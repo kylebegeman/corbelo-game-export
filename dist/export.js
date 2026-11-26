@@ -273,11 +273,18 @@ export function exportGameGlb(input) {
             componentType: small ? COMPONENT_UNSIGNED_SHORT : COMPONENT_UNSIGNED_INT,
             count: indexData.length,
             type: "SCALAR",
-        }, { bufferView: binary.add(stored, TARGET_ARRAY_BUFFER), componentType: COMPONENT_FLOAT, count: mesh.vertices, type: "VEC3", min: local.min, max: local.max }, { bufferView: binary.add(mesh.normals, TARGET_ARRAY_BUFFER), componentType: COMPONENT_FLOAT, count: mesh.vertices, type: "VEC3" });
+        }, { bufferView: binary.add(stored, TARGET_ARRAY_BUFFER), componentType: COMPONENT_FLOAT, count: mesh.vertices, type: "VEC3", min: local.min, max: local.max }, { bufferView: binary.add(mesh.normals, TARGET_ARRAY_BUFFER), componentType: COMPONENT_FLOAT, count: mesh.vertices, type: "VEC3" }, { bufferView: binary.add(mesh.tangents, TARGET_ARRAY_BUFFER), componentType: COMPONENT_FLOAT, count: mesh.vertices, type: "VEC4" });
         const material = slotOfBody[index];
         json.meshes.push({
             name,
-            primitives: [{ attributes: { POSITION: accessors.length - 2, NORMAL: accessors.length - 1 }, indices: accessors.length - 3, material, mode: MODE_TRIANGLES }],
+            primitives: [
+                {
+                    attributes: { POSITION: accessors.length - 3, NORMAL: accessors.length - 2, TANGENT: accessors.length - 1 },
+                    indices: accessors.length - 4,
+                    material,
+                    mode: MODE_TRIANGLES,
+                },
+            ],
         });
         const moved = translation.some((value) => value !== 0);
         json.nodes.push(moved ? { name, mesh: index, translation } : { name, mesh: index });

@@ -5,6 +5,48 @@
 export const DEGENERATE_AREA_RATIO = 1e-10;
 /** Without face ids, triangles within this angle of each other count as one flat face. */
 export const FLAT_FACE_ANGLE_DEGREES = 1;
+/**
+ * A unit vector at a right angle to a unit normal, the same for the same normal every time.
+ *
+ * It is the cross product of the normal with the coordinate axis the normal leans on least, so
+ * the product always has length: at least 0.81 before it is made unit length.
+ *
+ * The bodies carry no texture coordinates, so no direction along the surface means more than any
+ * other. The tangent is written because engines store one with every normal, and an engine left
+ * to make one up can fail to: Godot 4 builds it from a fixed rule that has no length for normals
+ * along (1, 1, -1) and its opposite, and then stores a wrong normal for those vertices.
+ */
+export function tangentFor(nx, ny, nz, out, at) {
+    const ax = Math.abs(nx);
+    const ay = Math.abs(ny);
+    const az = Math.abs(nz);
+    let tx;
+    let ty;
+    let tz;
+    if (ax <= ay && ax <= az) {
+        // X axis cross normal.
+        tx = 0;
+        ty = -nz;
+        tz = ny;
+    }
+    else if (ay <= az) {
+        // Y axis cross normal.
+        tx = nz;
+        ty = 0;
+        tz = -nx;
+    }
+    else {
+        // Z axis cross normal.
+        tx = -ny;
+        ty = nx;
+        tz = 0;
+    }
+    const length = Math.hypot(tx, ty, tz);
+    out[at] = tx / length + 0;
+    out[at + 1] = ty / length + 0;
+    out[at + 2] = tz / length + 0;
+    out[at + 3] = 1;
+}
 function tableSize(entries) {
     let size = 16;
     while (size < entries * 2)
@@ -295,6 +337,7 @@ export function buildMesh(points, indices, faceIds, options) {
     }
     const positions = new Float64Array(vertices * 3);
     const normals = new Float32Array(vertices * 3);
+    const tangents = new Float32Array(vertices * 4);
     for (let vertex = 0; vertex < vertices; vertex += 1) {
         const at = weldedOfVertex[vertex] * 3;
         positions[vertex * 3] = welded[at];
@@ -315,10 +358,12 @@ export function buildMesh(points, indices, faceIds, options) {
         normals[vertex * 3] = nx / length;
         normals[vertex * 3 + 1] = ny / length;
         normals[vertex * 3 + 2] = nz / length;
+        tangentFor(nx / length, ny / length, nz / length, tangents, vertex * 4);
     }
     return {
         positions,
         normals,
+        tangents,
         indices: outIndices,
         vertices,
         triangles,

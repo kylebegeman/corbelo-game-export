@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { exportGameGlb, readPack, type ExportOptions, type SourceSpace } from "../src/index.js";
+import { tangentFor } from "../src/mesh.js";
+import { readAccessor, readGlb } from "../src/index.js";
 import { chamferedBlock, cylinder, fold, MM_Z_UP, type Shape } from "./fixtures.js";
 
 const METRES = { unit: 1, up: "Y" } as const;
@@ -149,5 +151,39 @@ describe("normal weighting", () => {
     expect(withIds).toBeCloseTo(withoutIds, 4);
     // Flat face 100, bevel 20: the normal leans by atan(20 sin 20 / (100 + 20 cos 20)).
     expect(withIds).toBeCloseTo((Math.atan2(20 * Math.sin((20 * Math.PI) / 180), 100 + 20 * Math.cos((20 * Math.PI) / 180)) * 180) / Math.PI, 3);
+  });
+});
+
+describe("tangents", () => {
+  it("gives every direction a unit tangent at a right angle to it", () => {
+    const out = new Float32Array(4);
+    const directions: number[][] = [];
+    for (const x of [-1, 0, 1]) for (const y of [-1, 0, 1]) for (const z of [-1, 0, 1]) if (x !== 0 || y !== 0 || z !== 0) directions.push([x, y, z]);
+    // Every axis, edge and corner direction, and a spread of others.
+    for (let i = 0; i < 500; i += 1) directions.push([Math.sin(i * 1.7), Math.cos(i * 2.3), Math.sin(i * 0.37 + 1)]);
+    for (const direction of directions) {
+      const length = Math.hypot(direction[0]!, direction[1]!, direction[2]!);
+      const n = direction.map((value) => value / length);
+      tangentFor(n[0]!, n[1]!, n[2]!, out, 0);
+      expect(Math.hypot(out[0]!, out[1]!, out[2]!)).toBeCloseTo(1, 6);
+      expect(out[0]! * n[0]! + out[1]! * n[1]! + out[2]! * n[2]!).toBeCloseTo(0, 6);
+      expect(out[3]).toBe(1);
+    }
+  });
+
+  it("writes one for every vertex, at a right angle to that vertex's normal", () => {
+    const { glb, facts } = exportGameGlb({ bodies: [{ name: "block", positions: chamferedBlock([1000, 500, 250], 40).positions }], source: MM_Z_UP });
+    const document = readGlb(glb);
+    const { attributes } = document.json.meshes![0]!.primitives[0]!;
+    const normals = readAccessor(document, attributes["NORMAL"]!);
+    const tangents = readAccessor(document, attributes["TANGENT"]!);
+    expect(tangents.length).toBe(facts.bodies[0]!.vertices * 4);
+    for (let vertex = 0; vertex < facts.bodies[0]!.vertices; vertex += 1) {
+      const [nx, ny, nz] = [normals[vertex * 3]!, normals[vertex * 3 + 1]!, normals[vertex * 3 + 2]!];
+      const [tx, ty, tz, tw] = [tangents[vertex * 4]!, tangents[vertex * 4 + 1]!, tangents[vertex * 4 + 2]!, tangents[vertex * 4 + 3]!];
+      expect(Math.hypot(tx, ty, tz)).toBeCloseTo(1, 5);
+      expect(tx * nx + ty * ny + tz * nz).toBeCloseTo(0, 5);
+      expect(tw).toBe(1);
+    }
   });
 });

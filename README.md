@@ -11,7 +11,7 @@ It is used by Corbelo and Corbelo Studio. It has no runtime dependencies, runs i
 The built `dist/` folder is committed, so the package installs straight from a git tag with no build step:
 
 ```sh
-npm install github:<owner>/corbelo-game-export#v0.1.0
+npm install github:kylebegeman/corbelo-game-export#v0.1.0
 ```
 
 ## Use
@@ -67,14 +67,14 @@ const { glb, facts } = exportGameGlb({
 
 ## What is in the GLB
 
-- Valid glTF 2.0: metres, +Y up, right-handed, counter-clockwise front faces. The test suite runs the Khronos glTF validator over the output and expects no errors, warnings or notes.
+- Valid glTF 2.0: metres, +Y up, right-handed, counter-clockwise front faces. The test suite runs the Khronos glTF validator over the output and expects no errors and no warnings. The validator leaves one note per mesh, that no texture uses the tangents; see [why there are tangents](#why-there-are-tangents).
 - One node per body, with one mesh each, all direct children of one scene.
-- Indexed triangles with `POSITION` and `NORMAL`. Indices are 16-bit when a body has at most 65,535 vertices, otherwise 32-bit.
+- Indexed triangles with `POSITION`, `NORMAL` and `TANGENT`. Indices are 16-bit when a body has at most 65,535 vertices, otherwise 32-bit.
 - One material per distinct colour, shared between bodies: `baseColorFactor` in linear light, `metallicFactor` 0, `roughnessFactor` 0.8.
 - `asset.generator` is `corbelo-game-export <version>`.
 - `scenes[0].extras.corbeloGameExport` holds `{ schema, profile, facts, provenance }`.
 
-There are no textures, UVs, tangents, vertex colours, collision shapes or detail levels in this version.
+There are no textures, UVs, vertex colours, collision shapes or detail levels in this version.
 
 ### Welding
 
@@ -278,11 +278,13 @@ Without Godot the proof is skipped and a line on standard error says so. Set `GO
 
 It has been run with Godot 4.7.2. Unity and Unreal have not been tested with the engines themselves.
 
-### A note on Godot's mesh compression
+### Why there are tangents
 
-Godot compresses imported meshes by default. A compressed mesh stores each normal together with a tangent, and for a mesh that has no tangents Godot makes one up from the normal. For a normal that points exactly along `(1, 1, -1)` or `(-1, -1, 1)` that made-up tangent has no length, and Godot stores a wrong normal for that vertex. On a block with all eight corners chamfered equally, two of the eight corner faces are affected. Everything else, including every other normal, is unaffected.
+Every vertex carries a tangent: a unit vector at a right angle to its normal, with `w` set to 1. The bodies have no texture coordinates, so the tangent says nothing about a texture. It is there for the engine.
 
-This comes from the engine, not from the file. If it matters for a model, turn on "Force Disable Compression" under Meshes in Godot's import settings for that file. The proof imports the block both ways: with default settings it checks every face except those two, and with compression off it checks all of them.
+Godot compresses imported meshes by default, and a compressed mesh stores each normal together with a tangent. For a mesh that has no tangents Godot makes one up from the normal, by a rule that gives a vector of no length when the normal points exactly along `(1, 1, -1)` or `(-1, -1, 1)`. Godot then stores a wrong normal for that vertex. On a block with all eight corners chamfered equally, two of the eight corner faces shade wrongly.
+
+With a tangent in the file Godot never makes one up. The proof imports the chamfered block with Godot's default settings and checks the normals of all 44 triangles, those two corners included, and imports it once more with compression off to check that the positions arrive exactly as written.
 
 ## Limits
 

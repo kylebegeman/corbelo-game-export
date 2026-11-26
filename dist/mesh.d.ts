@@ -19,6 +19,8 @@ export interface BuiltMesh {
     positions: Float64Array;
     /** Unit normal per written vertex. */
     normals: Float32Array;
+    /** x, y, z, w per written vertex: a unit vector at a right angle to the normal, and w = 1. */
+    tangents: Float32Array;
     /** Three written-vertex numbers per kept triangle. */
     indices: Uint32Array;
     vertices: number;
@@ -27,6 +29,18 @@ export interface BuiltMesh {
     openEdges: number;
     nonManifoldEdges: number;
 }
+/**
+ * A unit vector at a right angle to a unit normal, the same for the same normal every time.
+ *
+ * It is the cross product of the normal with the coordinate axis the normal leans on least, so
+ * the product always has length: at least 0.81 before it is made unit length.
+ *
+ * The bodies carry no texture coordinates, so no direction along the surface means more than any
+ * other. The tangent is written because engines store one with every normal, and an engine left
+ * to make one up can fail to: Godot 4 builds it from a fixed rule that has no length for normals
+ * along (1, 1, -1) and its opposite, and then stores a wrong normal for those vertices.
+ */
+export declare function tangentFor(nx: number, ny: number, nz: number, out: Float32Array, at: number): void;
 /**
  * Welds, drops degenerate triangles, counts open and non-manifold edges, splits vertices along
  * hard edges and computes vertex normals. Positions are already in glTF space.

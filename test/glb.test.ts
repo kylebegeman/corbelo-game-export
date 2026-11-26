@@ -28,23 +28,24 @@ describe("GLB file", () => {
     expect(view.getUint32(12, true) % 4).toBe(0);
   });
 
-  it("describes indexed triangles with positions and normals", () => {
+  it("describes indexed triangles with positions, normals and tangents", () => {
     const { glb } = exportGameGlb({ bodies: [{ name: "block", positions: block.positions }], source: MM_Z_UP });
     const { json } = readGlb(glb);
     expect(json.scene).toBe(0);
     expect(json.scenes![0]!.nodes).toEqual([0]);
     const primitive = json.meshes![0]!.primitives[0]!;
     expect(primitive.mode).toBe(4);
-    expect(Object.keys(primitive.attributes).sort()).toEqual(["NORMAL", "POSITION"]);
+    expect(Object.keys(primitive.attributes).sort()).toEqual(["NORMAL", "POSITION", "TANGENT"]);
     const [indices, positions, normals] = [json.accessors![primitive.indices!]!, json.accessors![primitive.attributes["POSITION"]!]!, json.accessors![primitive.attributes["NORMAL"]!]!];
     expect(indices).toMatchObject({ componentType: 5123, type: "SCALAR", count: 44 * 3 });
     expect(positions).toMatchObject({ componentType: 5126, type: "VEC3", count: 96, min: [-0.5, 0, -0.25], max: [0.5, 0.25, 0.25] });
     expect(normals).toMatchObject({ componentType: 5126, type: "VEC3", count: 96 });
-    expect(json.bufferViews!.map((view) => view.target)).toEqual([34963, 34962, 34962]);
+    expect(json.accessors![primitive.attributes["TANGENT"]!]).toMatchObject({ componentType: 5126, type: "VEC4", count: 96 });
+    expect(json.bufferViews!.map((view) => view.target)).toEqual([34963, 34962, 34962, 34962]);
     expect(json.bufferViews!.every((view) => view.byteOffset! % 4 === 0)).toBe(true);
   });
 
-  it("passes the Khronos glTF validator with no errors, warnings or infos", async () => {
+  it("passes the Khronos glTF validator with no errors or warnings", async () => {
     const files = [
       exportGameGlb({ bodies: [{ name: "block", positions: block.positions, faceIds: block.faceIds, color: "#d98a3d" }], source: MM_Z_UP }),
       exportGameGlb({ bodies: [{ name: "cylinder", positions: cylinder(150, 400, 48).positions }], source: MM_Z_UP, normals: "face-weighted", provenance: { id: 1 } }),
@@ -61,8 +62,10 @@ describe("GLB file", () => {
     ];
     for (const { glb } of files) {
       const report = await validateBytes(glb);
-      expect(report.issues.messages).toEqual([]);
-      expect(report.issues).toMatchObject({ numErrors: 0, numWarnings: 0, numInfos: 0 });
+      // The one thing the validator has to say is a note that the tangents are not needed by
+      // any texture. They are there for the engine: see `tangentFor`.
+      expect([...new Set(report.issues.messages.map((message: { code: string }) => message.code))]).toEqual(["UNUSED_MESH_TANGENT"]);
+      expect(report.issues).toMatchObject({ numErrors: 0, numWarnings: 0, numHints: 0 });
     }
   });
 

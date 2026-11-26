@@ -91,8 +91,8 @@ function facing(surface: GodotSurface, triangle: number): [number, number, numbe
 /**
  * Godot's default mesh compression stores a normal together with a tangent. For a mesh without
  * tangents it makes one up as cross((n.z, -n.x, n.y), n), which has no length when the normal
- * lies exactly along (1, 1, -1) or its opposite, and the stored normal comes out wrong.
- * That is Godot's doing, not the file's: see "exact normals with mesh compression off" below.
+ * lies exactly along (1, 1, -1) or its opposite, and the stored normal comes out wrong. The
+ * files carry a tangent for every vertex so that Godot never has to make one up.
  */
 function onGodotBlindAxis(normal: readonly number[]): boolean {
   return Math.abs(dot(normal, [1, 1, -1])) / Math.sqrt(3) > 0.999999;
@@ -267,16 +267,13 @@ describe.skipIf(!usable)("Godot 4 editor import", () => {
       let onBlindAxis = 0;
       for (let triangle = 0; triangle < surface.triangleCount; triangle += 1) {
         const outward = facing(surface, triangle);
-        if (onGodotBlindAxis(outward)) {
-          onBlindAxis += 1;
-          continue;
-        }
+        if (onGodotBlindAxis(outward)) onBlindAxis += 1;
         checked += 1;
         for (let k = 0; k < 3; k += 1) near(vectorAt(surface.normals, surface.indices[triangle * 3 + k]!), outward, 3);
       }
-      // 42 of the 44 triangles. The other two are the corner chamfers facing (1, 1, -1) and
-      // (-1, -1, 1), which Godot's default compression cannot store; they are checked below.
-      expect([checked, onBlindAxis]).toEqual([42, 2]);
+      // All 44 triangles, the two corner chamfers facing (1, 1, -1) and (-1, -1, 1) included.
+      // Those are the ones Godot's default compression gets wrong for a file without tangents.
+      expect([checked, onBlindAxis]).toEqual([44, 2]);
       // The top face in particular: four vertices at full height whose normals are all straight up.
       const top: number[][] = [];
       for (let vertex = 0; vertex < surface.vertexCount; vertex += 1) {
