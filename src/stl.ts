@@ -34,7 +34,7 @@ export function readStl(data: Uint8Array): StlMesh {
   }
 
   const text = new TextDecoder("utf-8").decode(data);
-  const header = /^\s*solid\b[ \t]*([^\r\n]*)/.exec(text);
+  const header = /^\s*solid\b[ \t]*([^\r\n]*)/i.exec(text);
   if (header === null) {
     refuse(
       "BAD_STL",

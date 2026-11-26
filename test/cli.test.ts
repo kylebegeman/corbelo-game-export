@@ -1,0 +1,173 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readPack, VERSION, type PackFacts } from "../src/index.js";
+import { runCli, runJob } from "../src/node.js";
+import { asciiStl, binaryStl, box, chamferedBlock } from "./fixtures.js";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+let dir: string;
+
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "corbelo-game-export-cli-"));
+  mkdirSync(join(dir, "parts"));
+  writeFileSync(join(dir, "parts/block.stl"), binaryStl(chamferedBlock([1000, 500, 250], 20).positions));
+  writeFileSync(join(dir, "parts/lid.stl"), asciiStl(box([0, 0, 250], [1000, 500, 270]).positions, "lid"));
+});
+
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+function writeJob(name: string, job: unknown): string {
+  const path = join(dir, name);
+  writeFileSync(path, typeof job === "string" ? job : JSON.stringify(job));
+  return path;
+}
+
+function cli(...args: string[]): { code: number; out: string; err: string } {
+  let out = "";
+  let err = "";
+  const code = runCli(args, { out: (text) => (out += text), err: (text) => (err += text) });
+  return { code, out, err };
+}
+
+const job = {
+  bodies: [
+    { name: "Block", stl: "parts/block.stl", color: "#d98a3d" },
+    { name: "Lid", stl: "parts/lid.stl", color: [0.2, 0.4, 0.6], materialName: "Lid Paint" },
+  ],
+  source: { unit: 0.001, up: "Z" },
+  profile: "unreal5",
+  pivot: "origin",
+  placement: "designed",
+  creaseAngle: 40,
+  provenance: { order: 42 },
+  output: { glb: "out/pack.glb" },
+};
+
+describe("command line", () => {
+  it("runs a job file and writes the GLB and the facts", () => {
+    const { code, out, err } = cli(writeJob("job.json", job));
+    expect(err).toBe("");
+    expect(code).toBe(0);
+    const summary = JSON.parse(out) as Record<string, unknown>;
+    expect(summary).toEqual({
+      glb: join(dir, "out/pack.glb"),
+      facts: join(dir, "out/pack.facts.json"),
+      bytes: readFileSync(join(dir, "out/pack.glb")).length,
+      bodies: 2,
+      triangles: 56,
+      // The job's crease angle of 40 degrees keeps the block's corner triangles soft against
+      // their chamfers (35 degrees apart): 48 vertices, not the 96 of the default 30. The lid has 24.
+      vertices: 72,
+      materialSlots: 2,
+    });
+    const pack = readPack(readFileSync(join(dir, "out/pack.glb")));
+    const facts = JSON.parse(readFileSync(join(dir, "out/pack.facts.json"), "utf8")) as PackFacts;
+    expect(facts).toEqual(pack.facts);
+    expect(pack.provenance).toEqual({ order: 42 });
+    expect(pack.bodies.map((body) => body.name)).toEqual(["Block", "Lid"]);
+    expect(facts.profile).toBe("unreal5");
+    expect(facts.settings).toMatchObject({ pivot: "origin", placement: "designed", creaseAngle: 40 });
+    expect(facts.materials.map((material) => material.name)).toEqual(["color_d98a3d", "Lid_Paint"]);
+    expect(facts.total.bounds.meters.size).toEqual([1, 0.27000001072883606, 0.5]);
+  });
+
+  it("lets --out and --facts win over the job", () => {
+    const glb = join(dir, "elsewhere/a.glb");
+    const facts = join(dir, "elsewhere/deep/a.json");
+    const { code, out } = cli(writeJob("job.json", job), "--out", glb, "--facts", facts);
+    expect(code).toBe(0);
+    expect(JSON.parse(out)).toMatchObject({ glb, facts });
+    expect(existsSync(glb) && existsSync(facts)).toBe(true);
+  });
+
+  it("needs somewhere to write", () => {
+    const { output: _output, ...noOutput } = job;
+    const { code, err } = cli(writeJob("no-output.json", noOutput));
+    expect(code).toBe(1);
+    expect(err).toBe('corbelo-game-export: error [BAD_JOB]: Nowhere to write the GLB. Set "output.glb" in the job or pass --out.\n');
+  });
+
+  it("reports a missing STL file", () => {
+    const { code, err, out } = cli(writeJob("missing.json", { ...job, bodies: [{ name: "Gone", stl: "parts/gone.stl" }] }));
+    expect(code).toBe(1);
+    expect(out).toBe("");
+    expect(err).toBe(`corbelo-game-export: error [BAD_JOB]: Cannot read STL file ${join(dir, "parts/gone.stl")}: ENOENT.\n`);
+  });
+
+  it("reports a file that is not STL, naming the body", () => {
+    writeFileSync(join(dir, "parts/notes.stl"), "these are notes, not a mesh");
+    const { code, err } = cli(writeJob("not-stl.json", { ...job, bodies: [{ name: "Notes", stl: "parts/notes.stl" }] }));
+    expect(code).toBe(1);
+    expect(err).toContain('error [BAD_STL]: Body "Notes"');
+  });
+
+  it("passes on what the exporter refuses", () => {
+    const { code, err } = cli(writeJob("limit.json", { ...job, maxTriangles: 10 }));
+    expect(code).toBe(1);
+    expect(err).toContain("error [TOO_MANY_TRIANGLES]");
+    expect(existsSync(join(dir, "limit.glb"))).toBe(false);
+  });
+
+  it("refuses keys it does not know, so a typing mistake is not ignored", () => {
+    expect(cli(writeJob("typo.json", { ...job, pivit: "center" })).err).toContain('error [BAD_JOB]: The job has an unknown key "pivit"');
+    expect(cli(writeJob("typo2.json", { ...job, bodies: [{ name: "Block", stl: "parts/block.stl", colour: "#fff" }] })).err).toContain('Body 0 has an unknown key "colour"');
+    expect(cli(writeJob("typo3.json", { ...job, output: { glb: "x.glb", fact: "x.json" } })).err).toContain('"output" has an unknown key "fact"');
+  });
+
+  it("refuses a job that is not valid", () => {
+    expect(cli(writeJob("broken.json", "{ not json")).err).toContain("error [BAD_JOB]: The job file");
+    expect(cli(join(dir, "nowhere.json")).err).toContain("error [BAD_JOB]: Cannot read job file");
+    expect(cli(writeJob("list.json", [])).err).toContain("must hold a JSON object");
+    expect(cli(writeJob("no-bodies.json", { ...job, bodies: [] })).err).toContain('needs a "bodies" list');
+    expect(cli(writeJob("no-source.json", { bodies: job.bodies, output: job.output })).err).toContain('needs a "source" object');
+    expect(cli(writeJob("no-stl.json", { ...job, bodies: [{ name: "Block" }] })).err).toContain('Body "Block" needs an "stl" file path');
+  });
+
+  it("exits with 2 for a wrong command line", () => {
+    expect(cli()).toEqual({ code: 2, out: "", err: "corbelo-game-export: no job file given. Try --help.\n" });
+    expect(cli("a.json", "b.json").code).toBe(2);
+    expect(cli("a.json", "--out").code).toBe(2);
+    expect(cli("--fast", "a.json").err).toContain("unknown option --fast");
+  });
+
+  it("prints help and its version", () => {
+    expect(cli("--help")).toMatchObject({ code: 0, err: "" });
+    expect(cli("--help").out).toContain("corbelo-game-export <job.json>");
+    expect(cli("--version")).toEqual({ code: 0, out: `${VERSION}\n`, err: "" });
+  });
+
+  it("can be called as a function with the same result", () => {
+    const result = runJob(writeJob("job.json", job));
+    expect(result.glb).toBe(join(dir, "out/pack.glb"));
+    expect(result.report.total.triangles).toBe(56);
+    expect(result.bytes).toBe(readFileSync(result.glb).length);
+  });
+});
+
+describe("built command", () => {
+  const bin = join(root, "dist/cli.js");
+
+  it("runs as a program and writes the same files", () => {
+    const jobPath = writeJob("built.json", { ...job, output: { glb: "built/pack.glb" } });
+    const out = execFileSync(process.execPath, [bin, jobPath], { encoding: "utf8" });
+    expect(JSON.parse(out)).toMatchObject({ glb: join(dir, "built/pack.glb"), triangles: 56 });
+    expect(readFileSync(join(dir, "built/pack.glb")).equals(readFileSync(join(dir, "out/pack.glb")))).toBe(true);
+  });
+
+  it("exits with 1 and a message on standard error when it refuses", () => {
+    const result = spawnSync(process.execPath, [bin, writeJob("built-bad.json", { ...job, source: { unit: 0, up: "Z" } })], { encoding: "utf8" });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/^corbelo-game-export: error \[BAD_SOURCE_SPACE\]: source\.unit must be a positive number/);
+  });
+
+  it("is the program package.json points at, and starts with a Node shebang", () => {
+    const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { bin: Record<string, string> };
+    expect(manifest.bin).toEqual({ "corbelo-game-export": "dist/cli.js" });
+    expect(readFileSync(bin, "utf8").startsWith("#!/usr/bin/env node\n")).toBe(true);
+  });
+});

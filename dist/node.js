@@ -1,0 +1,173 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { GameExportError, refuse } from "./errors.js";
+import { exportGameGlb } from "./export.js";
+import { readStl } from "./stl.js";
+import { VERSION } from "./version.js";
+const JOB_KEYS = ["bodies", "source", "profile", "pivot", "placement", "creaseAngle", "normals", "weldTolerance", "maxTriangles", "colorSpace", "provenance", "output"];
+const BODY_KEYS = ["name", "stl", "color", "materialName"];
+const OUTPUT_KEYS = ["glb", "facts"];
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function refuseUnknownKeys(value, allowed, where) {
+    for (const key of Object.keys(value)) {
+        if (!allowed.includes(key))
+            refuse("BAD_JOB", `${where} has an unknown key "${key}". Known keys: ${allowed.join(", ")}.`);
+    }
+}
+function readFile(path, what) {
+    try {
+        return readFileSync(path);
+    }
+    catch (error) {
+        return refuse("BAD_JOB", `Cannot read ${what} ${path}: ${error.code ?? error.message}.`);
+    }
+}
+/**
+ * Runs a job file: reads its STL bodies, exports them and writes the GLB and the facts JSON.
+ * `overrides` replace the job's output paths and are taken relative to the working directory.
+ */
+export function runJob(jobPath, overrides = {}) {
+    const jobFile = resolve(jobPath);
+    const base = dirname(jobFile);
+    let job;
+    try {
+        job = JSON.parse(new TextDecoder().decode(readFile(jobFile, "job file")));
+    }
+    catch (error) {
+        if (error instanceof GameExportError)
+            throw error;
+        refuse("BAD_JOB", `The job file ${jobFile} is not valid JSON: ${error.message}`);
+    }
+    if (!isRecord(job))
+        refuse("BAD_JOB", "The job file must hold a JSON object.");
+    refuseUnknownKeys(job, JOB_KEYS, "The job");
+    if (!Array.isArray(job["bodies"]) || job["bodies"].length === 0)
+        refuse("BAD_JOB", "The job needs a \"bodies\" list with at least one body.");
+    if (!isRecord(job["source"]))
+        refuse("BAD_JOB", "The job needs a \"source\" object, for example { \"unit\": 0.001, \"up\": \"Z\" }.");
+    const output = job["output"] ?? {};
+    if (!isRecord(output))
+        refuse("BAD_JOB", "\"output\" must be an object with \"glb\" and optionally \"facts\".");
+    refuseUnknownKeys(output, OUTPUT_KEYS, "\"output\"");
+    for (const key of OUTPUT_KEYS) {
+        if (output[key] !== undefined && (typeof output[key] !== "string" || output[key] === ""))
+            refuse("BAD_JOB", `"output.${key}" must be a file path.`);
+    }
+    const glb = overrides.glb !== undefined ? resolve(overrides.glb) : typeof output["glb"] === "string" ? resolve(base, output["glb"]) : undefined;
+    if (glb === undefined)
+        refuse("BAD_JOB", "Nowhere to write the GLB. Set \"output.glb\" in the job or pass --out.");
+    const facts = overrides.facts !== undefined
+        ? resolve(overrides.facts)
+        : typeof output["facts"] === "string"
+            ? resolve(base, output["facts"])
+            : glb.replace(/\.glb$/i, "") + ".facts.json";
+    const bodies = job["bodies"].map((entry, index) => {
+        if (!isRecord(entry))
+            refuse("BAD_JOB", `Body ${index} must be an object with "name" and "stl".`);
+        refuseUnknownKeys(entry, BODY_KEYS, `Body ${index}`);
+        if (typeof entry["name"] !== "string" || entry["name"].trim() === "")
+            refuse("BAD_JOB", `Body ${index} needs a "name".`);
+        if (typeof entry["stl"] !== "string" || entry["stl"] === "")
+            refuse("BAD_JOB", `Body "${entry["name"]}" needs an "stl" file path.`);
+        const stlPath = resolve(base, entry["stl"]);
+        let positions;
+        try {
+            positions = readStl(readFile(stlPath, "STL file")).positions;
+        }
+        catch (error) {
+            if (error instanceof GameExportError && error.code === "BAD_STL")
+                refuse("BAD_STL", `Body "${entry["name"]}" (${stlPath}): ${error.message}`);
+            throw error;
+        }
+        const body = { name: entry["name"], positions };
+        if (entry["color"] !== undefined)
+            body.color = entry["color"];
+        if (entry["materialName"] !== undefined)
+            body.materialName = entry["materialName"];
+        return body;
+    });
+    const { bodies: _bodies, output: _output, ...options } = job;
+    const result = exportGameGlb({ ...options, bodies });
+    mkdirSync(dirname(glb), { recursive: true });
+    writeFileSync(glb, result.glb);
+    mkdirSync(dirname(facts), { recursive: true });
+    writeFileSync(facts, `${JSON.stringify(result.facts, null, 2)}\n`);
+    return { glb, facts, bytes: result.glb.length, report: result.facts };
+}
+const HELP = `corbelo-game-export ${VERSION}
+
+Turns STL bodies into one game-engine-ready GLB and a facts JSON file.
+
+Usage:
+  corbelo-game-export <job.json> [--out <file.glb>] [--facts <file.json>]
+
+The job file is JSON:
+  {
+    "bodies": [{ "name": "Block", "stl": "block.stl", "color": "#d98a3d" }],
+    "source": { "unit": 0.001, "up": "Z" },
+    "profile": "godot4",
+    "pivot": "base-center",
+    "output": { "glb": "block.glb" }
+  }
+
+Paths in the job are relative to the job file. --out and --facts are relative to the
+working directory and win over the job. Without a facts path, the facts go next to the
+GLB as <name>.facts.json.
+
+On success one line of JSON is printed: the two paths, the GLB size and the totals.
+On failure a line "corbelo-game-export: error [CODE]: message" goes to standard error
+and the exit code is 1. A wrong command line exits with 2.
+`;
+/** The command line. Returns the exit code and never throws. */
+export function runCli(argv, io = { out: (text) => process.stdout.write(text), err: (text) => process.stderr.write(text) }) {
+    let jobPath;
+    const overrides = {};
+    for (let at = 0; at < argv.length; at += 1) {
+        const arg = argv[at];
+        if (arg === "--help" || arg === "-h") {
+            io.out(HELP);
+            return 0;
+        }
+        if (arg === "--version" || arg === "-v") {
+            io.out(`${VERSION}\n`);
+            return 0;
+        }
+        if (arg === "--out" || arg === "--facts") {
+            const value = argv[at + 1];
+            if (value === undefined || value.startsWith("--")) {
+                io.err(`corbelo-game-export: ${arg} needs a file path.\n`);
+                return 2;
+            }
+            overrides[arg === "--out" ? "glb" : "facts"] = value;
+            at += 1;
+        }
+        else if (arg.startsWith("-")) {
+            io.err(`corbelo-game-export: unknown option ${arg}. Try --help.\n`);
+            return 2;
+        }
+        else if (jobPath === undefined) {
+            jobPath = arg;
+        }
+        else {
+            io.err("corbelo-game-export: give exactly one job file. Try --help.\n");
+            return 2;
+        }
+    }
+    if (jobPath === undefined) {
+        io.err("corbelo-game-export: no job file given. Try --help.\n");
+        return 2;
+    }
+    try {
+        const result = runJob(jobPath, overrides);
+        const { bodies, triangles, vertices, materialSlots } = result.report.total;
+        io.out(`${JSON.stringify({ glb: result.glb, facts: result.facts, bytes: result.bytes, bodies, triangles, vertices, materialSlots })}\n`);
+        return 0;
+    }
+    catch (error) {
+        const code = error instanceof GameExportError ? error.code : "UNEXPECTED";
+        io.err(`corbelo-game-export: error [${code}]: ${error.message}\n`);
+        return 1;
+    }
+}
