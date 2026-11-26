@@ -1,0 +1,522 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/pack.schema.json",
+  "title": "corbelo-game-export pack",
+  "description": "What scenes[0].extras.corbeloGameExport holds in a GLB this package wrote: the engine profile used, the facts measured from the written geometry, and whatever provenance the caller passed in. The facts on their own are #/$defs/PackFacts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile",
+    "facts"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "profile": {
+      "$ref": "#/$defs/EngineProfile"
+    },
+    "facts": {
+      "$ref": "#/$defs/PackFacts"
+    },
+    "provenance": {
+      "description": "Opaque JSON from the caller, stored as given."
+    }
+  },
+  "$defs": {
+    "Vec3": {
+      "description": "x, y, z.",
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "Box": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min",
+        "max",
+        "size"
+      ],
+      "properties": {
+        "min": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "max": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "size": {
+          "$ref": "#/$defs/Vec3"
+        }
+      }
+    },
+    "MeasuredBox": {
+      "description": "The same box twice: in glTF space (metres, +Y up) and in the engine's unit, with the up axis moved to the engine's up axis.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "meters",
+        "engine"
+      ],
+      "properties": {
+        "meters": {
+          "$ref": "#/$defs/Box"
+        },
+        "engine": {
+          "$ref": "#/$defs/Box"
+        }
+      }
+    },
+    "PivotMode": {
+      "enum": [
+        "base-center",
+        "center",
+        "min-corner",
+        "origin",
+        "point"
+      ]
+    },
+    "PivotFacts": {
+      "description": "A pivot in glTF space, in the engine's unit and axes, and in the caller's units and axes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "meters",
+        "engine",
+        "source"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/PivotMode"
+        },
+        "meters": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "engine": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "source": {
+          "$ref": "#/$defs/Vec3"
+        }
+      }
+    },
+    "BodyFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sourceName",
+        "node",
+        "mesh",
+        "triangles",
+        "vertices",
+        "materialSlots",
+        "materials",
+        "degenerateTrianglesDropped",
+        "openEdges",
+        "nonManifoldEdges",
+        "bounds",
+        "localBounds",
+        "pivot",
+        "translation"
+      ],
+      "properties": {
+        "name": {
+          "description": "The node and mesh name as written.",
+          "type": "string"
+        },
+        "sourceName": {
+          "description": "The name the caller gave.",
+          "type": "string"
+        },
+        "node": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mesh": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "triangles": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "vertices": {
+          "description": "Vertices written, after splitting along hard edges.",
+          "type": "integer",
+          "minimum": 3
+        },
+        "materialSlots": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "materials": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "degenerateTrianglesDropped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "openEdges": {
+          "description": "Edges used by exactly one triangle. Zero for a closed body.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "nonManifoldEdges": {
+          "description": "Edges used by more than two triangles.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "bounds": {
+          "$ref": "#/$defs/MeasuredBox"
+        },
+        "localBounds": {
+          "$ref": "#/$defs/MeasuredBox"
+        },
+        "pivot": {
+          "$ref": "#/$defs/PivotFacts"
+        },
+        "translation": {
+          "$ref": "#/$defs/Vec3"
+        }
+      }
+    },
+    "MaterialFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "color",
+        "baseColorFactor",
+        "bodies"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "description": "sRGB.",
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "baseColorFactor": {
+          "description": "Linear, as written to the file.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "bodies": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "TotalFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bodies",
+        "triangles",
+        "vertices",
+        "materialSlots",
+        "degenerateTrianglesDropped",
+        "openEdges",
+        "nonManifoldEdges",
+        "bounds"
+      ],
+      "properties": {
+        "bodies": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "triangles": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "vertices": {
+          "type": "integer",
+          "minimum": 3
+        },
+        "materialSlots": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "degenerateTrianglesDropped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "openEdges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nonManifoldEdges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bounds": {
+          "$ref": "#/$defs/MeasuredBox"
+        }
+      }
+    },
+    "NodeRole": {
+      "enum": [
+        "collision-trimesh",
+        "collision-convex",
+        "collision-trimesh-only",
+        "collision-convex-only",
+        "collision-box",
+        "collision-sphere",
+        "collision-capsule",
+        "lod"
+      ]
+    },
+    "NodeNameConvention": {
+      "description": "One node-name rule an engine's importer reads.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "affix",
+        "text",
+        "pattern"
+      ],
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/NodeRole"
+        },
+        "affix": {
+          "enum": [
+            "prefix",
+            "suffix"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pattern": {
+          "description": "How a full node name is built. {name} is the render node's name, {n} counts from 0 and {nn} is the same counter with two digits.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "EngineProfile": {
+      "description": "Facts about a target engine: its unit, its up axis and the node names its importer acts on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "unit",
+        "unitMeters",
+        "up",
+        "conventions"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "description": "For people.",
+          "type": "string"
+        },
+        "unit": {
+          "description": "The engine's unit, for people: m or cm.",
+          "type": "string"
+        },
+        "unitMeters": {
+          "description": "Metres per engine unit.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "up": {
+          "enum": [
+            "Y",
+            "Z"
+          ]
+        },
+        "conventions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "collision",
+            "lod"
+          ],
+          "properties": {
+            "collision": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/NodeNameConvention"
+              }
+            },
+            "lod": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/NodeNameConvention"
+              }
+            }
+          }
+        }
+      }
+    },
+    "PackFacts": {
+      "description": "Everything measured from the geometry that was written. This is also the facts JSON file the command line writes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "generator",
+        "profile",
+        "engine",
+        "source",
+        "settings",
+        "bodies",
+        "materials",
+        "total"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "generator": {
+          "type": "string"
+        },
+        "profile": {
+          "description": "Profile id.",
+          "type": "string"
+        },
+        "engine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unit",
+            "unitMeters",
+            "up"
+          ],
+          "properties": {
+            "unit": {
+              "type": "string"
+            },
+            "unitMeters": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "up": {
+              "enum": [
+                "Y",
+                "Z"
+              ]
+            }
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unit",
+            "up",
+            "handedness"
+          ],
+          "properties": {
+            "unit": {
+              "description": "Metres per source unit.",
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "up": {
+              "enum": [
+                "Y",
+                "Z"
+              ]
+            },
+            "handedness": {
+              "enum": [
+                "right",
+                "left"
+              ]
+            }
+          }
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pivot",
+            "placement",
+            "creaseAngle",
+            "normals",
+            "weldTolerance",
+            "faceIds"
+          ],
+          "properties": {
+            "pivot": {
+              "$ref": "#/$defs/PivotMode"
+            },
+            "placement": {
+              "enum": [
+                "origin",
+                "designed",
+                "assembly"
+              ]
+            },
+            "creaseAngle": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 180
+            },
+            "normals": {
+              "enum": [
+                "angle-area",
+                "face-weighted"
+              ]
+            },
+            "weldTolerance": {
+              "type": "number",
+              "minimum": 0
+            },
+            "faceIds": {
+              "type": "boolean"
+            }
+          }
+        },
+        "bodies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BodyFacts"
+          },
+          "minItems": 1
+        },
+        "materials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MaterialFacts"
+          },
+          "minItems": 1
+        },
+        "total": {
+          "$ref": "#/$defs/TotalFacts"
+        },
+        "assemblyPivot": {
+          "description": "Only with placement assembly: the point of the whole set of bodies, as modelled, that sits at the scene origin.",
+          "$ref": "#/$defs/PivotFacts"
+        }
+      }
+    }
+  }
+}

@@ -175,6 +175,14 @@ Facts are measured from the geometry that was written, not from the input. A sho
 - Every box and pivot is given twice. `meters` is glTF space: metres, +Y up. `engine` is the same thing in the profile's unit, with the up value moved to the profile's up axis. For a Z-up profile that means glTF `(x, y, z)` is reported as `(x, z, y)`. It describes sizes and heights. It is not a promise about which way an engine's importer turns the model around the up axis.
 - `pivot.source` is the pivot in your own units and axes.
 
+### A schema for the facts
+
+`schema/pack.schema.json` is a JSON Schema (draft 2020-12) for what the scene extras hold: the engine profile, the facts and the provenance. The facts on their own, which is also the facts file the command line writes, are its `#/$defs/PackFacts`, and an engine profile is `#/$defs/EngineProfile`. Every object in it refuses keys it does not name, and the test suite checks real output against it, so the schema and the code cannot drift apart unnoticed.
+
+```js
+import schema from "corbelo-game-export/schema/pack.schema.json" with { type: "json" };
+```
+
 ## Engine profiles
 
 A profile decides which unit the facts are also reported in, and it is stored in the file's extras. It does not change the geometry: the GLB is always metres and Y up, as glTF requires, and each engine's importer converts from there.
