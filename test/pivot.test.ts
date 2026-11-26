@@ -82,6 +82,53 @@ describe("placement", () => {
     near(facts.localBounds.meters.min, [-0.5, 0, -0.25]);
   });
 
+  it("can stand a set of bodies on the origin as one thing", () => {
+    // A seat away from the origin with a leg under one corner. In glTF space the seat spans
+    // x 2.0..2.4, y 0.4..0.45, z -3.4..-3.0 and the leg x 2.0..2.05, y 0..0.4, z -3.05..-3.0.
+    const seat = box([2000, 3000, 400], [2400, 3400, 450]);
+    const leg = box([2000, 3000, 0], [2050, 3050, 400]);
+    const result = exportGameGlb({
+      bodies: [
+        { name: "seat", positions: seat.positions },
+        { name: "leg", positions: leg.positions },
+      ],
+      source: MM_Z_UP,
+      placement: "assembly",
+    });
+    const { facts } = result;
+    // The set's pivot: centre of the footprint of both bodies, at the lowest point of either.
+    expect(facts.assemblyPivot!.mode).toBe("base-center");
+    near(facts.assemblyPivot!.meters, [2.2, 0, -3.2]);
+    near(facts.assemblyPivot!.source, [2200, 3200, 0]);
+    // The whole set stands on the scene origin.
+    near(facts.total.bounds.meters.min, [-0.2, 0, -0.2]);
+    near(facts.total.bounds.meters.max, [0.2, 0.45, 0.2]);
+    // Each body keeps its own pivot and its place relative to the other.
+    const [seatFacts, legFacts] = facts.bodies;
+    near(seatFacts!.translation, [0, 0.4, 0]);
+    near(legFacts!.translation, [-0.175, 0, 0.175]);
+    near(seatFacts!.localBounds.meters.min, [-0.2, 0, -0.2]);
+    near(legFacts!.bounds.meters.min, [-0.2, 0, 0.15]);
+    near(legFacts!.bounds.meters.max, [-0.15, 0.4, 0.2]);
+    const nodes = readGlb(result.glb).json.nodes!;
+    expect(nodes[0]).toHaveProperty("translation");
+    near(nodes[1]!.translation!, [-0.175, 0, 0.175]);
+    // The same bodies as designed differ from the assembly by exactly the set's pivot.
+    const designed = exportGameGlb({ bodies: [{ name: "seat", positions: seat.positions }, { name: "leg", positions: leg.positions }], source: MM_Z_UP, placement: "designed" });
+    expect(designed.facts.assemblyPivot).toBeUndefined();
+    designed.facts.bodies.forEach((body, at) => {
+      near(body.translation, [0, 1, 2].map((axis) => facts.bodies[at]!.translation[axis]! + facts.assemblyPivot!.meters[axis]!));
+    });
+  });
+
+  it("treats an assembly of one body like a body at the origin, and an origin pivot like the design", () => {
+    const one = run({ placement: "assembly" });
+    expect(readGlb(one.glb).json.nodes![0]).not.toHaveProperty("translation");
+    expect(one.facts.translation).toEqual([0, 0, 0]);
+    const kept = run({ placement: "assembly", pivot: "origin" });
+    near(kept.facts.bounds.meters.min, [0.1, 0.3, -0.7]);
+  });
+
   it("writes no translation when the pivot is the source origin", () => {
     const { glb, facts } = run({ placement: "designed", pivot: "origin" });
     expect(readGlb(glb).json.nodes![0]).not.toHaveProperty("translation");

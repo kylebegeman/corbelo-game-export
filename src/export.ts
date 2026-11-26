@@ -95,8 +95,8 @@ function readSettings(input: ExportInput): Settings {
     refuse("BAD_OPTION", `normals must be "angle-area" or "face-weighted". Got ${JSON.stringify(normals)}.`);
   }
   const placement = input.placement ?? "origin";
-  if (placement !== "origin" && placement !== "designed") {
-    refuse("BAD_OPTION", `placement must be "origin" or "designed". Got ${JSON.stringify(placement)}.`);
+  if (placement !== "origin" && placement !== "designed" && placement !== "assembly") {
+    refuse("BAD_OPTION", `placement must be "origin", "designed" or "assembly". Got ${JSON.stringify(placement)}.`);
   }
   const colorSpace = input.colorSpace ?? "srgb";
   if (colorSpace !== "srgb" && colorSpace !== "linear") {
@@ -270,8 +270,7 @@ export function exportGameGlb(input: ExportInput): ExportResult {
   const totalMin: Vec3 = [Infinity, Infinity, Infinity];
   const totalMax: Vec3 = [-Infinity, -Infinity, -Infinity];
 
-  for (const [index, body] of bodies.entries()) {
-    const name = names[index]!;
+  const built = bodies.map((body) => {
     const points = new Float64Array(body.positions.length);
     toGltfSpace(body.positions, conversion, points);
     const mesh = buildMesh(points, body.indices, body.faceIds, {
@@ -283,6 +282,28 @@ export function exportGameGlb(input: ExportInput): ExportResult {
     if (mesh.triangles === 0) {
       refuse("ALL_DEGENERATE", `Body "${body.name}": all ${mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
     }
+    return mesh;
+  });
+
+  // An assembly has one pivot of its own, taken from the box around every body as modelled.
+  // It ends up at the scene origin, and each body keeps its place relative to it.
+  let assemblyPivot: Vec3 | undefined;
+  if (settings.placement === "assembly") {
+    const min: Vec3 = [Infinity, Infinity, Infinity];
+    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+    for (const mesh of built) {
+      const bounds = boundsOf(mesh.positions);
+      for (let axis = 0; axis < 3; axis += 1) {
+        min[axis] = Math.min(min[axis]!, bounds.min[axis]!);
+        max[axis] = Math.max(max[axis]!, bounds.max[axis]!);
+      }
+    }
+    assemblyPivot = pivotPoint(settings, { min, max }, conversion);
+  }
+
+  for (const [index, body] of bodies.entries()) {
+    const name = names[index]!;
+    const mesh = built[index]!;
 
     // Vertex data is stored relative to the pivot, as 32-bit floats. Everything reported below
     // is measured from those stored values.
@@ -294,7 +315,12 @@ export function exportGameGlb(input: ExportInput): ExportResult {
       stored[at + 2] = mesh.positions[at + 2]! - pivot[2];
     }
     const local = boundsOf(stored);
-    const translation: Vec3 = settings.placement === "designed" ? [pivot[0] + 0, pivot[1] + 0, pivot[2] + 0] : [0, 0, 0];
+    const translation: Vec3 =
+      assemblyPivot !== undefined
+        ? [pivot[0] - assemblyPivot[0] + 0, pivot[1] - assemblyPivot[1] + 0, pivot[2] - assemblyPivot[2] + 0]
+        : settings.placement === "designed"
+          ? [pivot[0] + 0, pivot[1] + 0, pivot[2] + 0]
+          : [0, 0, 0];
     const sceneMin = add(local.min, translation);
     const sceneMax = add(local.max, translation);
     for (let axis = 0; axis < 3; axis += 1) {
@@ -384,6 +410,15 @@ export function exportGameGlb(input: ExportInput): ExportResult {
       bounds: measuredBox(totalMin, totalMax, profile),
     },
   };
+
+  if (assemblyPivot !== undefined) {
+    facts.assemblyPivot = {
+      mode: settings.pivotMode,
+      meters: [assemblyPivot[0] + 0, assemblyPivot[1] + 0, assemblyPivot[2] + 0],
+      engine: toEngine(assemblyPivot, profile),
+      source: pointToSourceSpace(assemblyPivot, conversion),
+    };
+  }
 
   const extras: PackExtras = { schema: 1, profile, facts };
   if (settings.provenance !== undefined) extras.provenance = settings.provenance;

@@ -63,7 +63,7 @@ const { glb, facts } = exportGameGlb({
 | --- | --- | --- |
 | `profile` | `"godot4"` | `"godot4"`, `"unity6"`, `"unreal5"` or your own profile object. See [Engine profiles](#engine-profiles). |
 | `pivot` | `"base-center"` | Where each body's own origin goes. See [Pivots](#pivots). |
-| `placement` | `"origin"` | `"origin"` puts every node at the scene origin. `"designed"` keeps each body where it was modelled. |
+| `placement` | `"origin"` | `"origin"` puts every node at the scene origin. `"designed"` keeps each body where it was modelled. `"assembly"` keeps the bodies together and stands the whole set on the scene origin. |
 | `creaseAngle` | `30` | Degrees. Edges sharper than this are hard. |
 | `normals` | `"angle-area"` | `"angle-area"` or `"face-weighted"`. See [Normals](#normals). |
 | `weldTolerance` | `0.000001` | Metres. Vertices closer than this become one. `0` welds only identical positions. |
@@ -117,6 +117,8 @@ The pivot is the point of the body that ends up at the node's own origin. Vertex
 | `[x, y, z]` | A point in source units and source axes. The same point is used for every body. |
 
 With `placement: "origin"` every node sits at the scene origin, which is what you want for separate reusable parts. With `placement: "designed"` each node's translation is its pivot, so the bodies sit together as they were modelled.
+
+With `placement: "assembly"` the bodies also sit together as modelled, and the whole set is moved so that its own pivot is at the scene origin. That pivot is chosen by the same `pivot` option, from the box around every body: with `"base-center"` a chair made of five bodies stands on the origin as one thing, wherever it was drawn. Each node's translation is its own pivot measured from the set's pivot, and the facts report the set's pivot as `assemblyPivot`. With `pivot: "origin"` this is the same as `"designed"`. With one body it is the same as `"origin"`.
 
 ### Names
 

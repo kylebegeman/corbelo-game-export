@@ -45,8 +45,12 @@ export type PivotOption = "base-center" | "center" | "min-corner" | "origin" | r
 
 export type PivotMode = "base-center" | "center" | "min-corner" | "origin" | "point";
 
-/** `"origin"` puts every node at the scene origin. `"designed"` keeps each body where it was modelled. */
-export type Placement = "origin" | "designed";
+/**
+ * `"origin"` puts every node at the scene origin. `"designed"` keeps each body where it was
+ * modelled. `"assembly"` keeps the bodies together as modelled and moves the whole set so that
+ * its own pivot, taken from the box around every body, sits at the scene origin.
+ */
+export type Placement = "origin" | "designed" | "assembly";
 
 /**
  * `"angle-area"` weights each triangle by its area and its angle at the vertex.
@@ -177,6 +181,11 @@ export interface PackFacts {
   bodies: BodyFacts[];
   materials: MaterialFacts[];
   total: TotalFacts;
+  /**
+   * Only with `placement: "assembly"`: the point of the whole set of bodies, as modelled, that
+   * sits at the scene origin.
+   */
+  assemblyPivot?: PivotFacts;
 }
 
 export interface ExportResult {
