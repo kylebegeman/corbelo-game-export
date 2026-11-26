@@ -31,10 +31,13 @@ export interface ColorPlan {
 }
 /**
  * Reads every colour of every body. One material per distinct colour: a body that names its
- * material gets a material of that name for its own colour, and every other colour is named
- * after itself. Two uses of one name must have the same colour.
+ * material gets a material of that name for its own colour, a face colour listed in
+ * `faceMaterialNames` gets the name listed, and every other colour is named after itself. Two
+ * uses of one name must have the same colour.
  *
  * A face colour that is the body's own colour is the body's own material, whatever it is named,
- * so a body never has two materials of one colour.
+ * so a body never has two materials of one colour. For the same reason a name that
+ * `faceMaterialNames` gives the body's own colour is the name of the body's own material, and
+ * must be the name `materialName` gives it, where both are there.
  */
 export declare function planColors(bodies: readonly BodyInput[], colorSpace: "srgb" | "linear"): ColorPlan;

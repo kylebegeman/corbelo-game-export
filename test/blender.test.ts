@@ -12,12 +12,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { exportGameGlb, type ExportResult } from "../src/index.js";
-import { box, chamferedBlock, cylinder, halfPaintedSide, MM_Z_UP, paintedTop } from "./fixtures.js";
+import { box, chamferedBlock, cutCylinder, cylinder, halfPaintedSide, MM_Z_UP, paintedPatch, paintedTop } from "./fixtures.js";
 
 const BLENDER = process.env["BLENDER"] ?? "blender";
 const BEGIN = "CORBELO_GAME_EXPORT_JSON_BEGIN";
 const END = "CORBELO_GAME_EXPORT_JSON_END";
 const SEGMENTS = 48;
+/** The post that is cut finer has few sides, so a normal along a flat side is far from one straight out. */
+const CUT_SEGMENTS = 12;
 
 interface BlenderTriangle {
   facing: number[];
@@ -100,6 +102,17 @@ describe.skipIf(version === null)("Blender glTF import", () => {
       ],
       source: MM_Z_UP,
     });
+
+    // A post painted across its flat sides, which cuts them finer: once saying what it was cut
+    // from, with a name for the paint, and once as the cut mesh alone with its own exact faces.
+    const uncut = cylinder(150, 400, CUT_SEGMENTS);
+    const pieces = cutCylinder(150, 400, CUT_SEGMENTS);
+    const paintedPost = { name: "Cut Post", positions: pieces.positions, color: "#2980ba", faceColors: paintedPatch(CUT_SEGMENTS, "#c0392b") };
+    exports["cut.glb"] = exportGameGlb({
+      bodies: [{ ...paintedPost, faceMaterialNames: { "#c0392b": "Signal Red" }, refines: { surfaces: [{ positions: uncut.positions, faceIds: uncut.faceIds }], triangleOf: pieces.triangleOf } }],
+      source: MM_Z_UP,
+    });
+    exports["cut-alone.glb"] = exportGameGlb({ bodies: [{ ...paintedPost, faceIds: pieces.faceIds }], source: MM_Z_UP });
 
     folder = mkdtempSync(join(tmpdir(), "corbelo-game-export-blender-"));
     const paths = Object.entries(exports).map(([name, result]) => {
@@ -276,6 +289,39 @@ describe.skipIf(version === null)("Blender glTF import", () => {
       const onLine = side.filter((triangle) => triangle.corners.some((corner) => Math.abs(corner[1]! - post.centre[1]!) < 1e-6));
       expect(new Set(onLine.map((triangle) => triangle.material))).toEqual(new Set([0, 1]));
       expect(onLine).toHaveLength(8);
+    });
+  });
+
+  describe("a post painted across its flat sides", () => {
+    /** How far each corner normal of the round side is from straight out from the axis, in degrees. Z is up in Blender. */
+    function offRound(file: string): number[] {
+      const post = only(file);
+      const off: number[] = [];
+      for (const triangle of post.triangles) {
+        if (Math.abs(triangle.facing[2]! / Math.hypot(...triangle.facing)) > 0.001) continue;
+        triangle.normals.forEach((normal, at) => {
+          const [x, y] = [triangle.corners[at]![0]! - post.centre[0]!, triangle.corners[at]![1]! - post.centre[1]!];
+          off.push((Math.acos(Math.min(1, (normal[0]! * x + normal[1]! * y) / Math.hypot(x, y))) * 180) / Math.PI);
+        });
+      }
+      return off;
+    }
+
+    it("is shaded along its flat sides where the paint cut it, when the file was written from the cut mesh alone", () => {
+      expect(Math.max(...offRound("cut-alone.glb"))).toBeGreaterThan(7);
+    });
+
+    it("is shaded round, as before the paint, when the body said what it was cut from", () => {
+      const off = offRound("cut.glb");
+      // Twelve triangles of the side for each segment, three corners each.
+      expect(off).toHaveLength(12 * CUT_SEGMENTS * 3);
+      // To a tenth of a degree: so near to straight out, the last digit of a 32-bit normal is 0.03 degrees.
+      expect(Math.max(...off)).toBeLessThan(0.1);
+    });
+
+    it("has the paint under the name it was given", () => {
+      expect(only("cut.glb").materials.map((material) => material.name)).toEqual(["Signal_Red", "color_2980ba"]);
+      expect(exports["cut.glb"]!.facts.bodies[0]!.materials).toEqual(["Signal_Red", "color_2980ba"]);
     });
   });
 });

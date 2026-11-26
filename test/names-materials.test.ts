@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { exportGameGlb, GameExportError, nodeNames, readGlb, readPack, type BodyInput } from "../src/index.js";
-import { box, MM_Z_UP } from "./fixtures.js";
+import { box, MM_Z_UP, paintedTop } from "./fixtures.js";
 
 const positions = box([0, 0, 0], [10, 10, 10]).positions;
 
@@ -97,5 +97,91 @@ describe("materials", () => {
     const run = () => exportGameGlb({ bodies: [body("a", { color: "#ff0000", materialName: "paint" }), body("b", { color: "#0000ff", materialName: "paint" })], source: MM_Z_UP });
     expect(run).toThrowError(GameExportError);
     expect(run).toThrowError(/Material "paint" is used with two colours/);
+  });
+});
+
+describe("names for the materials of face colours", () => {
+  const RED = "#c0392b";
+  const BLUE = "#2980ba";
+  const painted = (extra: Partial<BodyInput> = {}, name = "Crate") => body(name, { color: BLUE, faceColors: paintedTop(RED), ...extra });
+  const names = (...bodies: BodyInput[]) => exportGameGlb({ bodies, source: MM_Z_UP }).facts.materials.map((material) => [material.name, material.color]);
+  const refusal = (...bodies: unknown[]) => {
+    try {
+      exportGameGlb({ bodies: bodies as BodyInput[], source: MM_Z_UP });
+    } catch (error) {
+      expect(error).toBeInstanceOf(GameExportError);
+      return { code: (error as GameExportError).code, message: (error as GameExportError).message };
+    }
+    throw new Error("Expected the export to be refused, but it went through.");
+  };
+
+  it("names the material of a listed colour and leaves the others named after themselves", () => {
+    expect(names(painted())).toEqual([["color_2980ba", BLUE], ["color_c0392b", RED]]);
+    expect(names(painted({ faceMaterialNames: { [RED]: "Signal Red" } }))).toEqual([["color_2980ba", BLUE], ["Signal_Red", RED]]);
+    const { glb, facts } = exportGameGlb({ bodies: [painted({ materialName: "Body Paint", faceMaterialNames: { [RED]: "Signal Red" } })], source: MM_Z_UP });
+    expect(readGlb(glb).json.materials!.map((material) => material.name)).toEqual(["Body_Paint", "Signal_Red"]);
+    expect(facts.bodies[0]!.materials).toEqual(["Body_Paint", "Signal_Red"]);
+    expect(facts.bodies[0]!.slots!.map((slot) => slot.material)).toEqual(["Body_Paint", "Signal_Red"]);
+  });
+
+  it("reads the colour however it is spelled, and whatever way the triangles spell it", () => {
+    const faceColors = Array.from({ length: 12 }, (_, triangle) => (triangle >= 10 ? ([1, 0, 0] as const) : triangle >= 8 ? "F00" : null));
+    for (const key of ["#ff0000", "#F00", "ff0000", " #FF0000 "]) {
+      expect(names(body("Crate", { color: BLUE, faceColors, faceMaterialNames: { [key]: "Red" } }))).toEqual([["color_2980ba", BLUE], ["Red", "#ff0000"]]);
+    }
+  });
+
+  it("makes the name safe, as it does a body's own material name", () => {
+    expect(names(painted({ faceMaterialNames: { [RED]: "PLA+ Rot / matt" } }))[1]).toEqual(["PLA_Rot_matt", RED]);
+  });
+
+  it("shares one material between bodies that give a colour the same name", () => {
+    const { facts } = exportGameGlb({
+      bodies: [painted({ faceMaterialNames: { [RED]: "Red" } }), painted({ faceMaterialNames: { [RED]: "Red" } }, "Second"), body("Third", { color: RED, materialName: "Red" }), painted({}, "Fourth")],
+      source: MM_Z_UP,
+    });
+    expect(facts.materials.map((material) => [material.name, material.bodies])).toEqual([["color_2980ba", 3], ["Red", 3], ["color_c0392b", 1]]);
+  });
+
+  it("names the body's own material when the colour listed is the body's own", () => {
+    expect(names(painted({ faceMaterialNames: { [BLUE]: "Blue", [RED]: "Red" } }))).toEqual([["Blue", BLUE], ["Red", RED]]);
+    // Also for a body in one colour, and when materialName says the same.
+    expect(names(body("Plain", { color: BLUE, faceMaterialNames: { [BLUE]: "Blue" } }))).toEqual([["Blue", BLUE]]);
+    expect(names(painted({ materialName: "Blue", faceMaterialNames: { [BLUE]: "Blue" } }))[0]).toEqual(["Blue", BLUE]);
+    expect(refusal(painted({ materialName: "Body Paint", faceMaterialNames: { [BLUE]: "Blue" } }))).toEqual({
+      code: "MATERIAL_CONFLICT",
+      message: 'Body "Crate": materialName names the material of the body\'s own colour #2980ba "Body_Paint", and faceMaterialNames names it "Blue". Give the colour one name.',
+    });
+  });
+
+  it("checks a name for a colour no triangle has, and writes no material for it", () => {
+    expect(names(painted({ faceMaterialNames: { "#00ff00": "Green" } }))).toEqual([["color_2980ba", BLUE], ["color_c0392b", RED]]);
+    expect(refusal(painted({ faceMaterialNames: { crimson: "Red" } }))).toEqual({
+      code: "BAD_COLOR",
+      message: 'Body "Crate", faceMaterialNames: colour "crimson" is not "#rrggbb" or "#rgb". Transparency is not supported.',
+    });
+    expect(refusal(painted({ faceMaterialNames: { "#00ff00": "  " } }))).toEqual({
+      code: "BAD_NAME",
+      message: 'Body "Crate": the material name of colour "#00ff00" in faceMaterialNames must be a string with at least one character.',
+    });
+    expect(refusal(painted({ faceMaterialNames: { "#00ff00": 7 } as never })).code).toBe("BAD_NAME");
+    for (const bad of [["#00ff00", "Green"], "Green", 7, null]) expect(refusal(painted({ faceMaterialNames: bad as never })).code).toBe("BAD_NAME");
+  });
+
+  it("refuses one colour with two names", () => {
+    expect(names(painted({ faceMaterialNames: { "#c0392b": "Red", "C0392B": "Red" } }))[1]).toEqual(["Red", RED]);
+    expect(refusal(painted({ faceMaterialNames: { "#c0392b": "Red", "C0392B": "Rot" } }))).toEqual({
+      code: "MATERIAL_CONFLICT",
+      message: 'Body "Crate": faceMaterialNames gives colour #c0392b two material names, "Red" and "Rot". Give each colour one name.',
+    });
+  });
+
+  it("refuses one name with two colours, in one body or across bodies", () => {
+    const one = refusal(body("Crate", { color: BLUE, faceColors: Array.from({ length: 12 }, (_, triangle) => (triangle < 2 ? RED : triangle < 4 ? "#00ff00" : null)), faceMaterialNames: { [RED]: "Paint", "#00ff00": "Paint" } }));
+    expect(one).toEqual({ code: "MATERIAL_CONFLICT", message: 'Material "Paint" is used with two colours, #c0392b and #00ff00 (body "Crate"). Give each colour its own material name.' });
+    expect(refusal(painted({ materialName: "Paint", faceMaterialNames: { [RED]: "Paint" } })).code).toBe("MATERIAL_CONFLICT");
+    expect(refusal(body("First", { color: "#00ff00", materialName: "Paint" }), painted({ faceMaterialNames: { [RED]: "Paint" } })).code).toBe("MATERIAL_CONFLICT");
+    // Two names that are the same once made safe are one name.
+    expect(refusal(body("First", { color: "#00ff00", materialName: "Signal Red" }), painted({ faceMaterialNames: { [RED]: "Signal/Red" } })).code).toBe("MATERIAL_CONFLICT");
   });
 });

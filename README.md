@@ -4,20 +4,20 @@ Turns exact CAD bodies into one game-engine-ready GLB file, plus a set of facts 
 
 It takes triangles as a CAD kernel tessellates them (often triangle soup, in millimetres, with Z up) and writes a glTF 2.0 binary that a game engine imports cleanly: metres, Y up, welded and indexed, with hard and soft edges in the right places, sensible pivots, one named node per body and one material per colour. A body may have one colour or a colour on each of its faces.
 
-It is used by Corbelo and Corbelo Studio. It has no runtime dependencies, runs in Node 22 or later and in browsers, and bundles to about 28 kB minified (about 11 kB gzipped).
+It is used by Corbelo and Corbelo Studio. It has no runtime dependencies, runs in Node 22 or later and in browsers, and bundles to about 35 kB minified (about 14 kB gzipped).
 
 ## Install
 
 The built `dist/` folder is committed, so the package installs straight from a git tag with no build step:
 
 ```sh
-npm install github:kylebegeman/corbelo-game-export#v0.1.2
+npm install github:kylebegeman/corbelo-game-export#v0.1.3
 ```
 
 Where the build machine has no `git` program, install the tag's tarball instead. The lock file then holds a plain HTTPS address and a checksum:
 
 ```sh
-npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.2.tar.gz
+npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.3.tar.gz
 ```
 
 ## Use
@@ -49,6 +49,8 @@ const { glb, facts } = exportGameGlb({
 | `materialName` | Optional. Names the material of the body's own colour. Without it the name comes from the colour. |
 | `faceIds` | Optional. One whole number per triangle saying which exact CAD face it came from. |
 | `faceColors` | Optional. One entry per triangle: that triangle's colour, written like `color`, or `null` or `undefined` for the body's own colour. See [Bodies with several colours](#bodies-with-several-colours). |
+| `faceMaterialNames` | Optional. Names for the materials of face colours: `{ "#c0392b": "Signal Red" }`. See [Materials](#materials). |
+| `refines` | Optional. The meshes the body's triangles were cut from, to take the shading from. See [A body cut from a coarser mesh](#a-body-cut-from-a-coarser-mesh). |
 
 ### Source space
 
@@ -68,7 +70,7 @@ const { glb, facts } = exportGameGlb({
 | `creaseAngle` | `30` | Degrees. Edges sharper than this are hard. |
 | `normals` | `"angle-area"` | `"angle-area"` or `"face-weighted"`. See [Normals](#normals). |
 | `weldTolerance` | `0.000001` | Metres. Vertices closer than this become one. `0` welds only identical positions. |
-| `maxTriangles` | `2000000` | The export is refused when all bodies together hold more triangles than this. |
+| `maxTriangles` | `2000000` | The export is refused when all bodies together hold more triangles than this. The meshes given in `refines` are counted on their own, against the same number. |
 | `colorSpace` | `"srgb"` | How `[r, g, b]` colours are read. Set `"linear"` if yours are linear light. Hex colours are always sRGB. |
 | `provenance` | none | Any plain JSON. Stored untouched next to the facts inside the file. |
 
@@ -106,6 +108,54 @@ Each vertex normal is the weighted sum of the normals of the triangles around it
 - `"angle-area"` weights each triangle by its area times its angle at the vertex.
 - `"face-weighted"` weights each triangle by its angle at the vertex times the area of the whole flat face it belongs to. Large flat faces then keep their shading flat and small bevels take up the change. A face is the set of triangles with the same face id, or, without ids, neighbouring triangles within 1 degree of each other.
 
+### A body cut from a coarser mesh
+
+Painting a body, cutting a hole into it or joining it to another cuts its triangles into smaller ones. The surface does not move, but the rules above would shade it differently afterwards, for two reasons. A new point inside a flat triangle of a round wall is surrounded by triangles that all lie in that one flat triangle, so it gets the flat triangle's direction, while the wall's old corners keep the round one. And the weights of a vertex normal depend on the triangles around it, so even the old corners move a little when their triangles change.
+
+`refines` avoids both. The body says which meshes its triangles were cut from, and for each of its triangles which triangle of those meshes it lies in. The shading is then taken from those meshes, and the cut changes nothing about it.
+
+```ts
+exportGameGlb({
+  bodies: [
+    {
+      name: "Post",
+      positions: paintedPositions, // the mesh after the paint cut it
+      faceColors,
+      refines: {
+        surfaces: [{ positions: uncutPositions, faceIds: uncutFaceIds }], // the mesh before
+        triangleOf, // for each triangle of the body, the triangle of the uncut mesh it lies in
+      },
+    },
+  ],
+  source: { unit: 0.001, up: "Z" },
+});
+```
+
+| Field | Meaning |
+| --- | --- |
+| `surfaces` | Required. One or more meshes, each with `positions` and optionally `indices` and `faceIds`, read like a body's and in the same units and axes. |
+| `triangleOf` | Required. One whole number per triangle of the body: a triangle of its surface that it lies in, counted in that surface's own order. |
+| `surfaceOf` | One whole number per triangle of the body: which of `surfaces` it lies in. Required with more than one surface. |
+
+A cut does not always leave each new triangle inside one old one. Where the surface is flat across several of its triangles, a cut may divide that flat part afresh, and a triangle of the body then reaches across several triangles of the surface. It names any one of them that it touches, for instance the one under its middle.
+
+A painted body has one surface: its mesh before the paint. A body with a hole cut into it has two: its own mesh before the cut, and the mesh of what cut it with every triangle turned over, so that it faces into the hole. A body joined from several has one for each.
+
+How it is shaded:
+
+- Each surface is welded and given its hard edges, soft edges and normals by itself, exactly as a body is, with the same `creaseAngle`, `normals` and `weldTolerance` and with its own `faceIds`.
+- Every corner of every triangle of the body is found on its surface. The search starts in the triangle the body's triangle names and walks from there across the surface's soft edges for as long as that comes nearer to the corner, so a corner of a triangle that reaches across a flat part is found in the triangle it really lies in.
+- A corner takes the normal the surface has at that point: the normals of the triangle it lies in, mixed by where in the triangle it is. A corner on a vertex of the surface gets that vertex's normal, number for number.
+- A corner counts as on a vertex or on an edge of the surface when it is within `weldTolerance` of it. A cut leaves its points a rounding error off the edges they lie on, and the triangles on both sides of such an edge must still find the same place for them.
+- Two corners at one point are written as one vertex where the surface is shaded smoothly there, and as two where it is not. So the surface's hard edges stay hard, an edge of the body that runs through the middle of a triangle of the surface is soft, and an edge between two surfaces is always hard.
+- The body's own `faceIds` have no say in the shading when it has `refines`. Give the ids to the surfaces.
+
+Welding, dropped triangles, `openEdges`, `nonManifoldEdges`, the triangle and vertex counts and the colours are still those of the body itself. Only its edges and normals come from the surfaces. The facts report it as `shadedFrom`.
+
+A body that names itself as its only surface, with every triangle lying in itself, is written with the same vertex data as without `refines`.
+
+**What is checked.** Every corner must be found on its surface to within a thousandth of the longest edge of the triangle it is found in, or twice `weldTolerance` where that is more. A body with a corner that is not is refused with `BAD_REFINEMENT`, and the message says which triangle and how far off it is. The search does not cross a hard edge of the surface, so a triangle that names one on the other side of a hard edge is refused too. A triangle that is dropped for having no area is not asked. Only the place is checked, not which way the triangle faces: naming the triangle on the far side of a wall thinner than that distance would turn the shading inside out.
+
 ### Pivots
 
 The pivot is the point of the body that ends up at the node's own origin. Vertex data is stored relative to it.
@@ -130,7 +180,19 @@ Game engines read some names as instructions. Godot turns a mesh named `wall-col
 
 ### Materials
 
-Colours are rounded to 8 bits per channel in sRGB, so `"#ff0000"`, `"#F00"` and `[1, 0, 0]` are one material. A material is named `color_rrggbb` unless you give a `materialName`. Using one material name with two different colours is refused.
+Colours are rounded to 8 bits per channel in sRGB, so `"#ff0000"`, `"#F00"` and `[1, 0, 0]` are one material. A material is named `color_rrggbb` unless you name it: `materialName` names the material of the body's own colour, and `faceMaterialNames` names the materials of the colours on its faces.
+
+```ts
+{ name: "Crate", positions, color: "#2980ba", materialName: "Sky Blue", faceColors, faceMaterialNames: { "#c0392b": "Signal Red" } }
+```
+
+`faceMaterialNames` is an object whose keys are colours, written `"#rrggbb"` or `"#rgb"`, and whose values are the names. The rules are those of `materialName`:
+
+- A name is made safe the way a node name is: `Signal Red` becomes `Signal_Red`.
+- One name means one colour. Using one material name with two different colours is refused, in one body or across bodies, whichever of the two fields the name came from.
+- One colour has one name in a body. Two entries that spell the same colour differently must give it the same name, and an entry for the body's own colour names the body's own material, so it must agree with `materialName` where both are given.
+- A face colour that is not listed is named after itself, `color_rrggbb`.
+- Every entry is checked, also one for a colour that no triangle has. Such an entry writes no material.
 
 The file holds each material once. Every body and every face of that colour uses the same one, whichever body it belongs to. Materials are listed in the order they are first used: body by body, and inside a body in the order of its primitives.
 
@@ -149,7 +211,7 @@ The body is still one node and one mesh. Its triangles are divided into one prim
 
 - Primitives come in the order their first triangle comes in the input. Inside a primitive the triangles keep their input order.
 - A colour that is the body's own colour, however it is spelled, is the body's own material. A body never has two materials of one colour, and a body whose face colours all come to one colour is written exactly as a body without `faceColors`.
-- `materialName` names the material of the body's own colour. Every other colour is named after itself, `color_rrggbb`.
+- `materialName` names the material of the body's own colour. Every other colour is named by `faceMaterialNames` where it is listed there, and after itself, `color_rrggbb`, where it is not.
 - A material is in the file only when a written triangle uses it. If every triangle of a colour is dropped as degenerate, or the body's own colour is painted over everywhere, there is no material for that colour.
 
 **At a border between two colours.** Welding, dropped triangles, hard and soft edges and normals are all worked out on the whole body before it is divided, so colours change nothing about its shape or its shading. A vertex on the border is written once for each colour that touches it, with the same position, the same normal and the same tangent in each. A soft edge between two colours therefore still shades smoothly, and a hard edge is still hard. The body's `vertices` in the facts is the number written, so it grows by those extra copies. `openEdges` and `nonManifoldEdges` are counted on the whole body: a closed body is closed however it is coloured.
@@ -163,7 +225,7 @@ Facts are measured from the geometry that was written, not from the input. A sho
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.2",
+  "generator": "corbelo-game-export 0.1.3",
   "profile": "unreal5",
   "engine": { "unit": "cm", "unitMeters": 0.01, "up": "Z" },
   "source": { "unit": 0.001, "up": "Z", "handedness": "right" },
@@ -197,6 +259,8 @@ Facts are measured from the geometry that was written, not from the input. A sho
 
 - `vertices` is the count after splitting along hard edges and between colours, which is what an engine reports.
 - `materialSlots` is the number of primitives the body's mesh has, one for each colour its written triangles have, and `materials` names them in order. A body with more than one also has `slots`, which gives the triangles and vertices of each: `"slots": [{ "material": "color_2980ba", "triangles": 10, "vertices": 20 }, { "material": "color_c0392b", "triangles": 2, "vertices": 4 }]`. A body in one colour has no `slots`, because its one slot holds everything the body has.
+- A body given `refines` also has `shadedFrom`, which says how many surfaces its shading was taken from and how many triangles with an area they hold together: `"shadedFrom": { "surfaces": 1, "triangles": 256 }`.
+- `settings.faceIds` says whether face ids had a say in the shading: a body's own, or those of the surfaces a body refines.
 - In the `materials` list, `bodies` counts the bodies with at least one triangle in that material. `total.materialSlots` is the number of materials in the file.
 - `openEdges` counts edges used by one triangle only. It is 0 for a closed body. `nonManifoldEdges` counts edges used by more than two.
 - `bounds` is where the body sits in the scene. `localBounds` is the vertex data as stored, relative to the pivot. They are the same when `placement` is `"origin"`.
@@ -205,7 +269,7 @@ Facts are measured from the geometry that was written, not from the input. A sho
 
 ### A schema for the facts
 
-`schema/pack.schema.json` is a JSON Schema (draft 2020-12) for what the scene extras hold: the engine profile, the facts and the provenance. The facts layout is still `"schema": 1`. Version 0.1.2 added `slots`, which appears only on a body with several colours, and changed the meaning of no field that was there before. The facts on their own, which is also the facts file the command line writes, are its `#/$defs/PackFacts`, and an engine profile is `#/$defs/EngineProfile`. Every object in it refuses keys it does not name, and the test suite checks real output against it, so the schema and the code cannot drift apart unnoticed.
+`schema/pack.schema.json` is a JSON Schema (draft 2020-12) for what the scene extras hold: the engine profile, the facts and the provenance. The facts layout is still `"schema": 1`. Version 0.1.2 added `slots`, which appears only on a body with several colours, and version 0.1.3 added `shadedFrom`, which appears only on a body given `refines`. Neither changed the meaning of a field that was there before. The facts on their own, which is also the facts file the command line writes, are its `#/$defs/PackFacts`, and an engine profile is `#/$defs/EngineProfile`. Every object in it refuses keys it does not name, and the test suite checks real output against it, so the schema and the code cannot drift apart unnoticed.
 
 ```js
 import schema from "corbelo-game-export/schema/pack.schema.json" with { type: "json" };
@@ -273,6 +337,24 @@ STL cannot say which CAD face a triangle came from. A body may name a file that 
 
 STL cannot say what colour a triangle is either. A body may name a file for that too: `"faceColors": "block.colors.json"`, a JSON array with one entry per triangle in the STL's own order, each a colour (`"#rrggbb"`, `"#rgb"` or `[r, g, b]`) or `null` for the body's own colour. See [Bodies with several colours](#bodies-with-several-colours).
 
+A body may name the materials of its face colours in the job itself: `"faceMaterialNames": { "#c0392b": "Signal Red" }`.
+
+A body may also say what it was cut from, as [`refines`](#a-body-cut-from-a-coarser-mesh) does in code. The surfaces are STL files and the two lists are JSON files, each an array with one whole number per triangle of the body's STL:
+
+```json
+{
+  "name": "Post",
+  "stl": "post.painted.stl",
+  "faceColors": "post.colors.json",
+  "refines": {
+    "surfaces": [{ "stl": "post.stl", "faceIds": "post.faces.json" }],
+    "triangleOf": "post.triangle-of.json"
+  }
+}
+```
+
+With more than one surface, add `"surfaceOf"`, a file of the same kind that says which surface each triangle lies in.
+
 Every option from the table above may appear at the top level of the job. Unknown keys are refused. Paths inside the job are relative to the job file. `--out` and `--facts` are relative to the working directory and win over the job. Without a facts path, the facts are written next to the GLB as `<name>.facts.json`.
 
 On success the command prints one line of JSON and exits with 0:
@@ -293,7 +375,7 @@ const { glb, facts, report } = runJob("job.json");
 
 ## Refusals
 
-Bad input is refused with a `GameExportError`. Its `code` is stable and its `message` says what is wrong and where. Nothing is fixed silently.
+Bad input is refused with a `GameExportError`. Its `code` is stable and its `message` says what is wrong and where. Nothing is fixed silently. A refusal found while one body was checked or built also has `body`, that body's place in the input counted from 0, so a caller can act on that body: for instance export it again without `refines` after a `BAD_REFINEMENT`. A refusal about names or colours, which are read across all bodies, has none.
 
 | Code | When |
 | --- | --- |
@@ -306,10 +388,11 @@ Bad input is refused with a `GameExportError`. Its `code` is stable and its `mes
 | `INDEX_OUT_OF_RANGE` | An index points past the vertices, or is negative. |
 | `BAD_FACE_IDS` | `faceIds` is not exactly one whole number per triangle. |
 | `BAD_FACE_COLORS` | `faceColors` is not a list with exactly one entry per triangle. |
-| `TOO_MANY_TRIANGLES` | The bodies together hold more than `maxTriangles` triangles (2,000,000 unless changed). |
-| `BAD_NAME` | A body has no name, or an empty material name. |
+| `BAD_REFINEMENT` | `refines` is not surfaces and one whole number per triangle, a number points past the surfaces or their triangles, or a triangle does not lie where it says it does. |
+| `TOO_MANY_TRIANGLES` | The bodies together hold more than `maxTriangles` triangles (2,000,000 unless changed), or the meshes they refine do. |
+| `BAD_NAME` | A body has no name or an empty material name, or `faceMaterialNames` is not an object of names. |
 | `BAD_COLOR` | A colour cannot be read. Transparency is not supported. For a face colour the message names the triangle. |
-| `MATERIAL_CONFLICT` | One material name is used with two colours. |
+| `MATERIAL_CONFLICT` | One material name is used with two colours, or one colour of a body is given two names. |
 | `BAD_SOURCE_SPACE` | `source` is missing or has a bad unit, up axis or handedness. |
 | `BAD_OPTION` | An option is outside its range, or the profile is unknown. |
 | `BAD_PROVENANCE` | `provenance` is not plain JSON. |
@@ -325,11 +408,13 @@ The test suite includes a proof that runs when a `godot` 4 program is on the pat
 
 For the bodies with colours on their faces it checks that each body arrives as one mesh with one surface per colour, in the order the facts list the slots, that each surface has the material, the colour and the triangle and vertex counts the facts state, that the painted triangles are the right ones, and that a cylinder whose side is half one colour and half another is still shaded round across the two lines where the colours meet.
 
+It also imports a post painted across the flat sides of its round wall, which cuts them finer, twice. Written from the cut mesh alone, Godot holds normals that are more than 7 degrees away from straight out from the axis at the points the paint added. Written with `refines`, every normal of the wall is within a tenth of a degree of straight out, and the paint arrives under the name `faceMaterialNames` gave it.
+
 Without Godot the proof is skipped and a line on standard error says so. Set `GODOT_PROOF_LOG=1` to print what Godot reported.
 
 It has been run with Godot 4.7.2. Unity and Unreal have not been tested with the engines themselves.
 
-A second check runs when a `blender` program is on the path (or its location is in the `BLENDER` environment variable). Blender is not a game engine, but its glTF importer was written by other people, so it is a second opinion on the same files. A Python script imports the block, the cylinder, the two-body file and the file with colours on the faces with no window and reports what Blender holds, and the test compares that with the facts: body names, triangle counts, where each body is and how large in metres, that every triangle faces outwards, that the normals arrive as written (flat on the block's faces, smooth round the cylinder), material names and colours, and for a body with several colours the number of triangles in each material slot. Without Blender it is skipped the same way. It has been run with Blender 5.2.2.
+A second check runs when a `blender` program is on the path (or its location is in the `BLENDER` environment variable). Blender is not a game engine, but its glTF importer was written by other people, so it is a second opinion on the same files. A Python script imports the block, the cylinder, the two-body file and the file with colours on the faces with no window and reports what Blender holds, and the test compares that with the facts: body names, triangle counts, where each body is and how large in metres, that every triangle faces outwards, that the normals arrive as written (flat on the block's faces, smooth round the cylinder), material names and colours, and for a body with several colours the number of triangles in each material slot. The painted post is checked there the same two ways as in Godot. Without Blender it is skipped the same way. It has been run with Blender 5.2.2.
 
 ### Why there are tangents
 

@@ -64,12 +64,41 @@ export interface ColorPlan {
 }
 
 /**
+ * Reads `faceMaterialNames` of a body: the material name each listed colour gets, by the colour
+ * as six hex digits. Every entry is checked, whether a triangle has that colour or not.
+ */
+function namedColors(body: BodyInput, colorSpace: "srgb" | "linear", where: string): Map<string, string> {
+  const named = new Map<string, string>();
+  const names = body.faceMaterialNames;
+  if (names === undefined) return named;
+  if (typeof names !== "object" || names === null || Array.isArray(names)) {
+    refuse("BAD_NAME", `${where}: faceMaterialNames must be an object of colours and the material name of each, like { "#3a7bd5": "Blue" }.`);
+  }
+  for (const [key, name] of Object.entries(names)) {
+    const hex = hexOf(colorBytes(key, colorSpace, `${where}, faceMaterialNames`));
+    if (typeof name !== "string" || name.trim() === "") {
+      refuse("BAD_NAME", `${where}: the material name of colour "${key}" in faceMaterialNames must be a string with at least one character.`);
+    }
+    const safe = safeName(name, "material");
+    const before = named.get(hex);
+    if (before !== undefined && before !== safe) {
+      refuse("MATERIAL_CONFLICT", `${where}: faceMaterialNames gives colour #${hex} two material names, "${before}" and "${safe}". Give each colour one name.`);
+    }
+    named.set(hex, safe);
+  }
+  return named;
+}
+
+/**
  * Reads every colour of every body. One material per distinct colour: a body that names its
- * material gets a material of that name for its own colour, and every other colour is named
- * after itself. Two uses of one name must have the same colour.
+ * material gets a material of that name for its own colour, a face colour listed in
+ * `faceMaterialNames` gets the name listed, and every other colour is named after itself. Two
+ * uses of one name must have the same colour.
  *
  * A face colour that is the body's own colour is the body's own material, whatever it is named,
- * so a body never has two materials of one colour.
+ * so a body never has two materials of one colour. For the same reason a name that
+ * `faceMaterialNames` gives the body's own colour is the name of the body's own material, and
+ * must be the name `materialName` gives it, where both are there.
  */
 export function planColors(bodies: readonly BodyInput[], colorSpace: "srgb" | "linear"): ColorPlan {
   const candidates: MaterialDef[] = [];
@@ -98,7 +127,16 @@ export function planColors(bodies: readonly BodyInput[], colorSpace: "srgb" | "l
     if (body.materialName !== undefined && (typeof body.materialName !== "string" || body.materialName.trim() === "")) {
       refuse("BAD_NAME", `${where}: materialName must be a string with at least one character.`);
     }
-    const own = candidate(body.materialName === undefined ? `color_${ownHex}` : safeName(body.materialName, "material"), bytes, ownHex, body.name);
+    const named = namedColors(body, colorSpace, where);
+    const ownNamed = named.get(ownHex);
+    const ownGiven = body.materialName === undefined ? undefined : safeName(body.materialName, "material");
+    if (ownGiven !== undefined && ownNamed !== undefined && ownGiven !== ownNamed) {
+      refuse(
+        "MATERIAL_CONFLICT",
+        `${where}: materialName names the material of the body's own colour #${ownHex} "${ownGiven}", and faceMaterialNames names it "${ownNamed}". Give the colour one name.`,
+      );
+    }
+    const own = candidate(ownGiven ?? ownNamed ?? `color_${ownHex}`, bytes, ownHex, body.name);
     ofBody.push(own);
 
     const { faceColors } = body;
@@ -122,7 +160,7 @@ export function planColors(bodies: readonly BodyInput[], colorSpace: "srgb" | "l
         const hex = hexOf(faceBytes);
         found = byHex.get(hex);
         if (found === undefined) {
-          found = candidate(`color_${hex}`, faceBytes, hex, body.name);
+          found = candidate(named.get(hex) ?? `color_${hex}`, faceBytes, hex, body.name);
           byHex.set(hex, found);
         }
         if (typeof entry === "string") byText.set(entry, found);

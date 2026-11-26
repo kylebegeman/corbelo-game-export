@@ -16,6 +16,22 @@ export interface JobBody {
      * the file's own order: the colour of that triangle, or `null` for the body's own colour.
      */
     faceColors?: string;
+    /** Names for the materials of face colours: `{ "#3a7bd5": "Blue" }`. */
+    faceMaterialNames?: Record<string, string>;
+    /** The meshes the STL is a finer cut of, to take the shading from. */
+    refines?: JobRefinement;
+}
+/** `refines` of a body in a job. Every path is relative to the job file. */
+export interface JobRefinement {
+    /** Each an STL file, and optionally a JSON file with one face id per triangle of it. */
+    surfaces: {
+        stl: string;
+        faceIds?: string;
+    }[];
+    /** Path to a JSON file: for each triangle of the body's STL, a triangle of its surface it lies in. */
+    triangleOf: string;
+    /** Path to a JSON file: for each triangle of the body's STL, the surface it lies in. Needed with more than one surface. */
+    surfaceOf?: string;
 }
 /** The JSON job file the command line reads. Options are the same as `exportGameGlb` takes. */
 export interface JobFile extends ExportOptions {

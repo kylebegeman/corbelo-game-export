@@ -148,6 +148,165 @@ export function paintedTop(color: string): (string | null)[] {
   return Array.from({ length: 12 }, (_, triangle) => (triangle >= 10 ? color : null));
 }
 
+/** A shape that is a finer cut of another: its triangles, and the triangle of the other each lies in. */
+export interface CutShape extends Shape {
+  triangleOf: Uint32Array;
+}
+
+/** The point a quarter of the way along an edge, the same whichever end the edge is named from. */
+function quarter(p: Point, q: Point): Point {
+  const swap = p[0] !== q[0] ? p[0] > q[0] : p[1] !== q[1] ? p[1] > q[1] : p[2] > q[2];
+  const [from, to] = swap ? [q, p] : [p, q];
+  return [from[0] + (to[0] - from[0]) / 4, from[1] + (to[1] - from[1]) / 4, from[2] + (to[2] - from[2]) / 4];
+}
+
+function corners(shape: Shape, triangle: number): [Point, Point, Point] {
+  return [0, 1, 2].map((k) => [...shape.positions.subarray(triangle * 9 + k * 3, triangle * 9 + k * 3 + 3)] as Point) as [Point, Point, Point];
+}
+
+/**
+ * `cylinder(radius, height, segments)` cut finer without moving its surface, as paint cuts a
+ * body: no point leaves the flat triangle it was cut into. Every triangle of the side becomes
+ * six, around a new point at its middle and a new point a quarter of the way along each of its
+ * edges. Every triangle of an end becomes two, at the new point on the rim. The result is closed.
+ * 16 x segments triangles, in the order of the triangles they were cut from.
+ *
+ * None of the new points of the side lies where a flat side's own direction is also the
+ * direction straight out from the axis, so shading them along the flat side shows.
+ */
+export function cutCylinder(radius: number, height: number, segments: number): CutShape {
+  const coarse = cylinder(radius, height, segments);
+  const numbers: number[] = [];
+  const ids: number[] = [];
+  const of: number[] = [];
+  const add = (a: Point, b: Point, c: Point, triangle: number) => {
+    numbers.push(...a, ...b, ...c);
+    ids.push(coarse.faceIds[triangle]!);
+    of.push(triangle);
+  };
+  for (let triangle = 0; triangle < coarse.faceIds.length; triangle += 1) {
+    const [a, b, c] = corners(coarse, triangle);
+    if (triangle % 4 < 2) {
+      const middle: Point = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
+      const around = [a, quarter(a, b), b, quarter(b, c), c, quarter(c, a)];
+      for (let k = 0; k < 6; k += 1) add(around[k]!, around[(k + 1) % 6]!, middle, triangle);
+    } else {
+      // An end: `a` is the centre and the edge from `b` to `c` runs along the rim.
+      add(a, b, quarter(b, c), triangle);
+      add(a, quarter(b, c), c, triangle);
+    }
+  }
+  return { positions: Float32Array.from(numbers), faceIds: Uint32Array.from(ids), triangleOf: Uint32Array.from(of) };
+}
+
+/**
+ * Face colours for `cutCylinder(radius, height, segments)`: `color` on half of the six triangles
+ * of every side triangle for the first half of the way round, and nothing elsewhere. The two
+ * colours meet along edges of the cylinder's own triangles and along edges inside them.
+ */
+export function paintedPatch(segments: number, color: string): (string | null)[] {
+  return Array.from({ length: segments * 16 }, (_, triangle) => (triangle % 16 < 12 && triangle % 6 < 3 && Math.floor(triangle / 16) < segments / 2 ? color : null));
+}
+
+/**
+ * `cylinder(radius, height, segments)` with the same points and other triangles, as a cut leaves
+ * a flat part of a body: each flat side is divided along its other diagonal, and each end is a
+ * fan from one point of its rim, with no point at its middle. No triangle of it lies in one
+ * triangle of the cylinder: each reaches across two or more of them, and names one it touches.
+ * 4 x segments - 4 triangles.
+ */
+export function cylinderCutAcross(radius: number, height: number, segments: number): CutShape {
+  const coarse = cylinder(radius, height, segments);
+  const numbers: number[] = [];
+  const ids: number[] = [];
+  const of: number[] = [];
+  const add = (a: Point, b: Point, c: Point, triangle: number) => {
+    numbers.push(...a, ...b, ...c);
+    ids.push(coarse.faceIds[triangle]!);
+    of.push(triangle);
+  };
+  const [topStart] = corners(coarse, 2).slice(1) as [Point];
+  const [, bottomStart] = corners(coarse, 3).slice(1) as [Point, Point];
+  for (let segment = 0; segment < segments; segment += 1) {
+    // The side's two triangles are (low, next low, next high) and (low, next high, high).
+    const [low, nextLow, nextHigh] = corners(coarse, segment * 4);
+    const high = corners(coarse, segment * 4 + 1)[2];
+    add(low, nextLow, high, segment * 4);
+    add(nextLow, nextHigh, high, segment * 4 + 1);
+    if (segment === 0 || segment === segments - 1) continue;
+    const [, topFrom, topTo] = corners(coarse, segment * 4 + 2);
+    add(topStart, topFrom, topTo, segment * 4 + 2);
+    const [, bottomFrom, bottomTo] = corners(coarse, segment * 4 + 3);
+    add(bottomStart, bottomFrom, bottomTo, segment * 4 + 3);
+  }
+  return { positions: Float32Array.from(numbers), faceIds: Uint32Array.from(ids), triangleOf: Uint32Array.from(of) };
+}
+
+/** Any shape with each triangle cut in three around a new point at its middle. */
+export function cutAtMiddles(shape: Shape): CutShape {
+  const numbers: number[] = [];
+  const ids: number[] = [];
+  const of: number[] = [];
+  for (let triangle = 0; triangle < shape.faceIds.length; triangle += 1) {
+    const [a, b, c] = corners(shape, triangle);
+    const middle: Point = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
+    for (const [p, q] of [[a, b], [b, c], [c, a]] as const) {
+      numbers.push(...p, ...q, ...middle);
+      ids.push(shape.faceIds[triangle]!);
+      of.push(triangle);
+    }
+  }
+  return { positions: Float32Array.from(numbers), faceIds: Uint32Array.from(ids), triangleOf: Uint32Array.from(of) };
+}
+
+/** A shape with every triangle turned to face the other way: what cuts a hole, seen from inside the hole. */
+export function turned(shape: Shape): Shape {
+  const positions = Float32Array.from(shape.positions);
+  for (let at = 0; at < positions.length; at += 9) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      positions[at + 3 + axis] = shape.positions[at + 6 + axis]!;
+      positions[at + 6 + axis] = shape.positions[at + 3 + axis]!;
+    }
+  }
+  return { positions, faceIds: shape.faceIds };
+}
+
+/**
+ * A tube: `cylinder(outer, height, segments)` with `cylinder(inner, height, segments)` taken out
+ * of its middle. Every triangle lies in a triangle of one of the two: `surfaceOf` says which, 0
+ * for the outer cylinder and 1 for `turned` of the inner one, and `triangleOf` which triangle.
+ * 8 x segments triangles.
+ */
+export function tube(outer: number, inner: number, height: number, segments: number): CutShape & { surfaceOf: Uint32Array } {
+  const body = cylinder(outer, height, segments);
+  const hole = turned(cylinder(inner, height, segments));
+  const numbers: number[] = [];
+  const ids: number[] = [];
+  const of: number[] = [];
+  const surfaces: number[] = [];
+  const add = (points: Point[], face: number, surface: number, triangle: number) => {
+    numbers.push(...points.flat());
+    ids.push(face);
+    surfaces.push(surface);
+    of.push(triangle);
+  };
+  for (let triangle = 0; triangle < body.faceIds.length; triangle += 1) {
+    if (triangle % 4 < 2) {
+      // The outer side as it is, and the wall of the hole as the turned inner side is.
+      add(corners(body, triangle), 0, 0, triangle);
+      add(corners(hole, triangle), 3, 1, triangle);
+    } else {
+      // An end: the part of the outer cylinder's triangle that is outside the hole. The inner
+      // cylinder has the same triangle, smaller, with its rim corners in the other order.
+      const [, b, c] = corners(body, triangle);
+      const [, innerC, innerB] = corners(hole, triangle);
+      add([innerB, b, c], body.faceIds[triangle]!, 0, triangle);
+      add([innerB, c, innerC], body.faceIds[triangle]!, 0, triangle);
+    }
+  }
+  return { positions: Float32Array.from(numbers), faceIds: Uint32Array.from(ids), triangleOf: Uint32Array.from(of), surfaceOf: Uint32Array.from(surfaces) };
+}
+
 /** Two triangles sharing an edge along X, folded so their normals are `degrees` apart. */
 export function fold(degrees: number): Shape {
   const shape = new ShapeBuilder();

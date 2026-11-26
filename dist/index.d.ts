@@ -7,5 +7,5 @@ export { DEGENERATE_AREA_RATIO, FLAT_FACE_ANGLE_DEGREES } from "./mesh.js";
 export { nodeNames } from "./names.js";
 export { DEFAULT_PROFILE, ENGINE_PROFILES, resolveProfile, type EngineProfile, type EngineProfileId, type NodeNameConvention, type NodeRole, } from "./profiles.js";
 export { readStl, type StlMesh } from "./stl.js";
-export type { BodyFacts, BodyInput, Box, ColorInput, ExportInput, ExportOptions, ExportResult, JsonValue, MaterialFacts, MeasuredBox, NormalMode, PackExtras, PackFacts, PivotFacts, PivotMode, PivotOption, Placement, SlotFacts, SourceSpace, TotalFacts, Vec3, } from "./types.js";
+export type { BodyFacts, BodyInput, Box, ColorInput, ExportInput, ExportOptions, ExportResult, JsonValue, MaterialFacts, MeasuredBox, NormalMode, PackExtras, PackFacts, PivotFacts, PivotMode, PivotOption, Placement, Refinement, SlotFacts, SourceSpace, SurfaceMesh, TotalFacts, Vec3, } from "./types.js";
 export { GENERATOR, VERSION } from "./version.js";

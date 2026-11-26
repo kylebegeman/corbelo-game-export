@@ -33,8 +33,10 @@ export type {
   PivotMode,
   PivotOption,
   Placement,
+  Refinement,
   SlotFacts,
   SourceSpace,
+  SurfaceMesh,
   TotalFacts,
   Vec3,
 } from "./types.js";

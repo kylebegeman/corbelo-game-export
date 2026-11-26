@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { forBody, refuse } from "./errors.js";
 import { BinaryBuilder, encodeGlb } from "./glb-write.js";
 import { EXTRAS_KEY, COMPONENT_FLOAT, COMPONENT_UNSIGNED_INT, COMPONENT_UNSIGNED_SHORT, MODE_TRIANGLES, TARGET_ARRAY_BUFFER, TARGET_ELEMENT_ARRAY_BUFFER, } from "./gltf.js";
 import { MATERIAL_METALLIC, MATERIAL_ROUGHNESS, planColors } from "./materials.js";
@@ -92,14 +92,12 @@ function readSettings(input) {
         provenance: input.provenance,
     };
 }
-/** Checks one body's arrays and returns how many triangles it has. Refuses anything malformed. */
-function checkBody(body, index) {
-    if (typeof body !== "object" || body === null)
-        refuse("BAD_POSITIONS", `Body ${index} is not an object.`);
-    if (typeof body.name !== "string" || body.name.trim() === "")
-        refuse("BAD_NAME", `Body ${index} needs a name.`);
-    const label = `Body "${body.name}"`;
-    const { positions, indices, faceIds, faceColors } = body;
+/**
+ * Checks the arrays of a mesh and returns how many triangles it has. Refuses anything malformed.
+ * `label` starts the message and `what` is the mesh in the middle of a sentence: "the body".
+ */
+function checkMesh(mesh, label, what) {
+    const { positions, indices, faceIds } = mesh;
     if (!isArrayLike(positions))
         refuse("BAD_POSITIONS", `${label}: positions must be a Float32Array or an array of numbers.`);
     if (positions.length === 0)
@@ -131,7 +129,7 @@ function checkBody(body, index) {
             if (!Number.isInteger(value))
                 refuse("BAD_INDICES", `${label}: index ${at} is ${String(value)}, not a whole number.`);
             if (value < 0 || value >= vertexCount) {
-                refuse("INDEX_OUT_OF_RANGE", `${label}: index ${at} points at vertex ${value}, but the body has ${vertexCount} vertices.`);
+                refuse("INDEX_OUT_OF_RANGE", `${label}: index ${at} points at vertex ${value}, but ${what} has ${vertexCount} vertices.`);
             }
         }
         triangles = indices.length / 3;
@@ -147,6 +145,20 @@ function checkBody(body, index) {
                 refuse("BAD_FACE_IDS", `${label}: face id ${at} is ${String(faceIds[at])}, not a whole number.`);
         }
     }
+    return triangles;
+}
+/**
+ * Checks one body's arrays and returns how many triangles it has, and how many the meshes it
+ * refines have together. Refuses anything malformed.
+ */
+function checkBody(body, index) {
+    if (typeof body !== "object" || body === null)
+        refuse("BAD_POSITIONS", `Body ${index} is not an object.`);
+    if (typeof body.name !== "string" || body.name.trim() === "")
+        refuse("BAD_NAME", `Body ${index} needs a name.`);
+    const label = `Body "${body.name}"`;
+    const triangles = checkMesh(body, label, "the body");
+    const { faceColors, refines } = body;
     // The colours themselves are read with the body's own colour, in `planColors`.
     if (faceColors !== undefined) {
         if (!Array.isArray(faceColors))
@@ -155,7 +167,45 @@ function checkBody(body, index) {
             refuse("BAD_FACE_COLORS", `${label}: faceColors holds ${faceColors.length} entries for ${triangles} triangles. It needs exactly one per triangle.`);
         }
     }
-    return triangles;
+    let refined = 0;
+    if (refines !== undefined) {
+        if (typeof refines !== "object" || refines === null)
+            refuse("BAD_REFINEMENT", `${label}: refines must be { surfaces, triangleOf }.`);
+        const { surfaces, surfaceOf, triangleOf } = refines;
+        if (!Array.isArray(surfaces) || surfaces.length === 0)
+            refuse("BAD_REFINEMENT", `${label}: refines.surfaces must be an array with at least one mesh.`);
+        const surfaceTriangles = surfaces.map((surface, at) => {
+            const surfaceLabel = `${label}, surface ${at} of refines`;
+            if (typeof surface !== "object" || surface === null)
+                refuse("BAD_REFINEMENT", `${surfaceLabel} is not an object.`);
+            return checkMesh(surface, surfaceLabel, "the surface");
+        });
+        refined = surfaceTriangles.reduce((total, count) => total + count, 0);
+        const wholeNumbers = (values, key) => {
+            if (!isArrayLike(values))
+                refuse("BAD_REFINEMENT", `${label}: refines.${key} must be a typed array or an array of numbers.`);
+            if (values.length !== triangles) {
+                refuse("BAD_REFINEMENT", `${label}: refines.${key} holds ${values.length} numbers for ${triangles} triangles. It needs exactly one per triangle.`);
+            }
+            return values;
+        };
+        if (surfaceOf === undefined && surfaces.length > 1) {
+            refuse("BAD_REFINEMENT", `${label}: refines has ${surfaces.length} surfaces, so it needs surfaceOf to say which one each triangle lies in.`);
+        }
+        const ofSurface = surfaceOf === undefined ? undefined : wholeNumbers(surfaceOf, "surfaceOf");
+        const ofTriangle = wholeNumbers(triangleOf, "triangleOf");
+        for (let at = 0; at < triangles; at += 1) {
+            const surface = ofSurface === undefined ? 0 : ofSurface[at];
+            if (!Number.isInteger(surface) || surface < 0 || surface >= surfaces.length) {
+                refuse("BAD_REFINEMENT", `${label}: refines.surfaceOf says triangle ${at} lies in surface ${String(surface)}, but there are ${surfaces.length} surfaces, numbered from 0.`);
+            }
+            const triangle = ofTriangle[at];
+            if (!Number.isInteger(triangle) || triangle < 0 || triangle >= surfaceTriangles[surface]) {
+                refuse("BAD_REFINEMENT", `${label}: refines.triangleOf says triangle ${at} lies in triangle ${String(triangle)}, but ${surfaces.length > 1 ? `surface ${surface}` : "the surface"} has ${surfaceTriangles[surface]} triangles, numbered from 0.`);
+            }
+        }
+    }
+    return { triangles, refined };
 }
 function boundsOf(positions) {
     const min = [Infinity, Infinity, Infinity];
@@ -225,31 +275,58 @@ export function exportGameGlb(input) {
     const { bodies } = input;
     if (!Array.isArray(bodies) || bodies.length === 0)
         refuse("NO_BODIES", "There are no bodies to export.");
+    // The meshes that bodies refine are not written, so they are counted on their own.
     let inputTriangles = 0;
+    let refinedTriangles = 0;
     for (const [index, body] of bodies.entries()) {
-        inputTriangles += checkBody(body, index);
+        const counted = forBody(index, () => checkBody(body, index));
+        inputTriangles += counted.triangles;
         if (inputTriangles > settings.maxTriangles) {
             refuse("TOO_MANY_TRIANGLES", `The bodies hold more than ${settings.maxTriangles} triangles, the limit for one export. Simplify the mesh or raise maxTriangles.`);
+        }
+        refinedTriangles += counted.refined;
+        if (refinedTriangles > settings.maxTriangles) {
+            refuse("TOO_MANY_TRIANGLES", `The meshes that bodies refine hold more than ${settings.maxTriangles} triangles, the limit for one export. Raise maxTriangles.`);
         }
     }
     const names = nodeNames(bodies.map((body) => body.name));
     const colors = planColors(bodies, settings.colorSpace);
     const { profile } = settings;
-    const built = bodies.map((body, index) => {
+    const meshOptions = {
+        reverseWinding: conversion.mirrored,
+        weldTolerance: settings.weldTolerance,
+        creaseAngle: settings.creaseAngle,
+        normals: settings.normals,
+    };
+    const built = bodies.map((body, index) => forBody(index, () => {
         const points = new Float64Array(body.positions.length);
         toGltfSpace(body.positions, conversion, points);
-        const mesh = buildMesh(points, body.indices, body.faceIds, {
-            reverseWinding: conversion.mirrored,
-            weldTolerance: settings.weldTolerance,
-            creaseAngle: settings.creaseAngle,
-            normals: settings.normals,
-        });
+        // The meshes a body refines are built first, each by itself and by the same rules as a body.
+        let coarse;
+        if (body.refines !== undefined) {
+            const meshes = [];
+            const keptOf = [];
+            for (const surface of body.refines.surfaces) {
+                const surfacePoints = new Float64Array(surface.positions.length);
+                toGltfSpace(surface.positions, conversion, surfacePoints);
+                const surfaceMesh = buildMesh(surfacePoints, surface.indices, surface.faceIds, meshOptions);
+                const kept = new Int32Array(surfaceMesh.triangles + surfaceMesh.degenerateTrianglesDropped).fill(-1);
+                for (let t = 0; t < surfaceMesh.triangles; t += 1)
+                    kept[surfaceMesh.sourceTriangle[t]] = t;
+                meshes.push(surfaceMesh);
+                keptOf.push(kept);
+            }
+            coarse = { meshes, keptOf, surfaceOf: body.refines.surfaceOf, triangleOf: body.refines.triangleOf, where: `Body "${body.name}"` };
+        }
+        // With `refines` the body's own face ids have no say in the shading: the surfaces' have.
+        const mesh = buildMesh(points, body.indices, coarse === undefined ? body.faceIds : undefined, meshOptions, coarse);
         if (mesh.triangles === 0) {
             refuse("ALL_DEGENERATE", `Body "${body.name}": all ${mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
         }
         // One part per colour that a kept triangle has. Normals are settled by now, on the whole body.
-        return { mesh, parts: splitMesh(mesh, colors.ofTriangle[index], colors.ofBody[index]) };
-    });
+        const shadedFrom = coarse === undefined ? undefined : { surfaces: coarse.meshes.length, triangles: coarse.meshes.reduce((total, surface) => total + surface.triangles, 0) };
+        return { mesh, parts: splitMesh(mesh, colors.ofTriangle[index], colors.ofBody[index]), shadedFrom };
+    }));
     // The materials written are the ones a kept triangle uses, in the order bodies and their
     // parts first use them. A colour whose triangles were all dropped is not in the file.
     const materials = [];
@@ -298,7 +375,7 @@ export function exportGameGlb(input) {
     }
     for (const [index, body] of bodies.entries()) {
         const name = names[index];
-        const { mesh, parts } = built[index];
+        const { mesh, parts, shadedFrom } = built[index];
         // Vertex data is stored relative to the pivot, as 32-bit floats. Everything reported below
         // is measured from those stored values.
         const pivot = pivotPoint(settings, boundsOf(mesh.positions), conversion);
@@ -371,6 +448,7 @@ export function exportGameGlb(input) {
             materials: slots.map((slot) => slot.material),
             // Left out for a body in one colour, whose one slot holds everything the body has.
             ...(slots.length > 1 ? { slots } : {}),
+            ...(shadedFrom !== undefined ? { shadedFrom } : {}),
             degenerateTrianglesDropped: mesh.degenerateTrianglesDropped,
             openEdges: mesh.openEdges,
             nonManifoldEdges: mesh.nonManifoldEdges,
@@ -398,7 +476,8 @@ export function exportGameGlb(input) {
             creaseAngle: settings.creaseAngle,
             normals: settings.normals,
             weldTolerance: settings.weldTolerance,
-            faceIds: bodies.some((body) => body.faceIds !== undefined),
+            // Face ids that had a say: a body's own, or those of the surfaces it refines.
+            faceIds: bodies.some((body) => (body.refines === undefined ? body.faceIds !== undefined : body.refines.surfaces.some((surface) => surface.faceIds !== undefined))),
         },
         bodies: bodyFacts,
         materials: materials.map((material) => ({ ...material })),

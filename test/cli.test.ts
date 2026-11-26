@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readPack, VERSION, type PackFacts } from "../src/index.js";
 import { runCli, runJob } from "../src/node.js";
-import { asciiStl, binaryStl, box, chamferedBlock, cylinder, halfPaintedSide } from "./fixtures.js";
+import { asciiStl, binaryStl, box, chamferedBlock, cutCylinder, cylinder, halfPaintedSide, paintedPatch } from "./fixtures.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let dir: string;
@@ -186,6 +186,77 @@ describe("command line", () => {
     expect(refused("colors6.json", "parts/colors-bad.json")).toContain('error [BAD_COLOR]: Body "Block", triangle 5: colour "crimson"');
   });
 
+  it("names the materials of face colours from the job itself", () => {
+    const post = cylinder(100, 300, 8);
+    writeFileSync(join(dir, "parts/named.stl"), binaryStl(post.positions));
+    writeFileSync(join(dir, "parts/named.colors.json"), JSON.stringify(halfPaintedSide(8, "#c0392b")));
+    const body = { name: "Post", stl: "parts/named.stl", color: "#2980ba", faceColors: "parts/named.colors.json" };
+    const base = { source: { unit: 0.001, up: "Z" }, output: { glb: "named.glb" } };
+    const named = runJob(writeJob("named.json", { ...base, bodies: [{ ...body, faceMaterialNames: { "#c0392b": "Signal Red" } }] }));
+    expect(named.report.materials.map((material) => material.name)).toEqual(["Signal_Red", "color_2980ba"]);
+    const refused = (faceMaterialNames: unknown) => cli(writeJob("named-bad.json", { ...base, bodies: [{ ...body, faceMaterialNames }] })).err;
+    expect(refused(["Signal Red"])).toContain('error [BAD_NAME]: Body "Post": faceMaterialNames must be an object');
+    expect(refused({ red: "Signal Red" })).toContain('error [BAD_COLOR]: Body "Post", faceMaterialNames: colour "red"');
+    expect(refused({ "#c0392b": "Paint", "#2980ba": "Paint" })).toContain("error [MATERIAL_CONFLICT]");
+  });
+
+  it("reads what a body was cut from, and shades the body as that was shaded", () => {
+    const post = cylinder(100, 300, 8);
+    const pieces = cutCylinder(100, 300, 8);
+    writeFileSync(join(dir, "parts/uncut.stl"), binaryStl(post.positions));
+    writeFileSync(join(dir, "parts/uncut.faces.json"), JSON.stringify(Array.from(post.faceIds)));
+    writeFileSync(join(dir, "parts/cut.stl"), binaryStl(pieces.positions));
+    writeFileSync(join(dir, "parts/cut.of.json"), JSON.stringify(Array.from(pieces.triangleOf)));
+    writeFileSync(join(dir, "parts/cut.surface.json"), JSON.stringify(Array.from(pieces.triangleOf, () => 0)));
+    writeFileSync(join(dir, "parts/cut.colors.json"), JSON.stringify(paintedPatch(8, "#c0392b")));
+    const base = { source: { unit: 0.001, up: "Z" }, pivot: "origin", output: { glb: "cut.glb" } };
+    const body = { name: "Post", stl: "parts/cut.stl", color: "#2980ba", faceColors: "parts/cut.colors.json" };
+    const refines = { surfaces: [{ stl: "parts/uncut.stl", faceIds: "parts/uncut.faces.json" }], triangleOf: "parts/cut.of.json" };
+    const { code, err } = cli(writeJob("cut.json", { ...base, bodies: [{ ...body, refines }] }));
+    expect(err).toBe("");
+    expect(code).toBe(0);
+    const pack = readPack(readFileSync(join(dir, "cut.glb")));
+    expect(pack.facts!.bodies[0]!.shadedFrom).toEqual({ surfaces: 1, triangles: 32 });
+    expect(pack.facts!.settings.faceIds).toBe(true);
+    // Every normal of the round side points straight out from the axis, which is +Y in the file.
+    const { positions, normals } = pack.bodies[0]!;
+    let side = 0;
+    for (let at = 0; at < positions.length; at += 3) {
+      if (Math.abs(normals[at + 1]!) > 0.5) continue;
+      side += 1;
+      expect((normals[at]! * positions[at]! + normals[at + 2]! * positions[at + 2]!) / Math.hypot(positions[at]!, positions[at + 2]!)).toBeGreaterThan(0.999999);
+    }
+    expect(side).toBeGreaterThan(8 * 8);
+    // Two surfaces, with a file that says which one each triangle lies in.
+    const two = { surfaces: [refines.surfaces[0], { stl: "parts/uncut.stl" }], surfaceOf: "parts/cut.surface.json", triangleOf: "parts/cut.of.json" };
+    expect(runJob(writeJob("cut-two.json", { ...base, bodies: [{ ...body, refines: two }] })).report.bodies[0]!.shadedFrom).toEqual({ surfaces: 2, triangles: 64 });
+
+    const refused = (changed: unknown): string => {
+      const result = cli(writeJob("cut-bad.json", { ...base, bodies: [{ ...body, refines: changed }] }));
+      expect(result.code).toBe(1);
+      return result.err;
+    };
+    writeFileSync(join(dir, "parts/cut.broken.json"), "[0, 1,");
+    writeFileSync(join(dir, "parts/cut.object.json"), '{"of":[0]}');
+    writeFileSync(join(dir, "parts/cut.short.json"), "[0, 1, 2]");
+    expect(refused("parts/uncut.stl")).toContain('error [BAD_JOB]: Body "Post": "refines" must be an object with "surfaces" and "triangleOf".');
+    expect(refused({ ...refines, surface: "x" })).toContain('error [BAD_JOB]: Body "Post": "refines" has an unknown key "surface". Known keys: surfaces, triangleOf, surfaceOf.');
+    expect(refused({ ...refines, surfaces: [] })).toContain('"refines.surfaces" must be a list with at least one surface.');
+    expect(refused({ ...refines, surfaces: [{ stl: "parts/uncut.stl", faceids: "x" }] })).toContain('Body "Post", surface 0 of "refines" has an unknown key "faceids". Known keys: stl, faceIds.');
+    expect(refused({ ...refines, surfaces: [{}] })).toContain('Body "Post", surface 0 of "refines" needs an "stl" file path.');
+    expect(refused({ ...refines, surfaces: [{ stl: "parts/none.stl" }] })).toMatch(/error \[BAD_JOB\]: Cannot read STL file .*none\.stl: ENOENT/);
+    expect(refused({ ...refines, surfaces: [{ stl: "parts/cut.of.json" }] })).toMatch(/error \[BAD_STL\]: Body "Post", surface 0 of "refines" \(.*cut\.of\.json\)/);
+    expect(refused({ surfaces: refines.surfaces })).toContain('error [BAD_JOB]: Body "Post": "refines" needs "triangleOf", the path of a JSON file holding one whole number per triangle.');
+    expect(refused({ ...refines, triangleOf: [0, 1] })).toContain('error [BAD_JOB]: Body "Post": "refines.triangleOf" must be the path of a JSON file holding one whole number per triangle.');
+    expect(refused({ ...refines, triangleOf: "parts/none.json" })).toMatch(/error \[BAD_JOB\]: Cannot read refinement file .*none\.json: ENOENT/);
+    expect(refused({ ...refines, triangleOf: "parts/cut.broken.json" })).toMatch(/error \[BAD_REFINEMENT\]: Body "Post" \(.*cut\.broken\.json\): the refinement file is not valid JSON/);
+    expect(refused({ ...refines, triangleOf: "parts/cut.object.json" })).toContain("the refinement file must hold one JSON array of whole numbers.");
+    expect(refused({ ...refines, triangleOf: "parts/cut.short.json" })).toContain('error [BAD_REFINEMENT]: Body "Post": refines.triangleOf holds 3 numbers for 128 triangles.');
+    expect(refused({ ...two, surfaceOf: undefined })).toContain("error [BAD_REFINEMENT]: Body \"Post\": refines has 2 surfaces, so it needs surfaceOf");
+    // The cut mesh against the wrong mesh: a triangle that does not lie where the job says.
+    expect(refused({ surfaces: [{ stl: "parts/block.stl" }], triangleOf: "parts/cut.surface.json" })).toContain("error [BAD_REFINEMENT]: Body \"Post\": triangle 0 is said to lie in triangle 0 of the mesh it refines, but one of its corners is");
+  });
+
   it("refuses keys it does not know, so a typing mistake is not ignored", () => {
     expect(cli(writeJob("typo.json", { ...job, pivit: "center" })).err).toContain('error [BAD_JOB]: The job has an unknown key "pivit"');
     expect(cli(writeJob("typo2.json", { ...job, bodies: [{ name: "Block", stl: "parts/block.stl", colour: "#fff" }] })).err).toContain('Body 0 has an unknown key "colour"');
@@ -211,6 +282,7 @@ describe("command line", () => {
   it("prints help and its version", () => {
     expect(cli("--help")).toMatchObject({ code: 0, err: "" });
     expect(cli("--help").out).toContain("corbelo-game-export <job.json>");
+    for (const key of ["faceIds", "faceColors", "faceMaterialNames", "refines", "triangleOf", "surfaceOf"]) expect(cli("--help").out).toContain(`"${key}"`);
     expect(cli("--version")).toEqual({ code: 0, out: `${VERSION}\n`, err: "" });
   });
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { ENGINE_PROFILES, EXTRAS_KEY, exportGameGlb, readGlb, type ExportInput } from "../src/index.js";
-import { box, chamferedBlock, cylinder, halfPaintedSide, MM_Z_UP, paintedTop } from "./fixtures.js";
+import { box, chamferedBlock, cutCylinder, cylinder, halfPaintedSide, MM_Z_UP, paintedPatch, paintedTop } from "./fixtures.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const schema = JSON.parse(readFileSync(join(root, "schema/pack.schema.json"), "utf8")) as Record<string, unknown>;
@@ -33,6 +33,19 @@ const cases: Record<string, ExportInput> = {
     source: MM_Z_UP,
     placement: "assembly",
     profile: "unreal5",
+  },
+  "a painted body that says what it was cut from, with names for its colours": {
+    bodies: [
+      {
+        name: "Post",
+        positions: cutCylinder(150, 400, 24).positions,
+        color: "#2980ba",
+        faceColors: paintedPatch(24, "#c0392b"),
+        faceMaterialNames: { "#c0392b": "Signal Red", "#2980ba": "Sky Blue" },
+        refines: { surfaces: [{ positions: round.positions, faceIds: round.faceIds }], triangleOf: cutCylinder(150, 400, 24).triangleOf },
+      },
+    ],
+    source: MM_Z_UP,
   },
   "a profile of the caller's own": {
     bodies: pair,
@@ -79,5 +92,20 @@ describe("schema/pack.schema.json", () => {
     expect(withSlots([slots[0], { material: "color_c0392b" }])).toBe(false);
     // A body in one colour is written without the list.
     expect(exportGameGlb(cases["the defaults"]!).facts.bodies[0]).not.toHaveProperty("slots");
+  });
+
+  it("knows what a body's shading was taken from, and refuses what that cannot be", () => {
+    const facts = JSON.parse(JSON.stringify(exportGameGlb(cases["a painted body that says what it was cut from, with names for its colours"]!).facts)) as Record<string, unknown>;
+    const body = (facts["bodies"] as Record<string, unknown>[])[0]!;
+    expect(body["shadedFrom"]).toEqual({ surfaces: 1, triangles: 96 });
+    expect(body["materials"]).toEqual(["Signal_Red", "Sky_Blue"]);
+    const withShadedFrom = (changed: unknown) => validFacts({ ...facts, bodies: [{ ...body, shadedFrom: changed }] });
+    expect(withShadedFrom({ surfaces: 2, triangles: 10 })).toBe(true);
+    expect(withShadedFrom({ surfaces: 0, triangles: 10 })).toBe(false);
+    expect(withShadedFrom({ surfaces: 1 })).toBe(false);
+    expect(withShadedFrom({ surfaces: 1, triangles: 10, exact: true })).toBe(false);
+    expect(withShadedFrom(true)).toBe(false);
+    // A body that does not say what it was cut from is written without it.
+    expect(exportGameGlb(cases["a body in two colours"]!).facts.bodies[0]).not.toHaveProperty("shadedFrom");
   });
 });

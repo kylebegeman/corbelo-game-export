@@ -5,7 +5,9 @@ import { exportGameGlb } from "./export.js";
 import { readStl } from "./stl.js";
 import { VERSION } from "./version.js";
 const JOB_KEYS = ["bodies", "source", "profile", "pivot", "placement", "creaseAngle", "normals", "weldTolerance", "maxTriangles", "colorSpace", "provenance", "output"];
-const BODY_KEYS = ["name", "stl", "color", "materialName", "faceIds", "faceColors"];
+const BODY_KEYS = ["name", "stl", "color", "materialName", "faceIds", "faceColors", "faceMaterialNames", "refines"];
+const REFINES_KEYS = ["surfaces", "triangleOf", "surfaceOf"];
+const SURFACE_KEYS = ["stl", "faceIds"];
 const OUTPUT_KEYS = ["glb", "facts"];
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -24,16 +26,20 @@ function readFile(path, what) {
         return refuse("BAD_JOB", `Cannot read ${what} ${path}: ${error.code ?? error.message}.`);
     }
 }
+const FACE_IDS = { what: "face id", holds: "one whole number per triangle", array: "whole numbers", code: "BAD_FACE_IDS" };
+const FACE_COLORS = { what: "face colour", holds: "one colour, or null, per triangle", array: "colours", code: "BAD_FACE_COLORS" };
+const TRIANGLE_OF = { what: "refinement", holds: "one whole number per triangle", array: "whole numbers", code: "BAD_REFINEMENT" };
+const SURFACE_OF = { what: "refinement", holds: "one whole number per triangle", array: "whole numbers", code: "BAD_REFINEMENT" };
 /**
- * Reads the JSON array a body names under `key`: something per triangle that an STL file cannot
+ * Reads the JSON array a job names under `key`: something per triangle that an STL file cannot
  * hold. What is in the array, and how many entries it needs, is for the exporter to check.
+ * `where` starts the message of a refusal and `key` is the key as the job spells it.
  */
-function readList(entry, key, base, kind) {
-    const value = entry[key];
+function readList(value, key, where, base, kind) {
     if (value === undefined)
         return undefined;
     if (typeof value !== "string" || value === "") {
-        refuse("BAD_JOB", `Body "${entry["name"]}": "${key}" must be the path of a JSON file holding ${kind.holds}.`);
+        refuse("BAD_JOB", `${where}: "${key}" must be the path of a JSON file holding ${kind.holds}.`);
     }
     const path = resolve(base, value);
     let list;
@@ -43,11 +49,49 @@ function readList(entry, key, base, kind) {
     catch (error) {
         if (error instanceof GameExportError)
             throw error;
-        refuse(kind.code, `Body "${entry["name"]}" (${path}): the ${kind.what} file is not valid JSON.`);
+        refuse(kind.code, `${where} (${path}): the ${kind.what} file is not valid JSON.`);
     }
     if (!Array.isArray(list))
-        refuse(kind.code, `Body "${entry["name"]}" (${path}): the ${kind.what} file must hold one JSON array of ${kind.array}.`);
+        refuse(kind.code, `${where} (${path}): the ${kind.what} file must hold one JSON array of ${kind.array}.`);
     return list;
+}
+/** Reads an STL file a job names. `where` starts the message of a refusal. */
+function readStlFile(path, where) {
+    try {
+        return readStl(readFile(path, "STL file")).positions;
+    }
+    catch (error) {
+        if (error instanceof GameExportError && error.code === "BAD_STL")
+            refuse("BAD_STL", `${where} (${path}): ${error.message}`);
+        throw error;
+    }
+}
+/** Reads `refines` of a body: the STL of each surface and the lists that say where each triangle lies. */
+function readRefines(value, where, base) {
+    if (!isRecord(value))
+        refuse("BAD_JOB", `${where}: "refines" must be an object with "surfaces" and "triangleOf".`);
+    refuseUnknownKeys(value, REFINES_KEYS, `${where}: "refines"`);
+    const listed = value["surfaces"];
+    if (!Array.isArray(listed) || listed.length === 0)
+        refuse("BAD_JOB", `${where}: "refines.surfaces" must be a list with at least one surface.`);
+    const surfaces = listed.map((entry, at) => {
+        const surfaceWhere = `${where}, surface ${at} of "refines"`;
+        if (!isRecord(entry))
+            refuse("BAD_JOB", `${surfaceWhere} must be an object with "stl".`);
+        refuseUnknownKeys(entry, SURFACE_KEYS, surfaceWhere);
+        if (typeof entry["stl"] !== "string" || entry["stl"] === "")
+            refuse("BAD_JOB", `${surfaceWhere} needs an "stl" file path.`);
+        const surface = { positions: readStlFile(resolve(base, entry["stl"]), surfaceWhere) };
+        const faceIds = readList(entry["faceIds"], "faceIds", surfaceWhere, base, FACE_IDS);
+        if (faceIds !== undefined)
+            surface.faceIds = faceIds;
+        return surface;
+    });
+    const triangleOf = readList(value["triangleOf"], "refines.triangleOf", where, base, TRIANGLE_OF);
+    if (triangleOf === undefined)
+        refuse("BAD_JOB", `${where}: "refines" needs "triangleOf", the path of a JSON file holding ${TRIANGLE_OF.holds}.`);
+    const surfaceOf = readList(value["surfaceOf"], "refines.surfaceOf", where, base, SURFACE_OF);
+    return { surfaces, triangleOf: triangleOf, ...(surfaceOf !== undefined ? { surfaceOf: surfaceOf } : {}) };
 }
 /**
  * Runs a job file: reads its STL bodies, exports them and writes the GLB and the facts JSON.
@@ -96,28 +140,24 @@ export function runJob(jobPath, overrides = {}) {
             refuse("BAD_JOB", `Body ${index} needs a "name".`);
         if (typeof entry["stl"] !== "string" || entry["stl"] === "")
             refuse("BAD_JOB", `Body "${entry["name"]}" needs an "stl" file path.`);
-        const stlPath = resolve(base, entry["stl"]);
-        let positions;
-        try {
-            positions = readStl(readFile(stlPath, "STL file")).positions;
-        }
-        catch (error) {
-            if (error instanceof GameExportError && error.code === "BAD_STL")
-                refuse("BAD_STL", `Body "${entry["name"]}" (${stlPath}): ${error.message}`);
-            throw error;
-        }
-        const body = { name: entry["name"], positions };
+        const where = `Body "${entry["name"]}"`;
+        const body = { name: entry["name"], positions: readStlFile(resolve(base, entry["stl"]), where) };
         if (entry["color"] !== undefined)
             body.color = entry["color"];
         if (entry["materialName"] !== undefined)
             body.materialName = entry["materialName"];
         // The exporter checks each list's length against the triangles, and what the entries are.
-        const faceIds = readList(entry, "faceIds", base, { what: "face id", holds: "one whole number per triangle", array: "whole numbers", code: "BAD_FACE_IDS" });
+        const faceIds = readList(entry["faceIds"], "faceIds", where, base, FACE_IDS);
         if (faceIds !== undefined)
             body.faceIds = faceIds;
-        const faceColors = readList(entry, "faceColors", base, { what: "face colour", holds: "one colour, or null, per triangle", array: "colours", code: "BAD_FACE_COLORS" });
+        const faceColors = readList(entry["faceColors"], "faceColors", where, base, FACE_COLORS);
         if (faceColors !== undefined)
             body.faceColors = faceColors;
+        // Written into the job itself: a name for each colour is short. The exporter checks it.
+        if (entry["faceMaterialNames"] !== undefined)
+            body.faceMaterialNames = entry["faceMaterialNames"];
+        if (entry["refines"] !== undefined)
+            body.refines = readRefines(entry["refines"], where, base);
         return body;
     });
     const { bodies: _bodies, output: _output, ...options } = job;
@@ -147,6 +187,14 @@ The job file is JSON:
 A body may also name two JSON files, each an array with one entry per triangle of its
 STL: "faceIds", the exact face each triangle came from, and "faceColors", the colour of
 each triangle, or null for the body's own colour.
+
+"faceMaterialNames" names the materials of face colours: { "#3a7bd5": "Blue" }.
+
+"refines" takes the shading from the meshes the STL is a finer cut of:
+  { "surfaces": [{ "stl": "uncut.stl" }], "triangleOf": "triangle-of.json" }
+"triangleOf" is a JSON file with one whole number per triangle of the body's STL: a
+triangle of the surface it lies in. With more than one surface, "surfaceOf" is a file
+of the same kind that says which surface. A surface may name a "faceIds" file too.
 
 Paths in the job are relative to the job file. --out and --facts are relative to the
 working directory and win over the job. Without a facts path, the facts go next to the

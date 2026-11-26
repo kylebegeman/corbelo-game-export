@@ -14,6 +14,25 @@ export interface MeshOptions {
     creaseAngle: number;
     normals: NormalMode;
 }
+/**
+ * A corner of a mesh must lie this near the surface it is said to lie in: this share of the
+ * longest edge of the surface's triangle it is found in, or twice the weld tolerance where that
+ * is more.
+ */
+export declare const REFINEMENT_REACH = 0.001;
+/** The surfaces a mesh is a finer cut of, already built, and where each of its triangles lies in them. */
+export interface CoarseSurfaces {
+    /** Each surface as `buildMesh` made it. */
+    meshes: readonly BuiltMesh[];
+    /** For each surface, the kept triangle each of its input triangles became, or -1 where it was dropped. */
+    keptOf: readonly Int32Array[];
+    /** The surface each input triangle of the fine mesh lies in. Undefined when there is one surface. */
+    surfaceOf: ArrayLike<number> | undefined;
+    /** An input triangle of that surface each input triangle of the fine mesh lies in, or in part. */
+    triangleOf: ArrayLike<number>;
+    /** Starts the message of a refusal: the body. */
+    where: string;
+}
 export interface BuiltMesh {
     /** x, y, z per written vertex, before the pivot is taken off. */
     positions: Float64Array;
@@ -46,8 +65,17 @@ export declare function tangentFor(nx: number, ny: number, nz: number, out: Floa
 /**
  * Welds, drops degenerate triangles, counts open and non-manifold edges, splits vertices along
  * hard edges and computes vertex normals. Positions are already in glTF space.
+ *
+ * With `coarse` the mesh is a finer cut of surfaces that were built before, and its shading is
+ * theirs. Every corner of every triangle is found on its surface: the surface's triangle it lies
+ * in, and its share of each of that triangle's written vertices. A corner takes the normal the
+ * surface has there, which is the normals of those vertices mixed by their shares. Two corners at
+ * one point become one written vertex where they are found on the same written vertices of the
+ * surface, which is where the surface is shaded smoothly, and stay two where they are not, which
+ * is along the surface's hard edges and between two surfaces. Face ids, the crease angle and the
+ * normal mode then act on the surfaces only.
  */
-export declare function buildMesh(points: Float64Array, indices: ArrayLike<number> | undefined, faceIds: ArrayLike<number> | undefined, options: MeshOptions): BuiltMesh;
+export declare function buildMesh(points: Float64Array, indices: ArrayLike<number> | undefined, faceIds: ArrayLike<number> | undefined, options: MeshOptions, coarse?: CoarseSurfaces): BuiltMesh;
 /** The triangles of a mesh that go into one primitive, with vertices of their own. */
 export interface MeshPart {
     /** The group every triangle of this part is in. */

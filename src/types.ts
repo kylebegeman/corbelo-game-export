@@ -31,6 +31,45 @@ export interface BodyInput {
    * a material slot, for each colour.
    */
   faceColors?: readonly (ColorInput | null | undefined)[];
+  /**
+   * Names for the materials of face colours: the colour, as `"#rrggbb"` or `"#rgb"`, and the name
+   * its material gets. A face colour that is not listed is named after itself.
+   */
+  faceMaterialNames?: Readonly<Record<string, string>>;
+  /**
+   * Says that the body's triangles are a finer cut of meshes that were there before, and takes
+   * the shading from those meshes, so that cutting a surface without moving it does not change
+   * how it is shaded.
+   */
+  refines?: Refinement;
+}
+
+/** A mesh of a surface, in the same units and axes as the body. */
+export interface SurfaceMesh {
+  /** x, y, z for each vertex. */
+  positions: ArrayLike<number>;
+  /** Three vertex numbers per triangle. Leave out for triangle soup. */
+  indices?: ArrayLike<number>;
+  /** One whole number per triangle, naming the exact CAD face the triangle came from. */
+  faceIds?: ArrayLike<number>;
+}
+
+/**
+ * The meshes a body was cut from, and for each triangle of the body the triangle it lies in.
+ * A body painted across its faces has one: its mesh before the paint cut it. A body with a hole
+ * cut into it has two: its own mesh before the cut and the mesh of what cut it, turned to face
+ * into the hole.
+ */
+export interface Refinement {
+  /** Each is welded and given hard edges, soft edges and normals by itself, as a body is. */
+  surfaces: readonly SurfaceMesh[];
+  /** One whole number per triangle of the body: which of `surfaces` it lies in. Leave out when there is one. */
+  surfaceOf?: ArrayLike<number>;
+  /**
+   * One whole number per triangle of the body: a triangle of that surface it lies in. A triangle
+   * that reaches across several triangles of a flat part of the surface names any one it touches.
+   */
+  triangleOf: ArrayLike<number>;
 }
 
 /** The space the bodies were authored in. */
@@ -137,6 +176,11 @@ export interface BodyFacts {
    * triangles add up to `triangles` and the vertices to `vertices`.
    */
   slots?: SlotFacts[];
+  /**
+   * Only for a body given `refines`: how many surfaces its shading was taken from and how many
+   * triangles they hold together.
+   */
+  shadedFrom?: { surfaces: number; triangles: number };
   degenerateTrianglesDropped: number;
   /** Edges used by exactly one triangle. Zero for a closed body. */
   openEdges: number;

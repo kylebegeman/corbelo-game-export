@@ -13,12 +13,14 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeGlb } from "../src/glb-write.js";
 import { exportGameGlb, readGlb, type ExportResult, type PackFacts } from "../src/index.js";
-import { box, chamferedBlock, cylinder, halfPaintedSide, MM_Z_UP, paintedTop } from "./fixtures.js";
+import { box, chamferedBlock, cutCylinder, cylinder, halfPaintedSide, MM_Z_UP, paintedPatch, paintedTop } from "./fixtures.js";
 
 const GODOT = process.env["GODOT"] ?? "godot";
 const BEGIN = "CORBELO_GAME_EXPORT_JSON_BEGIN";
 const END = "CORBELO_GAME_EXPORT_JSON_END";
 const SEGMENTS = 48;
+/** The post that is cut finer has few sides, so a normal along a flat side is far from one straight out. */
+const CUT_SEGMENTS = 12;
 
 interface GodotSurface {
   vertexCount: number;
@@ -176,6 +178,16 @@ describe.skipIf(!usable)("Godot 4 editor import", () => {
       ],
       source: MM_Z_UP,
     });
+    // A post painted across its flat sides, which cuts them finer: once saying what it was cut
+    // from, with a name for the paint, and once as the cut mesh alone with its own exact faces.
+    const uncut = cylinder(150, 400, CUT_SEGMENTS);
+    const pieces = cutCylinder(150, 400, CUT_SEGMENTS);
+    const paintedPost = { name: "Cut Post", positions: pieces.positions, color: "#2980ba", faceColors: paintedPatch(CUT_SEGMENTS, "#c0392b") };
+    exports["cut.glb"] = exportGameGlb({
+      bodies: [{ ...paintedPost, faceMaterialNames: { "#c0392b": "Signal Red" }, refines: { surfaces: [{ positions: uncut.positions, faceIds: uncut.faceIds }], triangleOf: pieces.triangleOf } }],
+      source: MM_Z_UP,
+    });
+    exports["cut-alone.glb"] = exportGameGlb({ bodies: [{ ...paintedPost, faceIds: pieces.faceIds }], source: MM_Z_UP });
     const small = box([0, 0, 0], [100, 100, 100]).positions;
     exports["names.glb"] = exportGameGlb({
       bodies: ["wall-col", "UCX_Crate", "part_LOD0", "Left Wall (v2)", "Left Wall (v2)"].map((name) => ({ name, positions: small })),
@@ -515,6 +527,52 @@ describe.skipIf(!usable)("Godot 4 editor import", () => {
         expect(copies.map((copy) => copy[0]).sort()).toEqual([0, 1]);
         near(copies[0]!.slice(1), copies[1]!.slice(1), 3);
       }
+    });
+  });
+
+  describe("a post painted across its flat sides", () => {
+    /** How far each normal of the round side is from straight out from the axis, in degrees, over every surface. */
+    function offRound(file: string): number[] {
+      const off: number[] = [];
+      for (const surface of meshNodes(file)[0]!.mesh!.surfaces) {
+        for (let vertex = 0; vertex < surface.vertexCount; vertex += 1) {
+          const [x, , z] = vectorAt(surface.vertices, vertex);
+          const normal = vectorAt(surface.normals, vertex);
+          if (Math.abs(normal[1]) > 0.5) continue;
+          off.push((Math.acos(Math.min(1, (normal[0] * x + normal[2] * z) / Math.hypot(x, z))) * 180) / Math.PI);
+        }
+      }
+      return off;
+    }
+
+    it("is shaded along its flat sides where the paint cut it, when the file was written from the cut mesh alone", () => {
+      // A quarter of the way along a side that turns 30 degrees, the side's own direction is over 7 degrees off.
+      expect(Math.max(...offRound("cut-alone.glb"))).toBeGreaterThan(7);
+    });
+
+    it("is shaded round, as before the paint, when the body said what it was cut from", () => {
+      const off = offRound("cut.glb");
+      expect(off.length).toBeGreaterThanOrEqual(8 * CUT_SEGMENTS);
+      // Godot's default compression keeps a normal to within a few hundredths of a degree.
+      expect(Math.max(...off)).toBeLessThan(0.1);
+      for (const surface of meshNodes("cut.glb")[0]!.mesh!.surfaces) {
+        for (let triangle = 0; triangle < surface.triangleCount; triangle += 1) {
+          const outward = facing(surface, triangle);
+          for (let k = 0; k < 3; k += 1) expect(dot(vectorAt(surface.normals, surface.indices[triangle * 3 + k]!), outward)).toBeGreaterThan(0.96);
+        }
+      }
+    });
+
+    it("has the counts the facts state, and the paint under the name it was given", () => {
+      const body = facts("cut.glb").bodies[0]!;
+      const surfaces = meshNodes("cut.glb")[0]!.mesh!.surfaces;
+      expect(body.shadedFrom).toEqual({ surfaces: 1, triangles: 4 * CUT_SEGMENTS });
+      expect(surfaces.map((surface) => ({ material: surface.material!.name, triangles: surface.triangleCount, vertices: surface.vertexCount }))).toEqual(body.slots);
+      expect(surfaces.map((surface) => [surface.material!.name, surface.material!.albedo])).toEqual([
+        ["Signal_Red", "#c0392b"],
+        ["color_2980ba", "#2980ba"],
+      ]);
+      expect(surfaces.reduce((total, surface) => total + surface.triangleCount, 0)).toBe(16 * CUT_SEGMENTS);
     });
   });
 

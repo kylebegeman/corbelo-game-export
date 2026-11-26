@@ -9,6 +9,7 @@ export type GameExportErrorCode =
   | "INDEX_OUT_OF_RANGE"
   | "BAD_FACE_IDS"
   | "BAD_FACE_COLORS"
+  | "BAD_REFINEMENT"
   | "TOO_MANY_TRIANGLES"
   | "BAD_NAME"
   | "BAD_COLOR"
@@ -23,6 +24,12 @@ export type GameExportErrorCode =
 /** Thrown for input the package refuses. `code` says which rule was broken. */
 export class GameExportError extends Error {
   readonly code: GameExportErrorCode;
+  /**
+   * Which body of the input the refusal is about, counted from 0, when it was found while that
+   * one body was checked or built. Not set for what is read across all bodies, like names and
+   * colours, or for what is not about a body.
+   */
+  body?: number;
 
   constructor(code: GameExportErrorCode, message: string) {
     super(message);
@@ -33,4 +40,14 @@ export class GameExportError extends Error {
 
 export function refuse(code: GameExportErrorCode, message: string): never {
   throw new GameExportError(code, message);
+}
+
+/** Runs `work` on one body of the input, and marks a refusal that comes out of it with that body. */
+export function forBody<T>(body: number, work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (error instanceof GameExportError && error.body === undefined) error.body = body;
+    throw error;
+  }
 }
