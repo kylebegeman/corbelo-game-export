@@ -8,6 +8,7 @@ export type GameExportErrorCode =
   | "BAD_INDICES"
   | "INDEX_OUT_OF_RANGE"
   | "BAD_FACE_IDS"
+  | "BAD_FACE_COLORS"
   | "TOO_MANY_TRIANGLES"
   | "BAD_NAME"
   | "BAD_COLOR"

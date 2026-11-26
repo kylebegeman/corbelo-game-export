@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeGlb } from "../src/glb-write.js";
 import { exportGameGlb, readGlb, type ExportResult, type PackFacts } from "../src/index.js";
-import { box, chamferedBlock, cylinder, MM_Z_UP } from "./fixtures.js";
+import { box, chamferedBlock, cylinder, halfPaintedSide, MM_Z_UP, paintedTop } from "./fixtures.js";
 
 const GODOT = process.env["GODOT"] ?? "godot";
 const BEGIN = "CORBELO_GAME_EXPORT_JSON_BEGIN";
@@ -166,6 +166,15 @@ describe.skipIf(!usable)("Godot 4 editor import", () => {
       ],
       source: MM_Z_UP,
       placement: "designed",
+    });
+    // Two bodies with colours on their faces: a cylinder whose side is half red, the two colours
+    // meeting along two lines down the smooth side, and a box with a red top.
+    exports["painted.glb"] = exportGameGlb({
+      bodies: [
+        { name: "Striped Post", positions: round.positions, faceIds: round.faceIds, color: "#2980ba", faceColors: halfPaintedSide(SEGMENTS, "#c0392b") },
+        { name: "Painted Box", positions: box([0, 0, 0], [200, 300, 100]).positions, color: "#2980ba", faceColors: paintedTop("#c0392b") },
+      ],
+      source: MM_Z_UP,
     });
     const small = box([0, 0, 0], [100, 100, 100]).positions;
     exports["names.glb"] = exportGameGlb({
@@ -401,6 +410,111 @@ describe.skipIf(!usable)("Godot 4 editor import", () => {
       ]);
       expect(facts("pair.glb").materials.map((material) => material.color)).toEqual(["#c0392b", "#2980ba"]);
       expect(facts("pair.glb").total.materialSlots).toBe(2);
+    });
+  });
+
+  describe("two bodies with colours on their faces", () => {
+    const body = (index: number) => facts("painted.glb").bodies[index]!;
+    const surfaces = (index: number) => meshNodes("painted.glb")[index]!.mesh!.surfaces;
+
+    it("has one mesh node per body, each mesh with a surface for each colour", () => {
+      expect(files["painted.glb"]!.nodes.map((node) => [node.name, node.class])).toEqual([
+        ["Striped_Post", "MeshInstance3D"],
+        ["Painted_Box", "MeshInstance3D"],
+      ]);
+      expect(surfaces(0)).toHaveLength(2);
+      expect(surfaces(1)).toHaveLength(2);
+      expect([body(0).materialSlots, body(1).materialSlots]).toEqual([2, 2]);
+    });
+
+    it("has each surface in its colour, in the order the facts list the slots", () => {
+      for (const index of [0, 1]) {
+        expect(surfaces(index).map((surface) => surface.material!.name)).toEqual(body(index).materials);
+        for (const surface of surfaces(index)) {
+          expect(surface.material!.albedo).toBe(facts("painted.glb").materials.find((material) => material.name === surface.material!.name)!.color);
+          expect(surface.material!.metallic).toBe(0);
+          expect(surface.material!.roughness).toBeCloseTo(0.8, 6);
+        }
+      }
+      expect(surfaces(0).map((surface) => [surface.material!.name, surface.material!.albedo])).toEqual([
+        ["color_c0392b", "#c0392b"],
+        ["color_2980ba", "#2980ba"],
+      ]);
+      expect(surfaces(1).map((surface) => [surface.material!.name, surface.material!.albedo])).toEqual([
+        ["color_2980ba", "#2980ba"],
+        ["color_c0392b", "#c0392b"],
+      ]);
+      expect(facts("painted.glb").total.materialSlots).toBe(2);
+    });
+
+    it("has the triangle and vertex counts the facts state for each surface", () => {
+      for (const index of [0, 1]) {
+        expect(surfaces(index).map((surface) => ({ material: surface.material!.name, triangles: surface.triangleCount, vertices: surface.vertexCount }))).toEqual(body(index).slots);
+        expect(surfaces(index).reduce((total, surface) => total + surface.triangleCount, 0)).toBe(body(index).triangles);
+        expect(surfaces(index).reduce((total, surface) => total + surface.vertexCount, 0)).toBe(body(index).vertices);
+      }
+      // Half of the cylinder's side is red: one triangle pair per segment for half the segments.
+      expect(surfaces(0).map((surface) => surface.triangleCount)).toEqual([SEGMENTS, 3 * SEGMENTS]);
+      // The box's top is red: two triangles on four corners.
+      expect(surfaces(1).map((surface) => [surface.triangleCount, surface.vertexCount])).toEqual([[10, 20], [2, 4]]);
+    });
+
+    it("keeps the mesh the size of the whole body", () => {
+      for (const index of [0, 1]) {
+        const node = meshNodes("painted.glb")[index]!;
+        // To four digits: Godot gives a surface that is perfectly flat, as the box's red top is,
+        // a box 0.01 mm thick, and the mesh's box is the box round its surfaces.
+        near(node.mesh!.aabbSize, body(index).bounds.meters.size, 4);
+        near(node.mesh!.aabbPosition, body(index).bounds.meters.min, 4);
+        near(node.position, [0, 0, 0]);
+      }
+    });
+
+    it("has the red on the right triangles: half the post's side and the box's top", () => {
+      const [red] = surfaces(0);
+      // The painted half is the one towards source +Y, which is glTF -Z.
+      for (let vertex = 0; vertex < red!.vertexCount; vertex += 1) {
+        expect(red!.vertices[vertex * 3 + 2]).toBeLessThan(1e-5);
+        expect(Math.abs(red!.normals[vertex * 3 + 1]!)).toBeLessThan(1e-3);
+      }
+      const top = surfaces(1)[1]!;
+      for (let vertex = 0; vertex < top.vertexCount; vertex += 1) {
+        expect(top.vertices[vertex * 3 + 1]).toBeCloseTo(0.1, 5);
+        near(vectorAt(top.normals, vertex), [0, 1, 0], 3);
+      }
+    });
+
+    it("shades the post's side smoothly across the two lines where the colours meet", () => {
+      let sideVertices = 0;
+      const seam = new Map<string, number[][]>();
+      surfaces(0).forEach((surface, part) => {
+        for (let vertex = 0; vertex < surface.vertexCount; vertex += 1) {
+          const [x, y, z] = vectorAt(surface.vertices, vertex);
+          const normal = vectorAt(surface.normals, vertex);
+          if (Math.abs(normal[1]) > 0.5) continue;
+          sideVertices += 1;
+          // Straight out from the axis, in the red part and in the blue part alike.
+          near(normal, [x / Math.hypot(x, z), 0, z / Math.hypot(x, z)], 3);
+          // Godot's default compression rounds positions within each surface's own box, so the
+          // same point is a few thousandths of a millimetre apart in the two surfaces.
+          if (Math.abs(z) < 1e-4) {
+            const key = `${Math.sign(x)},${y > 0.2 ? "top" : "bottom"}`;
+            seam.set(key, [...(seam.get(key) ?? []), [part, ...normal]]);
+          }
+        }
+        for (let triangle = 0; triangle < surface.triangleCount; triangle += 1) {
+          const outward = facing(surface, triangle);
+          for (let k = 0; k < 3; k += 1) expect(dot(vectorAt(surface.normals, surface.indices[triangle * 3 + k]!), outward)).toBeGreaterThan(0.99);
+        }
+      });
+      // One vertex per ring point, and the four on the two lines once more for the second colour.
+      expect(sideVertices).toBe(2 * SEGMENTS + 4);
+      // Each of those four is in both surfaces, with the same normal in each.
+      expect([...seam.keys()].sort()).toEqual(["-1,bottom", "-1,top", "1,bottom", "1,top"]);
+      for (const copies of seam.values()) {
+        expect(copies.map((copy) => copy[0]).sort()).toEqual([0, 1]);
+        near(copies[0]!.slice(1), copies[1]!.slice(1), 3);
+      }
     });
   });
 

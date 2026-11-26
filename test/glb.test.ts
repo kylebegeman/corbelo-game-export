@@ -2,7 +2,7 @@ import { validateBytes } from "gltf-validator";
 import { describe, expect, it } from "vitest";
 import { BinaryBuilder, encodeGlb } from "../src/glb-write.js";
 import { exportGameGlb, GameExportError, readAccessor, readGlb, readPack } from "../src/index.js";
-import { box, chamferedBlock, cylinder, MM_Z_UP } from "./fixtures.js";
+import { box, chamferedBlock, cylinder, halfPaintedSide, MM_Z_UP, paintedTop } from "./fixtures.js";
 
 const block = chamferedBlock([1000, 500, 250], 20);
 
@@ -59,6 +59,15 @@ describe("GLB file", () => {
         profile: "unreal5",
       }),
       exportGameGlb({ bodies: [{ name: "mirror", positions: block.positions }], source: { unit: 0.01, up: "Z", handedness: "left" }, pivot: "min-corner" }),
+      // Bodies in several colours, so several primitives to a mesh.
+      exportGameGlb({
+        bodies: [
+          { name: "painted", positions: box([0, 0, 0], [100, 100, 100]).positions, color: "#2980ba", faceColors: paintedTop("#c0392b") },
+          { name: "striped", positions: cylinder(150, 400, 48).positions, faceIds: cylinder(150, 400, 48).faceIds, color: "#c0392b", faceColors: halfPaintedSide(48, "#00ff00") },
+        ],
+        source: MM_Z_UP,
+        placement: "assembly",
+      }),
     ];
     for (const { glb } of files) {
       const report = await validateBytes(glb);

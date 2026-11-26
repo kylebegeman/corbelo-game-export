@@ -34,7 +34,16 @@ def inspect(path):
             facing = (corners[1] - corners[0]).cross(corners[2] - corners[0])
             middle = (corners[0] + corners[1] + corners[2]) / 3
             normals = [list(rotation @ mesh.corner_normals[loop].vector) for loop in triangle.loops]
-            triangles.append({"facing": list(facing), "middle": list(middle), "normals": normals})
+            triangles.append(
+                {
+                    "facing": list(facing),
+                    "middle": list(middle),
+                    "corners": [list(corner) for corner in corners],
+                    "normals": normals,
+                    # The material slot of the object this triangle is drawn with.
+                    "material": triangle.material_index,
+                }
+            )
         materials = []
         for material in mesh.materials:
             shader = next((node for node in material.node_tree.nodes if node.type == "BSDF_PRINCIPLED"), None)

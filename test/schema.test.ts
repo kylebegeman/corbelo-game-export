@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { ENGINE_PROFILES, EXTRAS_KEY, exportGameGlb, readGlb, type ExportInput } from "../src/index.js";
-import { box, chamferedBlock, cylinder, MM_Z_UP } from "./fixtures.js";
+import { box, chamferedBlock, cylinder, halfPaintedSide, MM_Z_UP, paintedTop } from "./fixtures.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const schema = JSON.parse(readFileSync(join(root, "schema/pack.schema.json"), "utf8")) as Record<string, unknown>;
@@ -27,6 +27,13 @@ const cases: Record<string, ExportInput> = {
   "face ids, face-weighted normals and Unreal": { bodies: [{ name: "Post", positions: round.positions, faceIds: round.faceIds }], source: MM_Z_UP, profile: "unreal5", normals: "face-weighted", creaseAngle: 45 },
   "two bodies as designed, with provenance": { bodies: pair, source: MM_Z_UP, placement: "designed", provenance: { part: "p1", revision: 3, tags: ["a", null] } },
   "an assembly with a point pivot, inches, Y up and left-handed": { bodies: pair, source: { unit: 0.0254, up: "Y", handedness: "left" }, placement: "assembly", pivot: [1, 2, 3], profile: "unity6" },
+  "a body in two colours": { bodies: [{ name: "Post", positions: round.positions, faceIds: round.faceIds, color: "#2980ba", faceColors: halfPaintedSide(24, "#c0392b") }], source: MM_Z_UP },
+  "an assembly of a painted body and a plain one that share a colour": {
+    bodies: [{ ...pair[0]!, faceColors: paintedTop("#2980ba"), materialName: "Plate" }, { name: "Top Cap", positions: pair[1]!.positions, color: "#2980ba" }],
+    source: MM_Z_UP,
+    placement: "assembly",
+    profile: "unreal5",
+  },
   "a profile of the caller's own": {
     bodies: pair,
     source: MM_Z_UP,
@@ -56,5 +63,21 @@ describe("schema/pack.schema.json", () => {
     const body = (facts["bodies"] as Record<string, unknown>[])[0]!;
     expect(validFacts({ ...facts, bodies: [{ ...body, triangles: 0 }] })).toBe(false);
     expect(validFacts({ ...facts, bodies: [{ ...body, collision: "box" }] })).toBe(false);
+  });
+
+  it("knows the slots of a body in several colours, and refuses slots it cannot be", () => {
+    const facts = JSON.parse(JSON.stringify(exportGameGlb(cases["a body in two colours"]!).facts)) as Record<string, unknown>;
+    const body = (facts["bodies"] as Record<string, unknown>[])[0]!;
+    expect(body["slots"]).toHaveLength(2);
+    expect(validFacts(facts)).toBe(true);
+    const slots = body["slots"] as Record<string, unknown>[];
+    const withSlots = (changed: unknown) => validFacts({ ...facts, bodies: [{ ...body, slots: changed }] });
+    // One slot is a body in one colour, which has no list of slots.
+    expect(withSlots([slots[0]])).toBe(false);
+    expect(withSlots([slots[0], { ...slots[1], triangles: 0 }])).toBe(false);
+    expect(withSlots([slots[0], { ...slots[1], color: "#c0392b" }])).toBe(false);
+    expect(withSlots([slots[0], { material: "color_c0392b" }])).toBe(false);
+    // A body in one colour is written without the list.
+    expect(exportGameGlb(cases["the defaults"]!).facts.bodies[0]).not.toHaveProperty("slots");
   });
 });

@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { exportGameGlb, type ExportResult } from "../src/index.js";
-import { box, chamferedBlock, cylinder, MM_Z_UP } from "./fixtures.js";
+import { box, chamferedBlock, cylinder, halfPaintedSide, MM_Z_UP, paintedTop } from "./fixtures.js";
 
 const BLENDER = process.env["BLENDER"] ?? "blender";
 const BEGIN = "CORBELO_GAME_EXPORT_JSON_BEGIN";
@@ -22,7 +22,11 @@ const SEGMENTS = 48;
 interface BlenderTriangle {
   facing: number[];
   middle: number[];
+  /** Where the three corners are, and the normal at each. */
+  corners: number[][];
   normals: number[][];
+  /** Which of the object's materials the triangle has. */
+  material: number;
 }
 
 interface BlenderNode {
@@ -88,6 +92,13 @@ describe.skipIf(version === null)("Blender glTF import", () => {
       ],
       source: MM_Z_UP,
       placement: "designed",
+    });
+    exports["painted.glb"] = exportGameGlb({
+      bodies: [
+        { name: "Striped Post", positions: round.positions, faceIds: round.faceIds, color: "#2980ba", faceColors: halfPaintedSide(SEGMENTS, "#c0392b") },
+        { name: "Painted Box", positions: box([0, 0, 0], [200, 300, 100]).positions, color: "#2980ba", faceColors: paintedTop("#c0392b") },
+      ],
+      source: MM_Z_UP,
     });
 
     folder = mkdtempSync(join(tmpdir(), "corbelo-game-export-blender-"));
@@ -202,10 +213,69 @@ describe.skipIf(version === null)("Blender glTF import", () => {
       for (const body of result.facts.bodies) {
         const node = files[name]!.nodes.find((candidate) => candidate.name === body.name)!;
         expect(node.materials.map((material) => material.name)).toEqual(body.materials);
-        const written = result.facts.materials.find((material) => material.name === body.materials[0])!;
-        near(node.materials[0]!.baseColor!, written.baseColorFactor, 4);
-        expect(node.materials[0]!.metallic).toBeCloseTo(0, 4);
+        node.materials.forEach((material, slot) => {
+          const written = result.facts.materials.find((candidate) => candidate.name === body.materials[slot])!;
+          near(material.baseColor!, written.baseColorFactor, 4);
+          expect(material.metallic).toBeCloseTo(0, 4);
+        });
       }
     }
+  });
+
+  describe("two bodies with colours on their faces", () => {
+    const node = (name: string) => files["painted.glb"]!.nodes.find((candidate) => candidate.name === name)!;
+    const body = (name: string) => exports["painted.glb"]!.facts.bodies.find((candidate) => candidate.name === name)!;
+
+    it("is one object per body, with a material slot for each colour", () => {
+      expect(files["painted.glb"]!.nodes.map((entry) => entry.name).sort()).toEqual(["Painted_Box", "Striped_Post"]);
+      expect(node("Striped_Post").materials.map((material) => material.name)).toEqual(["color_c0392b", "color_2980ba"]);
+      expect(node("Painted_Box").materials.map((material) => material.name)).toEqual(["color_2980ba", "color_c0392b"]);
+      // The red of the post and the red of the box are one material in the file, and one in Blender.
+      expect(exports["painted.glb"]!.facts.total.materialSlots).toBe(2);
+    });
+
+    it("has the triangles the facts state in each slot", () => {
+      for (const name of ["Striped_Post", "Painted_Box"]) {
+        const counts = node(name).materials.map((_, slot) => node(name).triangles.filter((triangle) => triangle.material === slot).length);
+        expect(counts).toEqual(body(name).slots!.map((slot) => slot.triangles));
+        expect(node(name).triangleCount).toBe(body(name).triangles);
+      }
+      expect(body("Striped_Post").slots!.map((slot) => slot.triangles)).toEqual([SEGMENTS, 3 * SEGMENTS]);
+    });
+
+    it("has the red on the right triangles: half the post's side and the box's top", () => {
+      // The painted half of the side is towards source +Y, which is +Y in Blender too.
+      for (const triangle of node("Striped_Post").triangles.filter((entry) => entry.material === 0)) {
+        expect(triangle.middle[1]).toBeGreaterThan(0);
+        expect(Math.abs(triangle.facing[2]! / Math.hypot(...triangle.facing))).toBeLessThan(0.001);
+      }
+      const top = node("Painted_Box").triangles.filter((entry) => entry.material === 1);
+      expect(top).toHaveLength(2);
+      for (const triangle of top) {
+        expect(triangle.middle[2]).toBeCloseTo(0.1, 5);
+        for (const normal of triangle.normals) near(normal, [0, 0, 1], 4);
+      }
+    });
+
+    it("keeps the post's side smooth across the two lines where the colours meet", () => {
+      const post = node("Striped_Post");
+      const side = post.triangles.filter((triangle) => Math.abs(triangle.facing[2]! / Math.hypot(...triangle.facing)) < 0.001);
+      expect(side).toHaveLength(SEGMENTS * 2);
+      expect(new Set(side.map((triangle) => triangle.material))).toEqual(new Set([0, 1]));
+      for (const triangle of side) {
+        const outwards = [triangle.middle[0]! - post.centre[0]!, triangle.middle[1]! - post.centre[1]!, 0];
+        expect(dot(triangle.facing, outwards)).toBeGreaterThan(0);
+        triangle.normals.forEach((normal, at) => {
+          // Every corner normal points straight away from the axis at its own corner, not along
+          // its flat triangle. A corner on one of the two lines has that normal in both colours.
+          const [x, y] = [triangle.corners[at]![0]! - post.centre[0]!, triangle.corners[at]![1]! - post.centre[1]!];
+          near(normal, [x / Math.hypot(x, y), y / Math.hypot(x, y), 0], 4);
+        });
+      }
+      // The corners on the two lines, where source y is 0: each line has a red and a blue triangle at it.
+      const onLine = side.filter((triangle) => triangle.corners.some((corner) => Math.abs(corner[1]! - post.centre[1]!) < 1e-6));
+      expect(new Set(onLine.map((triangle) => triangle.material))).toEqual(new Set([0, 1]));
+      expect(onLine).toHaveLength(8);
+    });
   });
 });

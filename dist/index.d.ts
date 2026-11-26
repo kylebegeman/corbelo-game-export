@@ -1,11 +1,11 @@
 export { GameExportError, type GameExportErrorCode } from "./errors.js";
 export { DEFAULT_CREASE_ANGLE, DEFAULT_MAX_TRIANGLES, DEFAULT_WELD_TOLERANCE, exportGameGlb } from "./export.js";
-export { readAccessor, readGlb, readPack, type AccessorArray, type GlbDocument, type PackBody, type PackContents } from "./glb-read.js";
+export { readAccessor, readGlb, readPack, type AccessorArray, type GlbDocument, type PackBody, type PackContents, type PackMaterial, type PackSurface } from "./glb-read.js";
 export { EXTRAS_KEY, type GltfJson } from "./gltf.js";
 export { DEFAULT_COLOR } from "./materials.js";
 export { DEGENERATE_AREA_RATIO, FLAT_FACE_ANGLE_DEGREES } from "./mesh.js";
 export { nodeNames } from "./names.js";
 export { DEFAULT_PROFILE, ENGINE_PROFILES, resolveProfile, type EngineProfile, type EngineProfileId, type NodeNameConvention, type NodeRole, } from "./profiles.js";
 export { readStl, type StlMesh } from "./stl.js";
-export type { BodyFacts, BodyInput, Box, ColorInput, ExportInput, ExportOptions, ExportResult, JsonValue, MaterialFacts, MeasuredBox, NormalMode, PackExtras, PackFacts, PivotFacts, PivotMode, PivotOption, Placement, SourceSpace, TotalFacts, Vec3, } from "./types.js";
+export type { BodyFacts, BodyInput, Box, ColorInput, ExportInput, ExportOptions, ExportResult, JsonValue, MaterialFacts, MeasuredBox, NormalMode, PackExtras, PackFacts, PivotFacts, PivotMode, PivotOption, Placement, SlotFacts, SourceSpace, TotalFacts, Vec3, } from "./types.js";
 export { GENERATOR, VERSION } from "./version.js";

@@ -14,22 +14,37 @@ export declare function readGlb(glb: Uint8Array): GlbDocument;
  * Handles byte offsets and interleaved views. Sparse accessors and external buffers are refused.
  */
 export declare function readAccessor(document: GlbDocument, index: number): AccessorArray;
+export interface PackMaterial {
+    name: string;
+    baseColorFactor: [number, number, number, number];
+    metallicFactor: number;
+    roughnessFactor: number;
+}
+/** One primitive of a body's mesh: the triangles that share a material. */
+export interface PackSurface {
+    material: PackMaterial | null;
+    /** Where its vertices start in the body's `positions` and `normals`. */
+    firstVertex: number;
+    vertices: number;
+    /** Where its triangles start in the body's `indices`. */
+    firstTriangle: number;
+    triangles: number;
+}
 export interface PackBody {
     /** Node name. */
     name: string;
     /** Node translation in metres. */
     translation: Vec3;
-    /** x, y, z per vertex, relative to the node. */
+    /** x, y, z per vertex, relative to the node: every surface's vertices, one surface after another. */
     positions: Float32Array;
+    /** One per vertex. Empty when a primitive of the mesh has none. */
     normals: Float32Array;
-    /** Three vertex numbers per triangle. */
+    /** Three vertex numbers per triangle, counted in `positions`: every surface's triangles, in the same order. */
     indices: Uint32Array;
-    material: {
-        name: string;
-        baseColorFactor: [number, number, number, number];
-        metallicFactor: number;
-        roughnessFactor: number;
-    } | null;
+    /** The material of the first surface. A body with several colours has one for each: see `surfaces`. */
+    material: PackMaterial | null;
+    /** One per primitive of the mesh, in the file's order. A body has one for each of its colours. */
+    surfaces: PackSurface[];
 }
 export interface PackContents {
     generator: string | null;
@@ -41,6 +56,7 @@ export interface PackContents {
 }
 /**
  * Reads a GLB written by this package back into plain arrays: one entry per mesh node of the
- * scene, plus the facts, profile and provenance from the scene extras.
+ * scene, with every primitive of its mesh, plus the facts, profile and provenance from the
+ * scene extras.
  */
 export declare function readPack(glb: Uint8Array | GlbDocument): PackContents;

@@ -130,6 +130,24 @@ export function cylinder(radius: number, height: number, segments: number): Shap
   return shape.build();
 }
 
+/**
+ * Face colours for `cylinder(radius, height, segments)`: `color` on the side for the first half
+ * of the way round, and nothing, so the body's own colour, on the other half and on both ends.
+ * The two colours meet along two straight lines down the smooth side.
+ */
+export function halfPaintedSide(segments: number, color: string): (string | null)[] {
+  // The cylinder's triangles come four to a segment: two of the side, one of the top, one of the bottom.
+  return Array.from({ length: segments * 4 }, (_, triangle) => (triangle % 4 < 2 && Math.floor(triangle / 4) < segments / 2 ? color : null));
+}
+
+/**
+ * Face colours for `box(min, max)`: `color` on the two triangles of the face at the high end of
+ * the third axis, which is the top of a Z-up box, and nothing on the other five faces.
+ */
+export function paintedTop(color: string): (string | null)[] {
+  return Array.from({ length: 12 }, (_, triangle) => (triangle >= 10 ? color : null));
+}
+
 /** Two triangles sharing an edge along X, folded so their normals are `degrees` apart. */
 export function fold(degrees: number): Shape {
   const shape = new ShapeBuilder();

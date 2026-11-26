@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENGINE_PROFILES, exportGameGlb, EXTRAS_KEY, GENERATOR, readGlb, readPack, type PackBody, type PackExtras } from "../src/index.js";
-import { box, chamferedBlock, cylinder, MM_Z_UP } from "./fixtures.js";
+import { box, chamferedBlock, cylinder, halfPaintedSide, MM_Z_UP, paintedTop } from "./fixtures.js";
 
 const block = chamferedBlock([1000, 500, 250], 20);
 
@@ -53,6 +53,15 @@ describe("facts", () => {
         placement: "designed",
         pivot: "center",
       }),
+      // Bodies in several colours: a painted box beside a cylinder whose side is in two colours.
+      exportGameGlb({
+        bodies: [
+          { name: "painted", positions: box([0, 0, 0], [100, 100, 100]).positions, color: "#2980ba", faceColors: paintedTop("#c0392b") },
+          { name: "striped", positions: cylinder(150, 400, 48).positions, faceIds: cylinder(150, 400, 48).faceIds, color: "#c0392b", faceColors: halfPaintedSide(48, "#00ff00") },
+        ],
+        source: MM_Z_UP,
+        placement: "assembly",
+      }),
     ];
     for (const { glb, facts } of cases) {
       const pack = readPack(glb);
@@ -63,7 +72,20 @@ describe("facts", () => {
         expect(stated).toMatchObject({ triangles: measured.triangles, vertices: measured.vertices, openEdges: measured.openEdges, nonManifoldEdges: measured.nonManifoldEdges });
         expect(stated.bounds.meters.min).toEqual(measured.min);
         expect(stated.bounds.meters.max).toEqual(measured.max);
+        // The material slots are the primitives the file holds, each with its own counts.
+        expect(stated.materialSlots).toBe(body.surfaces.length);
+        expect(stated.materials).toEqual(body.surfaces.map((surface) => surface.material!.name));
+        const slots = body.surfaces.map((surface) => ({ material: surface.material!.name, triangles: surface.triangles, vertices: surface.vertices }));
+        if (slots.length > 1) expect(stated.slots).toEqual(slots);
+        else expect(stated).not.toHaveProperty("slots");
       });
+      // Every material written is used, and the file has as many as the facts count.
+      const { json } = readGlb(glb);
+      const used = new Set(json.meshes!.flatMap((mesh) => mesh.primitives.map((primitive) => primitive.material)));
+      expect(used.size).toBe(json.materials!.length);
+      expect(facts.total.materialSlots).toBe(json.materials!.length);
+      expect(facts.materials.map((material) => material.name)).toEqual(json.materials!.map((material) => material.name));
+      for (const material of facts.materials) expect(material.bodies).toBe(facts.bodies.filter((body) => body.materials.includes(material.name)).length);
     }
   });
 

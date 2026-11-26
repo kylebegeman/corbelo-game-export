@@ -21,10 +21,16 @@ export interface BodyInput {
   indices?: ArrayLike<number>;
   /** Defaults to a light grey. */
   color?: ColorInput;
-  /** Names the material. Without it the name comes from the colour. */
+  /** Names the material of the body's own colour. Without it the name comes from the colour. */
   materialName?: string;
   /** One whole number per triangle, naming the exact CAD face the triangle came from. */
   faceIds?: ArrayLike<number>;
+  /**
+   * One entry per triangle: the colour of that triangle, or `null` or `undefined` for the body's
+   * own colour. A body with more than one colour is written as one mesh with a primitive, and so
+   * a material slot, for each colour.
+   */
+  faceColors?: readonly (ColorInput | null | undefined)[];
 }
 
 /** The space the bodies were authored in. */
@@ -120,11 +126,17 @@ export interface BodyFacts {
   /** Index of the mesh in the glTF `meshes` array. */
   mesh: number;
   triangles: number;
-  /** Vertices written, after splitting along hard edges. */
+  /** Vertices written, after splitting along hard edges and between colours. */
   vertices: number;
+  /** Primitives of the mesh: one for each colour the written triangles have. */
   materialSlots: number;
   /** Material names, one per slot. */
   materials: string[];
+  /**
+   * Only for a body with more than one material slot: what each slot holds, in slot order. The
+   * triangles add up to `triangles` and the vertices to `vertices`.
+   */
+  slots?: SlotFacts[];
   degenerateTrianglesDropped: number;
   /** Edges used by exactly one triangle. Zero for a closed body. */
   openEdges: number;
@@ -139,13 +151,21 @@ export interface BodyFacts {
   translation: Vec3;
 }
 
+/** One material slot of a body: one primitive of its mesh. */
+export interface SlotFacts {
+  /** Material name. */
+  material: string;
+  triangles: number;
+  vertices: number;
+}
+
 export interface MaterialFacts {
   name: string;
   /** sRGB, `"#rrggbb"`. */
   color: string;
   /** Linear, as written to the file. */
   baseColorFactor: [number, number, number, number];
-  /** How many bodies use it. */
+  /** How many bodies have a triangle in it. */
   bodies: number;
 }
 

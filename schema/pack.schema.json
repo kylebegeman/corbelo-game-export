@@ -147,20 +147,30 @@
           "minimum": 1
         },
         "vertices": {
-          "description": "Vertices written, after splitting along hard edges.",
+          "description": "Vertices written, after splitting along hard edges and between colours.",
           "type": "integer",
           "minimum": 3
         },
         "materialSlots": {
+          "description": "Primitives of the mesh: one for each colour the written triangles have.",
           "type": "integer",
           "minimum": 1
         },
         "materials": {
+          "description": "Material names, one per slot.",
           "type": "array",
           "items": {
             "type": "string"
           },
           "minItems": 1
+        },
+        "slots": {
+          "description": "Only for a body with more than one material slot: what each slot holds, in slot order. The triangles add up to the body's triangles and the vertices to its vertices.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SlotFacts"
+          },
+          "minItems": 2
         },
         "degenerateTrianglesDropped": {
           "type": "integer",
@@ -187,6 +197,30 @@
         },
         "translation": {
           "$ref": "#/$defs/Vec3"
+        }
+      }
+    },
+    "SlotFacts": {
+      "description": "One material slot of a body: one primitive of its mesh.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "material",
+        "triangles",
+        "vertices"
+      ],
+      "properties": {
+        "material": {
+          "description": "Material name.",
+          "type": "string"
+        },
+        "triangles": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "vertices": {
+          "type": "integer",
+          "minimum": 3
         }
       }
     },
@@ -220,6 +254,7 @@
           "maxItems": 4
         },
         "bodies": {
+          "description": "How many bodies have a triangle in it.",
           "type": "integer",
           "minimum": 1
         }
@@ -252,6 +287,7 @@
           "minimum": 3
         },
         "materialSlots": {
+          "description": "Distinct materials in the file.",
           "type": "integer",
           "minimum": 1
         },

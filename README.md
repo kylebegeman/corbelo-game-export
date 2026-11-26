@@ -2,22 +2,22 @@
 
 Turns exact CAD bodies into one game-engine-ready GLB file, plus a set of facts computed from the geometry that was written.
 
-It takes triangles as a CAD kernel tessellates them (often triangle soup, in millimetres, with Z up) and writes a glTF 2.0 binary that a game engine imports cleanly: metres, Y up, welded and indexed, with hard and soft edges in the right places, sensible pivots, one named node per body and one material per colour.
+It takes triangles as a CAD kernel tessellates them (often triangle soup, in millimetres, with Z up) and writes a glTF 2.0 binary that a game engine imports cleanly: metres, Y up, welded and indexed, with hard and soft edges in the right places, sensible pivots, one named node per body and one material per colour. A body may have one colour or a colour on each of its faces.
 
-It is used by Corbelo and Corbelo Studio. It has no runtime dependencies, runs in Node 22 or later and in browsers, and bundles to about 24 kB minified (under 10 kB gzipped).
+It is used by Corbelo and Corbelo Studio. It has no runtime dependencies, runs in Node 22 or later and in browsers, and bundles to about 28 kB minified (about 11 kB gzipped).
 
 ## Install
 
 The built `dist/` folder is committed, so the package installs straight from a git tag with no build step:
 
 ```sh
-npm install github:kylebegeman/corbelo-game-export#v0.1.1
+npm install github:kylebegeman/corbelo-game-export#v0.1.2
 ```
 
 Where the build machine has no `git` program, install the tag's tarball instead. The lock file then holds a plain HTTPS address and a checksum:
 
 ```sh
-npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.1.tar.gz
+npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.2.tar.gz
 ```
 
 ## Use
@@ -46,8 +46,9 @@ const { glb, facts } = exportGameGlb({
 | `positions` | Required. `x, y, z` per vertex, as a `Float32Array` or any array of numbers. |
 | `indices` | Optional. Three vertex numbers per triangle. Without it, every three vertices make one triangle. |
 | `color` | Optional. `"#rrggbb"`, `"#rgb"` or `[r, g, b]` with channels from 0 to 1. Default `#cccccc`. |
-| `materialName` | Optional. Names the material. Without it the name comes from the colour. |
+| `materialName` | Optional. Names the material of the body's own colour. Without it the name comes from the colour. |
 | `faceIds` | Optional. One whole number per triangle saying which exact CAD face it came from. |
+| `faceColors` | Optional. One entry per triangle: that triangle's colour, written like `color`, or `null` or `undefined` for the body's own colour. See [Bodies with several colours](#bodies-with-several-colours). |
 
 ### Source space
 
@@ -75,7 +76,8 @@ const { glb, facts } = exportGameGlb({
 
 - Valid glTF 2.0: metres, +Y up, right-handed, counter-clockwise front faces. The test suite runs the Khronos glTF validator over the output and expects no errors and no warnings. The validator leaves one note per mesh, that no texture uses the tangents; see [why there are tangents](#why-there-are-tangents).
 - One node per body, with one mesh each, all direct children of one scene.
-- Indexed triangles with `POSITION`, `NORMAL` and `TANGENT`. Indices are 16-bit when a body has at most 65,535 vertices, otherwise 32-bit.
+- One primitive per mesh for a body in one colour. A body with several colours has one primitive for each colour, which an engine shows as one mesh with a surface or material slot for each.
+- Indexed triangles with `POSITION`, `NORMAL` and `TANGENT`. Indices are 16-bit when a primitive has at most 65,535 vertices, otherwise 32-bit.
 - One material per distinct colour, shared between bodies: `baseColorFactor` in linear light, `metallicFactor` 0, `roughnessFactor` 0.8.
 - `asset.generator` is `corbelo-game-export <version>`.
 - `scenes[0].extras.corbeloGameExport` holds `{ schema, profile, facts, provenance }`.
@@ -130,6 +132,30 @@ Game engines read some names as instructions. Godot turns a mesh named `wall-col
 
 Colours are rounded to 8 bits per channel in sRGB, so `"#ff0000"`, `"#F00"` and `[1, 0, 0]` are one material. A material is named `color_rrggbb` unless you give a `materialName`. Using one material name with two different colours is refused.
 
+The file holds each material once. Every body and every face of that colour uses the same one, whichever body it belongs to. Materials are listed in the order they are first used: body by body, and inside a body in the order of its primitives.
+
+### Bodies with several colours
+
+`faceColors` gives a body a colour per triangle. It is a list with exactly one entry for each triangle of the input, in the input's order: a colour written like `color`, or `null` or `undefined` for the body's own colour.
+
+```ts
+exportGameGlb({
+  bodies: [{ name: "Crate", positions, color: "#2980ba", faceColors: ["#c0392b", "#c0392b", null, null /* one per triangle */] }],
+  source: { unit: 0.001, up: "Z" },
+});
+```
+
+The body is still one node and one mesh. Its triangles are divided into one primitive per colour, each with its own material, its own vertices and its own indices. Godot imports that as one mesh with a surface per colour and Blender as one object with a material slot per colour, and the tests check both. This is the usual way a glTF file gives one mesh several materials, so other importers are expected to read it as submeshes or material slots too, but Unity and Unreal have not been tested with the engines themselves.
+
+- Primitives come in the order their first triangle comes in the input. Inside a primitive the triangles keep their input order.
+- A colour that is the body's own colour, however it is spelled, is the body's own material. A body never has two materials of one colour, and a body whose face colours all come to one colour is written exactly as a body without `faceColors`.
+- `materialName` names the material of the body's own colour. Every other colour is named after itself, `color_rrggbb`.
+- A material is in the file only when a written triangle uses it. If every triangle of a colour is dropped as degenerate, or the body's own colour is painted over everywhere, there is no material for that colour.
+
+**At a border between two colours.** Welding, dropped triangles, hard and soft edges and normals are all worked out on the whole body before it is divided, so colours change nothing about its shape or its shading. A vertex on the border is written once for each colour that touches it, with the same position, the same normal and the same tangent in each. A soft edge between two colours therefore still shades smoothly, and a hard edge is still hard. The body's `vertices` in the facts is the number written, so it grows by those extra copies. `openEdges` and `nonManifoldEdges` are counted on the whole body: a closed body is closed however it is coloured.
+
+Each colour of a body is a separate draw call in an engine, so a body with very many colours costs more to draw than its triangles suggest.
+
 ## Facts
 
 Facts are measured from the geometry that was written, not from the input. A shortened example for one 1000 x 500 x 250 mm box, modelled Z-up in millimetres and exported with the `unreal5` profile:
@@ -137,7 +163,7 @@ Facts are measured from the geometry that was written, not from the input. A sho
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.1",
+  "generator": "corbelo-game-export 0.1.2",
   "profile": "unreal5",
   "engine": { "unit": "cm", "unitMeters": 0.01, "up": "Z" },
   "source": { "unit": 0.001, "up": "Z", "handedness": "right" },
@@ -169,7 +195,9 @@ Facts are measured from the geometry that was written, not from the input. A sho
 }
 ```
 
-- `vertices` is the count after splitting along hard edges, which is what an engine reports.
+- `vertices` is the count after splitting along hard edges and between colours, which is what an engine reports.
+- `materialSlots` is the number of primitives the body's mesh has, one for each colour its written triangles have, and `materials` names them in order. A body with more than one also has `slots`, which gives the triangles and vertices of each: `"slots": [{ "material": "color_2980ba", "triangles": 10, "vertices": 20 }, { "material": "color_c0392b", "triangles": 2, "vertices": 4 }]`. A body in one colour has no `slots`, because its one slot holds everything the body has.
+- In the `materials` list, `bodies` counts the bodies with at least one triangle in that material. `total.materialSlots` is the number of materials in the file.
 - `openEdges` counts edges used by one triangle only. It is 0 for a closed body. `nonManifoldEdges` counts edges used by more than two.
 - `bounds` is where the body sits in the scene. `localBounds` is the vertex data as stored, relative to the pivot. They are the same when `placement` is `"origin"`.
 - Every box and pivot is given twice. `meters` is glTF space: metres, +Y up. `engine` is the same thing in the profile's unit, with the up value moved to the profile's up axis. For a Z-up profile that means glTF `(x, y, z)` is reported as `(x, z, y)`. It describes sizes and heights. It is not a promise about which way an engine's importer turns the model around the up axis.
@@ -177,7 +205,7 @@ Facts are measured from the geometry that was written, not from the input. A sho
 
 ### A schema for the facts
 
-`schema/pack.schema.json` is a JSON Schema (draft 2020-12) for what the scene extras hold: the engine profile, the facts and the provenance. The facts on their own, which is also the facts file the command line writes, are its `#/$defs/PackFacts`, and an engine profile is `#/$defs/EngineProfile`. Every object in it refuses keys it does not name, and the test suite checks real output against it, so the schema and the code cannot drift apart unnoticed.
+`schema/pack.schema.json` is a JSON Schema (draft 2020-12) for what the scene extras hold: the engine profile, the facts and the provenance. The facts layout is still `"schema": 1`. Version 0.1.2 added `slots`, which appears only on a body with several colours, and changed the meaning of no field that was there before. The facts on their own, which is also the facts file the command line writes, are its `#/$defs/PackFacts`, and an engine profile is `#/$defs/EngineProfile`. Every object in it refuses keys it does not name, and the test suite checks real output against it, so the schema and the code cannot drift apart unnoticed.
 
 ```js
 import schema from "corbelo-game-export/schema/pack.schema.json" with { type: "json" };
@@ -214,7 +242,7 @@ const pack = readPack(glb);                 // generator, profile, facts, proven
 const stl = readStl(bytes);                 // { positions, triangles, format, name }
 ```
 
-`readPack` returns each body's name, translation, positions, normals, indices and material. The GLB reader is small on purpose. It reads the files this package writes and other plain GLB files, refuses sparse accessors and external buffers, and does not decode compressed meshes.
+`readPack` returns each body's name, translation, positions, normals, indices and material. For a body with several colours, `positions`, `normals` and `indices` hold every primitive one after another, `surfaces` says where each primitive's vertices and triangles start and which material it has, and `material` is the first one. The GLB reader is small on purpose. It reads the files this package writes and other plain GLB files, refuses sparse accessors and external buffers, and does not decode compressed meshes.
 
 `readStl` reads binary and ASCII STL. It returns triangle soup, ready to use as a body's `positions`.
 
@@ -242,6 +270,8 @@ The job file is JSON. Bodies are STL files:
 ```
 
 STL cannot say which CAD face a triangle came from. A body may name a file that does: `"faceIds": "block.faces.json"`, a JSON array with one whole number per triangle in the STL's own order. See "Normals" for what the ids change.
+
+STL cannot say what colour a triangle is either. A body may name a file for that too: `"faceColors": "block.colors.json"`, a JSON array with one entry per triangle in the STL's own order, each a colour (`"#rrggbb"`, `"#rgb"` or `[r, g, b]`) or `null` for the body's own colour. See [Bodies with several colours](#bodies-with-several-colours).
 
 Every option from the table above may appear at the top level of the job. Unknown keys are refused. Paths inside the job are relative to the job file. `--out` and `--facts` are relative to the working directory and win over the job. Without a facts path, the facts are written next to the GLB as `<name>.facts.json`.
 
@@ -275,9 +305,10 @@ Bad input is refused with a `GameExportError`. Its `code` is stable and its `mes
 | `BAD_INDICES` | Indices are not whole triangles of whole numbers. |
 | `INDEX_OUT_OF_RANGE` | An index points past the vertices, or is negative. |
 | `BAD_FACE_IDS` | `faceIds` is not exactly one whole number per triangle. |
+| `BAD_FACE_COLORS` | `faceColors` is not a list with exactly one entry per triangle. |
 | `TOO_MANY_TRIANGLES` | The bodies together hold more than `maxTriangles` triangles (2,000,000 unless changed). |
 | `BAD_NAME` | A body has no name, or an empty material name. |
-| `BAD_COLOR` | A colour cannot be read. Transparency is not supported. |
+| `BAD_COLOR` | A colour cannot be read. Transparency is not supported. For a face colour the message names the triangle. |
 | `MATERIAL_CONFLICT` | One material name is used with two colours. |
 | `BAD_SOURCE_SPACE` | `source` is missing or has a bad unit, up axis or handedness. |
 | `BAD_OPTION` | An option is outside its range, or the profile is unknown. |
@@ -290,13 +321,15 @@ Every body is checked before any is exported.
 
 ## Checked against a real engine
 
-The test suite includes a proof that runs when a `godot` 4 program is on the path (or its location is in the `GODOT` environment variable). It builds a chamfered block, a cylinder and a file with two coloured bodies, puts them in a throwaway Godot project in the system's temporary folder, and runs Godot's own editor importer on them with no window (`godot --headless --import`). A GDScript then loads the imported scenes and reports what Godot ended up with, and the test compares that with the facts: node names, mesh size in metres, normals, vertex and triangle counts, materials and colours, and pivot positions.
+The test suite includes a proof that runs when a `godot` 4 program is on the path (or its location is in the `GODOT` environment variable). It builds a chamfered block, a cylinder, a file with two coloured bodies and a file with two bodies that have colours on their faces, puts them in a throwaway Godot project in the system's temporary folder, and runs Godot's own editor importer on them with no window (`godot --headless --import`). A GDScript then loads the imported scenes and reports what Godot ended up with, and the test compares that with the facts: node names, mesh size in metres, normals, vertex and triangle counts, materials and colours, and pivot positions.
+
+For the bodies with colours on their faces it checks that each body arrives as one mesh with one surface per colour, in the order the facts list the slots, that each surface has the material, the colour and the triangle and vertex counts the facts state, that the painted triangles are the right ones, and that a cylinder whose side is half one colour and half another is still shaded round across the two lines where the colours meet.
 
 Without Godot the proof is skipped and a line on standard error says so. Set `GODOT_PROOF_LOG=1` to print what Godot reported.
 
 It has been run with Godot 4.7.2. Unity and Unreal have not been tested with the engines themselves.
 
-A second check runs when a `blender` program is on the path (or its location is in the `BLENDER` environment variable). Blender is not a game engine, but its glTF importer was written by other people, so it is a second opinion on the same files. A Python script imports the block, the cylinder and the two-body file with no window and reports what Blender holds, and the test compares that with the facts: body names, triangle counts, where each body is and how large in metres, that every triangle faces outwards, that the normals arrive as written (flat on the block's faces, smooth round the cylinder), and material names and colours. Without Blender it is skipped the same way. It has been run with Blender 5.2.2.
+A second check runs when a `blender` program is on the path (or its location is in the `BLENDER` environment variable). Blender is not a game engine, but its glTF importer was written by other people, so it is a second opinion on the same files. A Python script imports the block, the cylinder, the two-body file and the file with colours on the faces with no window and reports what Blender holds, and the test compares that with the facts: body names, triangle counts, where each body is and how large in metres, that every triangle faces outwards, that the normals arrive as written (flat on the block's faces, smooth round the cylinder), material names and colours, and for a body with several colours the number of triangles in each material slot. Without Blender it is skipped the same way. It has been run with Blender 5.2.2.
 
 ### Why there are tangents
 
@@ -310,7 +343,7 @@ With a tangent in the file Godot never makes one up. The proof imports the chamf
 
 - Opaque flat colours only. No textures, UVs or transparency.
 - Colours are stored at 8 bits per channel.
-- One mesh and one material per body.
+- One mesh per body, and one material per colour. A body's colours are per triangle: no vertex colours and no blending between them.
 - No collision shapes and no detail levels yet.
 - All bodies in one export must fit under the triangle limit together.
 - The whole file is built in memory.

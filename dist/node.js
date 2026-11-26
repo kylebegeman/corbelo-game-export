@@ -5,7 +5,7 @@ import { exportGameGlb } from "./export.js";
 import { readStl } from "./stl.js";
 import { VERSION } from "./version.js";
 const JOB_KEYS = ["bodies", "source", "profile", "pivot", "placement", "creaseAngle", "normals", "weldTolerance", "maxTriangles", "colorSpace", "provenance", "output"];
-const BODY_KEYS = ["name", "stl", "color", "materialName", "faceIds"];
+const BODY_KEYS = ["name", "stl", "color", "materialName", "faceIds", "faceColors"];
 const OUTPUT_KEYS = ["glb", "facts"];
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -23,6 +23,31 @@ function readFile(path, what) {
     catch (error) {
         return refuse("BAD_JOB", `Cannot read ${what} ${path}: ${error.code ?? error.message}.`);
     }
+}
+/**
+ * Reads the JSON array a body names under `key`: something per triangle that an STL file cannot
+ * hold. What is in the array, and how many entries it needs, is for the exporter to check.
+ */
+function readList(entry, key, base, kind) {
+    const value = entry[key];
+    if (value === undefined)
+        return undefined;
+    if (typeof value !== "string" || value === "") {
+        refuse("BAD_JOB", `Body "${entry["name"]}": "${key}" must be the path of a JSON file holding ${kind.holds}.`);
+    }
+    const path = resolve(base, value);
+    let list;
+    try {
+        list = JSON.parse(new TextDecoder().decode(readFile(path, `${kind.what} file`)));
+    }
+    catch (error) {
+        if (error instanceof GameExportError)
+            throw error;
+        refuse(kind.code, `Body "${entry["name"]}" (${path}): the ${kind.what} file is not valid JSON.`);
+    }
+    if (!Array.isArray(list))
+        refuse(kind.code, `Body "${entry["name"]}" (${path}): the ${kind.what} file must hold one JSON array of ${kind.array}.`);
+    return list;
 }
 /**
  * Runs a job file: reads its STL bodies, exports them and writes the GLB and the facts JSON.
@@ -86,25 +111,13 @@ export function runJob(jobPath, overrides = {}) {
             body.color = entry["color"];
         if (entry["materialName"] !== undefined)
             body.materialName = entry["materialName"];
-        if (entry["faceIds"] !== undefined) {
-            if (typeof entry["faceIds"] !== "string" || entry["faceIds"] === "") {
-                refuse("BAD_JOB", `Body "${entry["name"]}": "faceIds" must be the path of a JSON file holding one whole number per triangle.`);
-            }
-            const idsPath = resolve(base, entry["faceIds"]);
-            let ids;
-            try {
-                ids = JSON.parse(new TextDecoder().decode(readFile(idsPath, "face id file")));
-            }
-            catch (error) {
-                if (error instanceof GameExportError)
-                    throw error;
-                refuse("BAD_FACE_IDS", `Body "${entry["name"]}" (${idsPath}): the face id file is not valid JSON.`);
-            }
-            if (!Array.isArray(ids))
-                refuse("BAD_FACE_IDS", `Body "${entry["name"]}" (${idsPath}): the face id file must hold one JSON array of whole numbers.`);
-            // The exporter checks the count against the triangles and that each id is a whole number.
-            body.faceIds = ids;
-        }
+        // The exporter checks each list's length against the triangles, and what the entries are.
+        const faceIds = readList(entry, "faceIds", base, { what: "face id", holds: "one whole number per triangle", array: "whole numbers", code: "BAD_FACE_IDS" });
+        if (faceIds !== undefined)
+            body.faceIds = faceIds;
+        const faceColors = readList(entry, "faceColors", base, { what: "face colour", holds: "one colour, or null, per triangle", array: "colours", code: "BAD_FACE_COLORS" });
+        if (faceColors !== undefined)
+            body.faceColors = faceColors;
         return body;
     });
     const { bodies: _bodies, output: _output, ...options } = job;
@@ -130,6 +143,10 @@ The job file is JSON:
     "pivot": "base-center",
     "output": { "glb": "block.glb" }
   }
+
+A body may also name two JSON files, each an array with one entry per triangle of its
+STL: "faceIds", the exact face each triangle came from, and "faceColors", the colour of
+each triangle, or null for the body's own colour.
 
 Paths in the job are relative to the job file. --out and --facts are relative to the
 working directory and win over the job. Without a facts path, the facts go next to the

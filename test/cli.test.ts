@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readPack, VERSION, type PackFacts } from "../src/index.js";
 import { runCli, runJob } from "../src/node.js";
-import { asciiStl, binaryStl, box, chamferedBlock, cylinder } from "./fixtures.js";
+import { asciiStl, binaryStl, box, chamferedBlock, cylinder, halfPaintedSide } from "./fixtures.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let dir: string;
@@ -140,6 +140,50 @@ describe("command line", () => {
     expect(cli(writeJob("ids5.json", withIds("parts/short.json"))).err).toContain("faceIds holds 3 ids for 44 triangles");
     expect(cli(writeJob("ids6.json", withIds("parts/half.json"))).err).toContain("not a whole number");
     expect(existsSync(join(dir, "out/pack.glb"))).toBe(true);
+  });
+
+  it("reads face colours from a file beside the STL, and writes the body with a slot for each", () => {
+    const post = cylinder(100, 300, 8);
+    writeFileSync(join(dir, "parts/striped.stl"), binaryStl(post.positions));
+    writeFileSync(join(dir, "parts/striped.faces.json"), JSON.stringify(Array.from(post.faceIds)));
+    // null is the body's own colour; a colour may be spelled as a hex string or as [r, g, b].
+    const colors: unknown[] = halfPaintedSide(8, "#c0392b");
+    colors[1] = [192 / 255, 57 / 255, 43 / 255];
+    writeFileSync(join(dir, "parts/striped.colors.json"), JSON.stringify(colors));
+    const body = { name: "Post", stl: "parts/striped.stl", faceIds: "parts/striped.faces.json", color: "#2980ba" };
+    const base = { source: { unit: 0.001, up: "Z" }, output: { glb: "striped.glb" } };
+    const plain = runJob(writeJob("striped-plain.json", { ...base, bodies: [body] }));
+    const { code, out } = cli(writeJob("striped.json", { ...base, bodies: [{ ...body, faceColors: "parts/striped.colors.json" }] }));
+    expect(code).toBe(0);
+    expect(JSON.parse(out)).toMatchObject({ bodies: 1, triangles: 32, vertices: plain.report.total.vertices + 4, materialSlots: 2 });
+    const pack = readPack(readFileSync(join(dir, "striped.glb")));
+    expect(pack.bodies).toHaveLength(1);
+    expect(pack.bodies[0]!.surfaces.map((surface) => [surface.material!.name, surface.triangles])).toEqual([
+      ["color_c0392b", 8],
+      ["color_2980ba", 24],
+    ]);
+    expect(pack.facts!.bodies[0]!.slots).toEqual([
+      { material: "color_c0392b", triangles: 8, vertices: 10 },
+      { material: "color_2980ba", triangles: 24, vertices: 28 },
+    ]);
+  });
+
+  it("refuses face colours that are missing, not JSON, not a list, the wrong count or not colours", () => {
+    const refused = (file: string, faceColors: unknown): string => {
+      const { code, err } = cli(writeJob(file, { ...job, bodies: [{ name: "Block", stl: "parts/block.stl", faceColors }] }));
+      expect(code).toBe(1);
+      return err;
+    };
+    writeFileSync(join(dir, "parts/colors-broken.json"), '["#ff0000",');
+    writeFileSync(join(dir, "parts/colors-object.json"), '{"colors":["#ff0000"]}');
+    writeFileSync(join(dir, "parts/colors-short.json"), '["#ff0000", null]');
+    writeFileSync(join(dir, "parts/colors-bad.json"), JSON.stringify(Array.from({ length: 44 }, (_, at) => (at === 5 ? "crimson" : null))));
+    expect(refused("colors1.json", ["#ff0000"])).toContain('error [BAD_JOB]: Body "Block": "faceColors" must be the path of a JSON file holding one colour, or null, per triangle.');
+    expect(refused("colors2.json", "parts/none.json")).toMatch(/error \[BAD_JOB\]: Cannot read face colour file .*none\.json: ENOENT/);
+    expect(refused("colors3.json", "parts/colors-broken.json")).toMatch(/error \[BAD_FACE_COLORS\]: Body "Block" \(.*colors-broken\.json\): the face colour file is not valid JSON/);
+    expect(refused("colors4.json", "parts/colors-object.json")).toMatch(/error \[BAD_FACE_COLORS\]: .* must hold one JSON array of colours\./);
+    expect(refused("colors5.json", "parts/colors-short.json")).toContain("error [BAD_FACE_COLORS]: Body \"Block\": faceColors holds 2 entries for 44 triangles");
+    expect(refused("colors6.json", "parts/colors-bad.json")).toContain('error [BAD_COLOR]: Body "Block", triangle 5: colour "crimson"');
   });
 
   it("refuses keys it does not know, so a typing mistake is not ignored", () => {

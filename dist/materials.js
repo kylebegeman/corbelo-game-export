@@ -12,20 +12,21 @@ function linearToSrgb(value) {
 }
 /**
  * Reads a colour and returns it as sRGB bytes. Colours are kept at eight bits per channel, so
- * a material name and its colour always match one to one.
+ * a material name and its colour always match one to one. `where` starts the message of a
+ * refusal: the body, and the triangle for a face colour.
  */
-export function colorBytes(color, colorSpace, bodyName) {
+export function colorBytes(color, colorSpace, where) {
     const input = color ?? DEFAULT_COLOR;
     if (typeof input === "string") {
         const hex = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(input.trim())?.[1];
         if (hex === undefined) {
-            refuse("BAD_COLOR", `Body "${bodyName}": colour "${input}" is not "#rrggbb" or "#rgb". Transparency is not supported.`);
+            refuse("BAD_COLOR", `${where}: colour "${input}" is not "#rrggbb" or "#rgb". Transparency is not supported.`);
         }
         const full = hex.length === 3 ? [...hex].map((digit) => digit + digit).join("") : hex;
         return [0, 2, 4].map((at) => parseInt(full.slice(at, at + 2), 16));
     }
     if (!Array.isArray(input) || input.length !== 3 || !input.every((channel) => Number.isFinite(channel) && channel >= 0 && channel <= 1)) {
-        refuse("BAD_COLOR", `Body "${bodyName}": colour must be a hex string or [r, g, b] with each channel from 0 to 1.`);
+        refuse("BAD_COLOR", `${where}: colour must be a hex string or [r, g, b] with each channel from 0 to 1.`);
     }
     return input.map((channel) => Math.round((colorSpace === "linear" ? linearToSrgb(channel) : channel) * 255));
 }
@@ -33,32 +34,71 @@ function hexOf(bytes) {
     return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 /**
- * One material per distinct colour, in the order bodies first use them. A body that names its
- * material gets a material of that name; two bodies may share a name only with the same colour.
+ * Reads every colour of every body. One material per distinct colour: a body that names its
+ * material gets a material of that name for its own colour, and every other colour is named
+ * after itself. Two uses of one name must have the same colour.
+ *
+ * A face colour that is the body's own colour is the body's own material, whatever it is named,
+ * so a body never has two materials of one colour.
  */
-export function buildMaterials(bodies, colorSpace) {
-    const materials = [];
-    const slotByName = new Map();
-    const slotOfBody = bodies.map((body) => {
-        const bytes = colorBytes(body.color, colorSpace, body.name);
-        const hex = hexOf(bytes);
-        if (body.materialName !== undefined && (typeof body.materialName !== "string" || body.materialName.trim() === "")) {
-            refuse("BAD_NAME", `Body "${body.name}": materialName must be a string with at least one character.`);
-        }
-        const name = body.materialName === undefined ? `color_${hex}` : safeName(body.materialName, "material");
-        const existing = slotByName.get(name);
+export function planColors(bodies, colorSpace) {
+    const candidates = [];
+    const byName = new Map();
+    const candidate = (name, bytes, hex, bodyName) => {
+        const existing = byName.get(name);
         if (existing !== undefined) {
-            const material = materials[existing];
+            const material = candidates[existing];
             if (material.color !== `#${hex}`) {
-                refuse("MATERIAL_CONFLICT", `Material "${name}" is used with two colours, ${material.color} and #${hex} (body "${body.name}"). Give each colour its own material name.`);
+                refuse("MATERIAL_CONFLICT", `Material "${name}" is used with two colours, ${material.color} and #${hex} (body "${bodyName}"). Give each colour its own material name.`);
             }
-            material.bodies += 1;
             return existing;
         }
         const linear = bytes.map((byte) => Math.round(srgbToLinear(byte / 255) * 1e6) / 1e6);
-        materials.push({ name, color: `#${hex}`, baseColorFactor: [linear[0], linear[1], linear[2], 1], bodies: 1 });
-        slotByName.set(name, materials.length - 1);
-        return materials.length - 1;
-    });
-    return { materials, slotOfBody };
+        candidates.push({ name, color: `#${hex}`, baseColorFactor: [linear[0], linear[1], linear[2], 1], bodies: 0 });
+        byName.set(name, candidates.length - 1);
+        return candidates.length - 1;
+    };
+    const ofBody = [];
+    const ofTriangle = [];
+    for (const body of bodies) {
+        const where = `Body "${body.name}"`;
+        const bytes = colorBytes(body.color, colorSpace, where);
+        const ownHex = hexOf(bytes);
+        if (body.materialName !== undefined && (typeof body.materialName !== "string" || body.materialName.trim() === "")) {
+            refuse("BAD_NAME", `${where}: materialName must be a string with at least one character.`);
+        }
+        const own = candidate(body.materialName === undefined ? `color_${ownHex}` : safeName(body.materialName, "material"), bytes, ownHex, body.name);
+        ofBody.push(own);
+        const { faceColors } = body;
+        if (faceColors === undefined) {
+            ofTriangle.push(undefined);
+            continue;
+        }
+        const triangles = new Uint32Array(faceColors.length);
+        // Most bodies repeat a few colours over many triangles, so each spelling is read once.
+        const byText = new Map();
+        const byHex = new Map([[ownHex, own]]);
+        for (let triangle = 0; triangle < faceColors.length; triangle += 1) {
+            const entry = faceColors[triangle];
+            if (entry === undefined || entry === null) {
+                triangles[triangle] = own;
+                continue;
+            }
+            let found = typeof entry === "string" ? byText.get(entry) : undefined;
+            if (found === undefined) {
+                const faceBytes = colorBytes(entry, colorSpace, `${where}, triangle ${triangle}`);
+                const hex = hexOf(faceBytes);
+                found = byHex.get(hex);
+                if (found === undefined) {
+                    found = candidate(`color_${hex}`, faceBytes, hex, body.name);
+                    byHex.set(hex, found);
+                }
+                if (typeof entry === "string")
+                    byText.set(entry, found);
+            }
+            triangles[triangle] = found;
+        }
+        ofTriangle.push(triangles);
+    }
+    return { candidates, ofBody, ofTriangle };
 }

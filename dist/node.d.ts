@@ -11,6 +11,11 @@ export interface JobBody {
      * STL in the file's own order: the CAD face each triangle came from. STL cannot say this itself.
      */
     faceIds?: string;
+    /**
+     * Path to a JSON file, relative to the job file, holding one entry per triangle of the STL in
+     * the file's own order: the colour of that triangle, or `null` for the body's own colour.
+     */
+    faceColors?: string;
 }
 /** The JSON job file the command line reads. Options are the same as `exportGameGlb` takes. */
 export interface JobFile extends ExportOptions {

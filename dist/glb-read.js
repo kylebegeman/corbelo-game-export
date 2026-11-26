@@ -89,7 +89,8 @@ export function readAccessor(document, index) {
 }
 /**
  * Reads a GLB written by this package back into plain arrays: one entry per mesh node of the
- * scene, plus the facts, profile and provenance from the scene extras.
+ * scene, with every primitive of its mesh, plus the facts, profile and provenance from the
+ * scene extras.
  */
 export function readPack(glb) {
     const document = glb instanceof Uint8Array ? readGlb(glb) : glb;
@@ -99,18 +100,53 @@ export function readPack(glb) {
     const bodies = [];
     for (const nodeIndex of scene?.nodes ?? []) {
         const node = json.nodes?.[nodeIndex];
-        const primitive = node?.mesh === undefined ? undefined : json.meshes?.[node.mesh]?.primitives[0];
-        if (node === undefined || primitive === undefined)
+        const primitives = node?.mesh === undefined ? undefined : json.meshes?.[node.mesh]?.primitives;
+        if (node === undefined || primitives === undefined || primitives.length === 0)
             continue;
-        const position = primitive.attributes["POSITION"];
-        const normal = primitive.attributes["NORMAL"];
-        if (position === undefined)
-            refuse("BAD_GLB", `Node "${node.name ?? nodeIndex}" has a mesh without positions.`);
-        const positions = Float32Array.from(readAccessor(document, position));
-        const normals = normal === undefined ? new Float32Array(0) : Float32Array.from(readAccessor(document, normal));
-        const indices = primitive.indices === undefined ? Uint32Array.from({ length: positions.length / 3 }, (_, i) => i) : Uint32Array.from(readAccessor(document, primitive.indices));
-        const source = primitive.material === undefined ? undefined : json.materials?.[primitive.material];
-        const pbr = source?.pbrMetallicRoughness;
+        const parts = primitives.map((primitive) => {
+            const position = primitive.attributes["POSITION"];
+            const normal = primitive.attributes["NORMAL"];
+            if (position === undefined)
+                refuse("BAD_GLB", `Node "${node.name ?? nodeIndex}" has a mesh without positions.`);
+            const positions = readAccessor(document, position);
+            const source = primitive.material === undefined ? undefined : json.materials?.[primitive.material];
+            const pbr = source?.pbrMetallicRoughness;
+            const material = source === undefined
+                ? null
+                : {
+                    name: source.name ?? "",
+                    baseColorFactor: (pbr?.baseColorFactor ?? [1, 1, 1, 1]),
+                    metallicFactor: pbr?.metallicFactor ?? 1,
+                    roughnessFactor: pbr?.roughnessFactor ?? 1,
+                };
+            return {
+                positions,
+                normals: normal === undefined ? undefined : readAccessor(document, normal),
+                indices: primitive.indices === undefined ? undefined : readAccessor(document, primitive.indices),
+                material,
+            };
+        });
+        const vertexCount = parts.reduce((total, part) => total + part.positions.length / 3, 0);
+        const cornerCount = parts.reduce((total, part) => total + (part.indices?.length ?? part.positions.length / 3), 0);
+        const positions = new Float32Array(vertexCount * 3);
+        const withNormals = parts.every((part) => part.normals !== undefined);
+        const normals = new Float32Array(withNormals ? vertexCount * 3 : 0);
+        const indices = new Uint32Array(cornerCount);
+        const surfaces = [];
+        let firstVertex = 0;
+        let firstCorner = 0;
+        for (const part of parts) {
+            const vertices = part.positions.length / 3;
+            const corners = part.indices?.length ?? vertices;
+            positions.set(part.positions, firstVertex * 3);
+            if (withNormals)
+                normals.set(part.normals, firstVertex * 3);
+            for (let corner = 0; corner < corners; corner += 1)
+                indices[firstCorner + corner] = firstVertex + (part.indices?.[corner] ?? corner);
+            surfaces.push({ material: part.material, firstVertex, vertices, firstTriangle: firstCorner / 3, triangles: corners / 3 });
+            firstVertex += vertices;
+            firstCorner += corners;
+        }
         const translation = node.translation ?? [0, 0, 0];
         bodies.push({
             name: node.name ?? "",
@@ -118,14 +154,8 @@ export function readPack(glb) {
             positions,
             normals,
             indices,
-            material: source === undefined
-                ? null
-                : {
-                    name: source.name ?? "",
-                    baseColorFactor: (pbr?.baseColorFactor ?? [1, 1, 1, 1]),
-                    metallicFactor: pbr?.metallicFactor ?? 1,
-                    roughnessFactor: pbr?.roughnessFactor ?? 1,
-                },
+            material: surfaces[0].material,
+            surfaces,
         });
     }
     return {

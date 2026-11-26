@@ -216,6 +216,7 @@ export function buildMesh(points, indices, faceIds, options) {
     const faceNormal = new Float64Array(cornerCount);
     const area = new Float64Array(inputTriangles);
     const face = faceIds === undefined ? undefined : new Float64Array(inputTriangles);
+    const sourceTriangle = new Uint32Array(inputTriangles);
     let triangles = 0;
     for (let t = 0; t < inputTriangles; t += 1) {
         const a = cornerVertex[t * 3];
@@ -245,6 +246,7 @@ export function buildMesh(points, indices, faceIds, options) {
         area[triangles] = doubleArea / 2;
         if (face !== undefined)
             face[triangles] = faceIds[t];
+        sourceTriangle[triangles] = t;
         triangles += 1;
     }
     const edges = buildEdges(triangleVertex, triangles);
@@ -365,10 +367,79 @@ export function buildMesh(points, indices, faceIds, options) {
         normals,
         tangents,
         indices: outIndices,
+        sourceTriangle: sourceTriangle.subarray(0, triangles),
         vertices,
         triangles,
         degenerateTrianglesDropped: inputTriangles - triangles,
         openEdges,
         nonManifoldEdges,
     };
+}
+/**
+ * Divides a built mesh into one part per group of triangles. `groupOfTriangle` names the group
+ * of every input triangle; without it the whole mesh is one part in `onlyGroup`.
+ *
+ * Parts come in the order their first kept triangle comes. Inside a part the triangles keep
+ * their order and the vertices are numbered as the triangles first reach them, which is how the
+ * mesh itself is numbered, so a mesh in one group is one part that is the mesh unchanged.
+ *
+ * Normals were worked out on the whole mesh before this, so a vertex on the border between two
+ * parts goes into both with the same position, normal and tangent.
+ */
+export function splitMesh(mesh, groupOfTriangle, onlyGroup) {
+    const { triangles, indices, sourceTriangle } = mesh;
+    const partOfGroup = new Map();
+    const partOfTriangle = new Uint32Array(triangles);
+    const groups = [];
+    const counts = [];
+    if (groupOfTriangle !== undefined) {
+        for (let t = 0; t < triangles; t += 1) {
+            const group = groupOfTriangle[sourceTriangle[t]];
+            let part = partOfGroup.get(group);
+            if (part === undefined) {
+                part = groups.length;
+                partOfGroup.set(group, part);
+                groups.push(group);
+                counts.push(0);
+            }
+            partOfTriangle[t] = part;
+            counts[part] += 1;
+        }
+    }
+    if (groups.length <= 1)
+        return [{ group: groups[0] ?? onlyGroup, vertexOf: undefined, indices, vertices: mesh.vertices, triangles }];
+    // The triangles of each part, in order: a counting sort by part.
+    const start = new Uint32Array(groups.length + 1);
+    for (let part = 0; part < groups.length; part += 1)
+        start[part + 1] = start[part] + counts[part];
+    const next = start.slice(0, groups.length);
+    const order = new Uint32Array(triangles);
+    for (let t = 0; t < triangles; t += 1) {
+        const part = partOfTriangle[t];
+        order[next[part]] = t;
+        next[part] += 1;
+    }
+    // `seenBy[vertex]` is the last part that took the vertex, and `numberIn[vertex]` its number there.
+    const seenBy = new Int32Array(mesh.vertices).fill(-1);
+    const numberIn = new Uint32Array(mesh.vertices);
+    return groups.map((group, part) => {
+        const count = counts[part];
+        const partIndices = new Uint32Array(count * 3);
+        const vertexOf = new Uint32Array(Math.min(mesh.vertices, count * 3));
+        let vertices = 0;
+        for (let at = 0; at < count; at += 1) {
+            const t = order[start[part] + at];
+            for (let k = 0; k < 3; k += 1) {
+                const vertex = indices[t * 3 + k];
+                if (seenBy[vertex] !== part) {
+                    seenBy[vertex] = part;
+                    numberIn[vertex] = vertices;
+                    vertexOf[vertices] = vertex;
+                    vertices += 1;
+                }
+                partIndices[at * 3 + k] = numberIn[vertex];
+            }
+        }
+        return { group, vertexOf: vertexOf.subarray(0, vertices), indices: partIndices, vertices, triangles: count };
+    });
 }
