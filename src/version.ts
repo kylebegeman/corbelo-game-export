@@ -1,5 +1,5 @@
 /** Package version. A test keeps this equal to the version in package.json. */
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 
 /** Written to `asset.generator` in every GLB. */
 export const GENERATOR = `corbelo-game-export ${VERSION}`;

@@ -11,7 +11,13 @@ It is used by Corbelo and Corbelo Studio. It has no runtime dependencies, runs i
 The built `dist/` folder is committed, so the package installs straight from a git tag with no build step:
 
 ```sh
-npm install github:kylebegeman/corbelo-game-export#v0.1.0
+npm install github:kylebegeman/corbelo-game-export#v0.1.1
+```
+
+Where the build machine has no `git` program, install the tag's tarball instead. The lock file then holds a plain HTTPS address and a checksum:
+
+```sh
+npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.1.tar.gz
 ```
 
 ## Use
@@ -129,7 +135,7 @@ Facts are measured from the geometry that was written, not from the input. A sho
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.0",
+  "generator": "corbelo-game-export 0.1.1",
   "profile": "unreal5",
   "engine": { "unit": "cm", "unitMeters": 0.01, "up": "Z" },
   "source": { "unit": 0.001, "up": "Z", "handedness": "right" },
@@ -225,6 +231,8 @@ The job file is JSON. Bodies are STL files:
 }
 ```
 
+STL cannot say which CAD face a triangle came from. A body may name a file that does: `"faceIds": "block.faces.json"`, a JSON array with one whole number per triangle in the STL's own order. See "Normals" for what the ids change.
+
 Every option from the table above may appear at the top level of the job. Unknown keys are refused. Paths inside the job are relative to the job file. `--out` and `--facts` are relative to the working directory and win over the job. Without a facts path, the facts are written next to the GLB as `<name>.facts.json`.
 
 On success the command prints one line of JSON and exits with 0:
@@ -277,6 +285,8 @@ The test suite includes a proof that runs when a `godot` 4 program is on the pat
 Without Godot the proof is skipped and a line on standard error says so. Set `GODOT_PROOF_LOG=1` to print what Godot reported.
 
 It has been run with Godot 4.7.2. Unity and Unreal have not been tested with the engines themselves.
+
+A second check runs when a `blender` program is on the path (or its location is in the `BLENDER` environment variable). Blender is not a game engine, but its glTF importer was written by other people, so it is a second opinion on the same files. A Python script imports the block, the cylinder and the two-body file with no window and reports what Blender holds, and the test compares that with the facts: body names, triangle counts, where each body is and how large in metres, that every triangle faces outwards, that the normals arrive as written (flat on the block's faces, smooth round the cylinder), and material names and colours. Without Blender it is skipped the same way. It has been run with Blender 5.2.2.
 
 ### Why there are tangents
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readPack, VERSION, type PackFacts } from "../src/index.js";
 import { runCli, runJob } from "../src/node.js";
-import { asciiStl, binaryStl, box, chamferedBlock } from "./fixtures.js";
+import { asciiStl, binaryStl, box, chamferedBlock, cylinder } from "./fixtures.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let dir: string;
@@ -110,6 +110,36 @@ describe("command line", () => {
     expect(code).toBe(1);
     expect(err).toContain("error [TOO_MANY_TRIANGLES]");
     expect(existsSync(join(dir, "limit.glb"))).toBe(false);
+  });
+
+  it("reads face ids from a file beside the STL, which keeps a coarse cylinder's side smooth", () => {
+    // Eight segments: neighbouring side triangles are 45 degrees apart, past the 30 degree crease.
+    const post = cylinder(100, 300, 8);
+    writeFileSync(join(dir, "parts/post.stl"), binaryStl(post.positions));
+    writeFileSync(join(dir, "parts/post.faces.json"), JSON.stringify(Array.from(post.faceIds)));
+    const base = { source: { unit: 0.001, up: "Z" }, output: { glb: "post.glb" } };
+    const plain = runJob(writeJob("post-plain.json", { ...base, bodies: [{ name: "Post", stl: "parts/post.stl" }] }));
+    const faced = runJob(writeJob("post-faced.json", { ...base, bodies: [{ name: "Post", stl: "parts/post.stl", faceIds: "parts/post.faces.json" }] }));
+    expect(plain.report.settings.faceIds).toBe(false);
+    expect(faced.report.settings.faceIds).toBe(true);
+    expect(faced.report.total.triangles).toBe(plain.report.total.triangles);
+    // Faceted: each side quad has its own four corners. Smooth: neighbours share them.
+    expect(faced.report.total.vertices).toBeLessThan(plain.report.total.vertices);
+  });
+
+  it("refuses face ids that are missing, not JSON, not a list or the wrong count", () => {
+    const withIds = (faceIds: unknown): unknown => ({ ...job, bodies: [{ name: "Block", stl: "parts/block.stl", faceIds }] });
+    writeFileSync(join(dir, "parts/broken.json"), "[1, 2,");
+    writeFileSync(join(dir, "parts/object.json"), '{"ids":[1]}');
+    writeFileSync(join(dir, "parts/short.json"), "[1, 2, 3]");
+    writeFileSync(join(dir, "parts/half.json"), JSON.stringify(Array.from({ length: 44 }, (_, at) => at + 0.5)));
+    expect(cli(writeJob("ids1.json", withIds(7))).err).toContain('error [BAD_JOB]: Body "Block": "faceIds" must be the path of a JSON file');
+    expect(cli(writeJob("ids2.json", withIds("parts/none.json"))).err).toMatch(/error \[BAD_JOB\]: Cannot read face id file .*none\.json: ENOENT/);
+    expect(cli(writeJob("ids3.json", withIds("parts/broken.json"))).err).toMatch(/error \[BAD_FACE_IDS\]: Body "Block" \(.*broken\.json\): the face id file is not valid JSON/);
+    expect(cli(writeJob("ids4.json", withIds("parts/object.json"))).err).toContain("must hold one JSON array of whole numbers");
+    expect(cli(writeJob("ids5.json", withIds("parts/short.json"))).err).toContain("faceIds holds 3 ids for 44 triangles");
+    expect(cli(writeJob("ids6.json", withIds("parts/half.json"))).err).toContain("not a whole number");
+    expect(existsSync(join(dir, "out/pack.glb"))).toBe(true);
   });
 
   it("refuses keys it does not know, so a typing mistake is not ignored", () => {

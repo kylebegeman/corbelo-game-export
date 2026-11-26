@@ -5,7 +5,7 @@ import { exportGameGlb } from "./export.js";
 import { readStl } from "./stl.js";
 import { VERSION } from "./version.js";
 const JOB_KEYS = ["bodies", "source", "profile", "pivot", "placement", "creaseAngle", "normals", "weldTolerance", "maxTriangles", "colorSpace", "provenance", "output"];
-const BODY_KEYS = ["name", "stl", "color", "materialName"];
+const BODY_KEYS = ["name", "stl", "color", "materialName", "faceIds"];
 const OUTPUT_KEYS = ["glb", "facts"];
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -86,6 +86,25 @@ export function runJob(jobPath, overrides = {}) {
             body.color = entry["color"];
         if (entry["materialName"] !== undefined)
             body.materialName = entry["materialName"];
+        if (entry["faceIds"] !== undefined) {
+            if (typeof entry["faceIds"] !== "string" || entry["faceIds"] === "") {
+                refuse("BAD_JOB", `Body "${entry["name"]}": "faceIds" must be the path of a JSON file holding one whole number per triangle.`);
+            }
+            const idsPath = resolve(base, entry["faceIds"]);
+            let ids;
+            try {
+                ids = JSON.parse(new TextDecoder().decode(readFile(idsPath, "face id file")));
+            }
+            catch (error) {
+                if (error instanceof GameExportError)
+                    throw error;
+                refuse("BAD_FACE_IDS", `Body "${entry["name"]}" (${idsPath}): the face id file is not valid JSON.`);
+            }
+            if (!Array.isArray(ids))
+                refuse("BAD_FACE_IDS", `Body "${entry["name"]}" (${idsPath}): the face id file must hold one JSON array of whole numbers.`);
+            // The exporter checks the count against the triangles and that each id is a whole number.
+            body.faceIds = ids;
+        }
         return body;
     });
     const { bodies: _bodies, output: _output, ...options } = job;

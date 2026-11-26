@@ -13,6 +13,11 @@ export interface JobBody {
   stl: string;
   color?: ColorInput;
   materialName?: string;
+  /**
+   * Path to a JSON file, relative to the job file, holding one whole number per triangle of the
+   * STL in the file's own order: the CAD face each triangle came from. STL cannot say this itself.
+   */
+  faceIds?: string;
 }
 
 /** The JSON job file the command line reads. Options are the same as `exportGameGlb` takes. */
@@ -34,7 +39,7 @@ export interface JobResult {
 }
 
 const JOB_KEYS = ["bodies", "source", "profile", "pivot", "placement", "creaseAngle", "normals", "weldTolerance", "maxTriangles", "colorSpace", "provenance", "output"];
-const BODY_KEYS = ["name", "stl", "color", "materialName"];
+const BODY_KEYS = ["name", "stl", "color", "materialName", "faceIds"];
 const OUTPUT_KEYS = ["glb", "facts"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -105,6 +110,22 @@ export function runJob(jobPath: string, overrides: { glb?: string; facts?: strin
     const body: BodyInput = { name: entry["name"], positions };
     if (entry["color"] !== undefined) body.color = entry["color"] as ColorInput;
     if (entry["materialName"] !== undefined) body.materialName = entry["materialName"] as string;
+    if (entry["faceIds"] !== undefined) {
+      if (typeof entry["faceIds"] !== "string" || entry["faceIds"] === "") {
+        refuse("BAD_JOB", `Body "${entry["name"]}": "faceIds" must be the path of a JSON file holding one whole number per triangle.`);
+      }
+      const idsPath = resolve(base, entry["faceIds"]);
+      let ids: unknown;
+      try {
+        ids = JSON.parse(new TextDecoder().decode(readFile(idsPath, "face id file")));
+      } catch (error) {
+        if (error instanceof GameExportError) throw error;
+        refuse("BAD_FACE_IDS", `Body "${entry["name"]}" (${idsPath}): the face id file is not valid JSON.`);
+      }
+      if (!Array.isArray(ids)) refuse("BAD_FACE_IDS", `Body "${entry["name"]}" (${idsPath}): the face id file must hold one JSON array of whole numbers.`);
+      // The exporter checks the count against the triangles and that each id is a whole number.
+      body.faceIds = ids as number[];
+    }
     return body;
   });
 

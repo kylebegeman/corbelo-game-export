@@ -20,5 +20,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run check:dist
-      # The Godot import proof skips itself here, because the runner has no godot program.
+      # The Godot and Blender import proofs skip themselves here, because the runner has neither program.
       - run: npm test

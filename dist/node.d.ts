@@ -6,6 +6,11 @@ export interface JobBody {
     stl: string;
     color?: ColorInput;
     materialName?: string;
+    /**
+     * Path to a JSON file, relative to the job file, holding one whole number per triangle of the
+     * STL in the file's own order: the CAD face each triangle came from. STL cannot say this itself.
+     */
+    faceIds?: string;
 }
 /** The JSON job file the command line reads. Options are the same as `exportGameGlb` takes. */
 export interface JobFile extends ExportOptions {
