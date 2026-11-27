@@ -130,7 +130,10 @@
                         "minLength": 1
                       },
                       "faceIds": {},
-                      "faceColors": {}
+                      "faceColors": {},
+                      "refines": {
+                        "type": "object"
+                      }
                     },
                     "additionalProperties": false
                   }

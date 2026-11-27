@@ -524,6 +524,16 @@ A decomposition is made only for a body the kernel can take as a solid: closed, 
 
 You make the lower levels: this package does not simplify meshes. Each level is welded, shaded and split into material slots exactly as a body is, with the same `creaseAngle`, `normals` and `weldTolerance` and its own `faceIds` and `faceColors`. Nothing is repaired, so a level is as closed as you gave it, and the facts count its open edges. The triangles of every level count against `maxTriangles`.
 
+A level takes `refines` as a body does, for a level whose triangles were cut finer without moving them, by paint or by a join: it names the meshes its triangles were cut from, and its shading is taken from those. See [A body cut from a coarser mesh](#a-body-cut-from-a-coarser-mesh): the rules, the refusals and the count against `maxTriangles` are the same, and a refusal names the body and the level.
+
+```ts
+const lods = [{ positions: cutLevel.positions, refines: { surfaces: [{ positions: level.positions, faceIds: level.faceIds }], triangleOf: cutLevel.triangleOf } }];
+const { facts } = exportGameAsset({ bodies: [{ name: "Post", positions: post.positions, lods }], source });
+facts.bodies[0].lods[1].shadedFrom; // { surfaces: 1, triangles: 48 }
+```
+
+A level given `refines` has `shadedFrom` in its facts, as such a body has. Before 0.1.8 a level took no `refines`, and one that was given was not read.
+
 Where the levels go depends on the engine, and `facts.settings.lodLayout` says which was used:
 
 | Layout | Profiles | Nodes |
@@ -1462,7 +1472,7 @@ A body of a pack job has the keys of a body of a plain job (`name`, `stl`, `colo
 
 | Key | Meaning |
 | --- | --- |
-| `lods` | `[{ "stl": "lod1.stl", "faceIds": "lod1.faces.json", "faceColors": "lod1.colors.json" }]`, the nearest to full detail first. The two JSON files are optional and read like a body's. |
+| `lods` | `[{ "stl": "lod1.stl", "faceIds": "lod1.faces.json", "faceColors": "lod1.colors.json" }]`, the nearest to full detail first. The two JSON files are optional and read like a body's. A level may have `refines` too, written as a body's is. |
 | `collisionPieces` | `[{ "stl": "piece.stl" }]`. Only the points of each file are used. |
 | `collisionRemainder` | `{ "stl": "rest.stl" }`. The rest of the body beside its pieces, one closed solid. See [Part of a body](#part-of-a-body). |
 | `attachPoints` | `[{ "name": "Seat", "position": [150, 150, 400], "direction": [0, 0, 1] }]`, written in the job itself, in source units and axes. |

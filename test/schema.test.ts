@@ -174,6 +174,16 @@ const assets: Record<string, AssetInput> = {
     texcoords: { tileMeters: 0.5 },
   },
   "detail levels as a group, for Unreal": { bodies: [{ name: "Post", positions: post.positions, lods: [{ positions: cylinder(150, 400, 12).positions }] }], source: MM_Z_UP, profile: "unreal5", texcoords: true },
+  "a detail level that says what it was cut from": {
+    bodies: [
+      {
+        name: "Post",
+        positions: post.positions,
+        lods: [{ positions: cutCylinder(150, 400, 12).positions, refines: { surfaces: [{ positions: cylinder(150, 400, 12).positions, faceIds: cylinder(150, 400, 12).faceIds }], triangleOf: cutCylinder(150, 400, 12).triangleOf } }],
+      },
+    ],
+    source: MM_Z_UP,
+  },
   "pieces of the caller's own, for Unity": {
     bodies: [{ name: "Ell", positions: ell(1000, 500).positions, collisionPieces: [{ positions: box([0, 0, 0], [1000, 500, 500]).positions }, { positions: box([0, 500, 0], [500, 1000, 500]).positions }] }],
     source: MM_Z_UP,
@@ -244,6 +254,21 @@ describe("schema/pack.schema.json for a game asset", () => {
     });
     expect(facts.bodies[0]!.collision).toMatchObject({ shape: "decomposition", pieces: 3, givenPieces: 1 });
     expect(validFacts(JSON.parse(JSON.stringify(facts))), JSON.stringify(validFacts.errors)).toBe(true);
+  });
+
+  it("describes what a detail level was shaded from, and still reads facts from before that was there", () => {
+    const facts = JSON.parse(JSON.stringify(exportGameAsset(assets["a detail level that says what it was cut from"]!).facts)) as { bodies: { lods: Record<string, unknown>[] }[] };
+    const [full, level] = facts.bodies[0]!.lods;
+    expect(full).not.toHaveProperty("shadedFrom");
+    expect(level!["shadedFrom"]).toEqual({ surfaces: 1, triangles: 48 });
+    const withShadedFrom = (changed: unknown) => validFacts({ ...facts, bodies: [{ ...facts.bodies[0], lods: [full, { ...level, shadedFrom: changed }] }] });
+    expect(withShadedFrom({ surfaces: 1, triangles: 48 }), JSON.stringify(validFacts.errors)).toBe(true);
+    expect(withShadedFrom({ surfaces: 0, triangles: 48 })).toBe(false);
+    expect(withShadedFrom({ surfaces: 1 })).toBe(false);
+    expect(withShadedFrom({ surfaces: 1, triangles: 48, meshes: 1 })).toBe(false);
+    // Version 0.1.7 wrote no level with it.
+    const { shadedFrom: _, ...before } = level!;
+    expect(validFacts({ ...facts, bodies: [{ ...facts.bodies[0], lods: [full, before] }] }), JSON.stringify(validFacts.errors)).toBe(true);
   });
 
   it("refuses collision, detail levels and attach points that cannot be", () => {
@@ -696,6 +721,10 @@ describe("schema/kit-job.schema.json", () => {
     expect(withBody({ collisionRemainder: { stl: "straight-rest.stl" } })).toBe(true);
     expect(withBody({ collisionRemainder: { stl: "" } })).toBe(false);
     expect(withBody({ collisionRemainder: { stl: "straight-rest.stl", name: "rest" } })).toBe(false);
+    // A detail level may say what it was cut from, as a body may.
+    expect(withBody({ lods: [{ stl: "straight-lod1.stl", refines: { surfaces: [{ stl: "straight-lod1-uncut.stl" }], triangleOf: "straight-lod1.of.json" } }] })).toBe(true);
+    expect(withBody({ lods: [{ stl: "straight-lod1.stl", refines: "straight-lod1-uncut.stl" }] })).toBe(false);
+    expect(withBody({ lods: [{ stl: "straight-lod1.stl", refined: {} }] })).toBe(false);
     expect(validKitJob({ ...job, collisions: ["box"] })).toBe(false);
     expect(validKitJob({ ...job, pivots: ["center"] })).toBe(false);
   });

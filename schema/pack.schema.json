@@ -564,6 +564,25 @@
           },
           "minItems": 1
         },
+        "shadedFrom": {
+          "description": "Only for a lower level given refines: how many surfaces its shading was taken from and how many triangles they hold together.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "surfaces",
+            "triangles"
+          ],
+          "properties": {
+            "surfaces": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "triangles": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
         "degenerateTrianglesDropped": {
           "type": "integer",
           "minimum": 0

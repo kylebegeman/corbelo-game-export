@@ -13,7 +13,7 @@ import {
   type GameExportErrorCode,
   type GltfJson,
 } from "../src/index.js";
-import { box, chamferedBlock, cylinder, doorFrame, halfPaintedSide, MM_Z_UP } from "./fixtures.js";
+import { box, chamferedBlock, cutCylinder, cylinder, doorFrame, halfPaintedSide, MM_Z_UP, paintedPatch } from "./fixtures.js";
 
 function refusal(run: () => unknown): { code: GameExportErrorCode; message: string; body?: number } {
   try {
@@ -320,6 +320,121 @@ describe("detail levels", () => {
     expect(short.message).toContain("detail level 1");
     const colours = refusal(() => exportGameAsset({ bodies: [{ ...body, lods: [{ positions: cylinder(150, 400, 8).positions, faceColors: ["#ff0000"] }] }], source: MM_Z_UP }));
     expect(colours.code).toBe("BAD_FACE_COLORS");
+  });
+});
+
+describe("a detail level cut from a coarser mesh", () => {
+  // A level of eight sides whose triangles were cut finer without moving them, as painting or
+  // joining leaves them, and the eight-sided post it was cut from.
+  const SIDES = 8;
+  const coarse = cylinder(150, 400, SIDES);
+  const cut = cutCylinder(150, 400, SIDES);
+  const refines = { surfaces: [{ positions: coarse.positions, faceIds: coarse.faceIds }], triangleOf: cut.triangleOf };
+  const body = { name: "Post", positions: post.positions, faceIds: post.faceIds };
+  const withLevel = (level: NonNullable<AssetBodyInput["lods"]>[number], options: Partial<AssetInput> = {}) =>
+    exportGameAsset({ bodies: [{ ...body, lods: [level] }], source: MM_Z_UP, ...options });
+
+  /** How far, in degrees, each normal of the round side of a level is from straight out from the axis, which is +Y in the file. */
+  function offRound(glb: Uint8Array, mesh: number): number[] {
+    const document = readGlb(glb);
+    const off: number[] = [];
+    for (const primitive of document.json.meshes![mesh]!.primitives) {
+      const positions = readAccessor(document, primitive.attributes["POSITION"]!);
+      const normals = readAccessor(document, primitive.attributes["NORMAL"]!);
+      for (let at = 0; at < positions.length; at += 3) {
+        if (Math.abs(normals[at + 1]!) > 0.5) continue;
+        const along = (normals[at]! * positions[at]! + normals[at + 2]! * positions[at + 2]!) / Math.hypot(positions[at]!, positions[at + 2]!);
+        off.push((Math.acos(Math.min(1, along)) * 180) / Math.PI);
+      }
+    }
+    return off;
+  }
+
+  it("is shaded along its flat sides where it was cut, when nothing says what it was cut from", () => {
+    const { glb, facts } = withLevel({ positions: cut.positions, faceIds: cut.faceIds });
+    const level = facts.bodies[0]!.lods![1]!;
+    expect(level).not.toHaveProperty("shadedFrom");
+    // A point cut into a flat side has that side's direction: a quarter of the way along a side
+    // that turns 45 degrees, that is over 11 degrees from straight out.
+    expect(Math.max(...offRound(glb, level.mesh))).toBeGreaterThan(11);
+  });
+
+  it("takes its shading from the mesh it says it was cut from, as a body does", () => {
+    const { glb, facts } = withLevel({ positions: cut.positions, refines });
+    const [full, level] = facts.bodies[0]!.lods!;
+    expect(level!.shadedFrom).toEqual({ surfaces: 1, triangles: 4 * SIDES });
+    expect(level!.triangles).toBe(16 * SIDES);
+    expect(full).not.toHaveProperty("shadedFrom");
+    expect(facts.bodies[0]).not.toHaveProperty("shadedFrom");
+    const off = offRound(glb, level!.mesh);
+    expect(off.length).toBeGreaterThan(0);
+    expect(Math.max(...off)).toBeLessThan(0.1);
+    // The same normals as the mesh it was cut from has as a level of its own, at the points they share.
+    const plain = withLevel({ positions: coarse.positions, faceIds: coarse.faceIds });
+    expect(Math.max(...offRound(plain.glb, plain.facts.bodies[0]!.lods![1]!.mesh))).toBeLessThan(0.1);
+    expect(facts.settings.faceIds).toBe(true);
+  });
+
+  it("keeps that shading where the level is painted across the cut", () => {
+    const painted = withLevel({ positions: cut.positions, refines, faceColors: paintedPatch(SIDES, "#c0392b") }, { bodies: [{ ...body, color: "#2980ba", lods: [{ positions: cut.positions, refines, faceColors: paintedPatch(SIDES, "#c0392b") }] }] });
+    const level = painted.facts.bodies[0]!.lods![1]!;
+    expect(level.materials).toEqual(["color_2980ba", "color_c0392b"]);
+    expect(level.shadedFrom).toEqual({ surfaces: 1, triangles: 4 * SIDES });
+    expect(Math.max(...offRound(painted.glb, level.mesh))).toBeLessThan(0.1);
+  });
+
+  it("writes a level that names itself as what it was cut from as it writes it without", () => {
+    const itself = { surfaces: [{ positions: coarse.positions, faceIds: coarse.faceIds }], triangleOf: Uint32Array.from({ length: 4 * SIDES }, (_, at) => at) };
+    const meshOf = (glb: Uint8Array, mesh: number) => {
+      const document = readGlb(glb);
+      const primitive = document.json.meshes![mesh]!.primitives[0]!;
+      return [readAccessor(document, primitive.attributes["POSITION"]!), readAccessor(document, primitive.attributes["NORMAL"]!), readAccessor(document, primitive.indices!)].map((values) => Array.from(values));
+    };
+    const plain = withLevel({ positions: coarse.positions, faceIds: coarse.faceIds });
+    const same = withLevel({ positions: coarse.positions, refines: itself });
+    expect(meshOf(same.glb, same.facts.bodies[0]!.lods![1]!.mesh)).toEqual(meshOf(plain.glb, plain.facts.bodies[0]!.lods![1]!.mesh));
+  });
+
+  it("leaves a body and its other levels as they were", () => {
+    const without = exportGameAsset({ bodies: [{ ...body, lods: [{ positions: cylinder(150, 400, 16).positions }, { positions: cut.positions, faceIds: cut.faceIds }] }], source: MM_Z_UP });
+    const withIt = exportGameAsset({ bodies: [{ ...body, lods: [{ positions: cylinder(150, 400, 16).positions }, { positions: cut.positions, refines }] }], source: MM_Z_UP });
+    const strip = ({ lods, ...rest }: (typeof without.facts.bodies)[number]) => ({ ...rest, lods: lods!.slice(0, 2) });
+    expect(strip(withIt.facts.bodies[0]!)).toEqual(strip(without.facts.bodies[0]!));
+    expect(withIt.facts.bodies[0]!.lods![2]).toMatchObject({ level: 2, triangles: 16 * SIDES, openEdges: 0 });
+  });
+
+  it("counts the meshes levels were cut from on their own, against the most allowed", () => {
+    const triangles = 4 * SEGMENTS + 16 * SIDES;
+    expect(() => withLevel({ positions: cut.positions, refines }, { maxTriangles: triangles })).not.toThrow();
+    expect(refusal(() => withLevel({ positions: cut.positions, refines }, { maxTriangles: triangles - 1 })).code).toBe("TOO_MANY_TRIANGLES");
+    const many = { surfaces: Array.from({ length: 60 }, () => refines.surfaces[0]!), surfaceOf: new Uint32Array(16 * SIDES), triangleOf: cut.triangleOf };
+    expect(refusal(() => withLevel({ positions: cut.positions, refines: many }, { maxTriangles: 1000 }))).toEqual({
+      code: "TOO_MANY_TRIANGLES",
+      message: "The meshes that bodies refine hold more than 1000 triangles, the limit for one export. Raise maxTriangles.",
+    });
+    // 31 surfaces of 32 triangles are 992, and one more is over.
+    expect(() => withLevel({ positions: cut.positions, refines: { ...many, surfaces: many.surfaces.slice(0, 31) } }, { maxTriangles: 1000 })).not.toThrow();
+    expect(refusal(() => withLevel({ positions: cut.positions, refines: { ...many, surfaces: many.surfaces.slice(0, 32) } }, { maxTriangles: 1000 })).code).toBe("TOO_MANY_TRIANGLES");
+  });
+
+  it("refuses what a level cannot have been cut from, naming the body and the level", () => {
+    expect(refusal(() => withLevel({ positions: cut.positions, refines: 7 as never }))).toEqual({ code: "BAD_REFINEMENT", message: 'Body "Post", detail level 1: refines must be { surfaces, triangleOf }.', body: 0 });
+    expect(refusal(() => withLevel({ positions: cut.positions, refines: { surfaces: [], triangleOf: cut.triangleOf } })).message).toBe('Body "Post", detail level 1: refines.surfaces must be an array with at least one mesh.');
+    expect(refusal(() => withLevel({ positions: cut.positions, refines: { surfaces: [null as never], triangleOf: cut.triangleOf } })).message).toBe('Body "Post", detail level 1, surface 0 of refines is not an object.');
+    expect(refusal(() => withLevel({ positions: cut.positions, refines: { ...refines, triangleOf: [0, 1] } })).message).toBe(
+      `Body "Post", detail level 1: refines.triangleOf holds 2 numbers for ${16 * SIDES} triangles. It needs exactly one per triangle.`,
+    );
+    const past = Array.from(cut.triangleOf);
+    past[5] = 4 * SIDES;
+    expect(refusal(() => withLevel({ positions: cut.positions, refines: { ...refines, triangleOf: past } })).message).toBe(
+      `Body "Post", detail level 1: refines.triangleOf says triangle 5 lies in triangle ${4 * SIDES}, but the surface has ${4 * SIDES} triangles, numbered from 0.`,
+    );
+    // A triangle that does not lie where it says it does.
+    const elsewhere = Array.from(cut.triangleOf);
+    elsewhere[0] = 2 * SIDES;
+    const moved = refusal(() => withLevel({ positions: cut.positions, refines: { ...refines, triangleOf: elsewhere } }));
+    expect(moved).toMatchObject({ code: "BAD_REFINEMENT", body: 0 });
+    expect(moved.message).toMatch(/^Body "Post", detail level 1: triangle 0 is said to lie in triangle 16 of the mesh it refines, but /);
   });
 });
 

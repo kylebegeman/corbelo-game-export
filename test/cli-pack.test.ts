@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { checkGameAsset, packToZip, readPack, VERSION, type CheckReport, type PackManifest } from "../src/index.js";
 import { checkFile, runCommand, runPackJob, type CliIo } from "../src/node.js";
-import { asciiStl, binaryStl, box, cylinder, doorFrame, ell, halfPaintedSide } from "./fixtures.js";
+import { asciiStl, binaryStl, box, cutCylinder, cylinder, doorFrame, ell, halfPaintedSide } from "./fixtures.js";
 import { counting, loadKernel } from "./kernel.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -21,6 +21,10 @@ beforeAll(() => {
   write("post-lod1.stl", cylinder(150, 400, 24).positions);
   write("post-lod2.stl", cylinder(150, 400, 12).positions);
   writeFileSync(join(dir, "parts/post-lod2.colors.json"), JSON.stringify(halfPaintedSide(12, "#c0392b")));
+  // The lowest level cut finer without moving it, and the list that says where each triangle of the cut lies.
+  write("post-lod2-cut.stl", cutCylinder(150, 400, 12).positions);
+  writeFileSync(join(dir, "parts/post-lod2-cut.of.json"), JSON.stringify(Array.from(cutCylinder(150, 400, 12).triangleOf)));
+  writeFileSync(join(dir, "parts/post-lod2.faces.json"), JSON.stringify(Array.from(cylinder(150, 400, 12).faceIds)));
   write("frame.stl", doorFrame(3000, 300, 2800, 1200, 2200).positions);
   write("ell.stl", ell(1000, 500).positions);
   // The two blocks the L was made from.
@@ -251,6 +255,22 @@ describe("pack command", () => {
     expect(err).toBe('corbelo-game-export: error [BAD_JOB]: Nowhere to write the pack. Set "output.dir" or "output.zip" in the job, or pass --dir or --zip.\n');
   });
 
+  it("takes what a detail level was cut from, and shades the level from it", async () => {
+    const cutLevel = { stl: "parts/post-lod2-cut.stl", refines: { surfaces: [{ stl: "parts/post-lod2.stl", faceIds: "parts/post-lod2.faces.json" }], triangleOf: "parts/post-lod2-cut.of.json" } };
+    const job = { ...postJob, bodies: [{ ...postJob.bodies[0]!, lods: [postJob.bodies[0]!.lods[0]!, cutLevel] }], output: { dir: "out/cut" } };
+    const { code, err } = await command(["pack", writeJob("cut.json", job)]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+    const levels = readPack(readFileSync(join(dir, "out/cut/SM_Post.glb"))).facts!.bodies[0]!.lods!;
+    expect(levels.map((level) => [level.name, level.triangles, level.shadedFrom])).toEqual([["SM_Post_LOD0", 192, undefined], ["SM_Post_LOD1", 96, undefined], ["SM_Post_LOD2", 192, { surfaces: 1, triangles: 48 }]]);
+    // What it cannot be is refused where it is read, by the level's name.
+    const refused = async (refines: unknown): Promise<string> => (await command(["pack", writeJob("cut-bad.json", { ...job, bodies: [{ ...job.bodies[0]!, lods: [{ ...cutLevel, refines }] }] })])).err;
+    expect(await refused(7)).toContain('error [BAD_JOB]: Body "Post", detail level 1: "refines" must be an object with "surfaces" and "triangleOf".');
+    expect(await refused({ surfaces: [{ stl: "parts/post-lod2.stl" }] })).toContain('Body "Post", detail level 1: "refines" needs "triangleOf"');
+    expect(await refused({ ...cutLevel.refines, triangle: 1 })).toContain('Body "Post", detail level 1: "refines" has an unknown key "triangle". Known keys: surfaces, triangleOf, surfaceOf.');
+    expect(await refused({ ...cutLevel.refines, triangleOf: "parts/post-lod2.faces.json" })).toContain("error [BAD_REFINEMENT]:");
+  });
+
   it("refuses keys it does not know, so a typing mistake is not ignored", async () => {
     const refused = async (job: unknown): Promise<string> => {
       const { code, err } = await command(["pack", writeJob("typo.json", job)]);
@@ -260,7 +280,7 @@ describe("pack command", () => {
     const [body] = postJob.bodies;
     expect(await refused({ ...postJob, colision: "box" })).toContain('error [BAD_JOB]: The job has an unknown key "colision". Known keys: name, source, bodies, rows, profile,');
     expect(await refused({ ...postJob, bodies: [{ ...body, lod: [] }] })).toContain('Body 0 has an unknown key "lod". Known keys: name, stl, color, materialName, faceIds, faceColors, faceMaterialNames, refines, lods, collisionPieces, collisionRemainder, attachPoints.');
-    expect(await refused({ ...postJob, bodies: [{ ...body, lods: [{ stl: "parts/post-lod1.stl", color: "#fff" }] }] })).toContain('Body "Post", detail level 1 has an unknown key "color". Known keys: stl, faceIds, faceColors.');
+    expect(await refused({ ...postJob, bodies: [{ ...body, lods: [{ stl: "parts/post-lod1.stl", color: "#fff" }] }] })).toContain('Body "Post", detail level 1 has an unknown key "color". Known keys: stl, faceIds, faceColors, refines.');
     expect(await refused({ ...postJob, bodies: [{ ...body, collisionPieces: [{ stl: "parts/ell-a.stl", name: "a" }] }] })).toContain('Body "Post", collision piece 0 has an unknown key "name". Known keys: stl.');
     expect(await refused({ ...postJob, output: { folder: "out" } })).toContain('"output" has an unknown key "folder". Known keys: dir, zip.');
     expect(await refused({ name: "crate", source, rows: [{ name: "small", bodies: [{ name: "Body", stl: "parts/crate-small.stl" }], size: 400 }], output: { dir: "x" } })).toContain('Row 0 has an unknown key "size". Known keys: name, bodies, provenance.');

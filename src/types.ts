@@ -141,6 +141,11 @@ export interface LodInput {
   faceIds?: ArrayLike<number>;
   /** One entry per triangle, as on a body. Without it the level is all in the body's own colour. */
   faceColors?: readonly (ColorInput | null | undefined)[];
+  /**
+   * The meshes this level's triangles were cut from, to take the shading from, as on a body.
+   * The level's own `faceIds` then have no say in the shading: the surfaces' have.
+   */
+  refines?: Refinement;
 }
 
 /** One piece the body was made from, in the same units and axes as the body. Only its points are used: it becomes their convex hull. */
@@ -365,6 +370,11 @@ export interface LodFacts {
   vertices: number;
   materialSlots: number;
   materials: string[];
+  /**
+   * Only for a lower level given `refines`: how many surfaces its shading was taken from and how
+   * many triangles they hold together.
+   */
+  shadedFrom?: { surfaces: number; triangles: number };
   degenerateTrianglesDropped: number;
   openEdges: number;
   nonManifoldEdges: number;

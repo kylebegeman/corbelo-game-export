@@ -147,7 +147,7 @@ function readStlFile(path: string, where: string): Float32Array {
   }
 }
 
-/** Reads `refines` of a body: the STL of each surface and the lists that say where each triangle lies. */
+/** Reads `refines` of a body or of a lower detail level: the STL of each surface and the lists that say where each triangle lies. */
 function readRefines(value: unknown, where: string, base: string): BodyInput["refines"] {
   if (!isRecord(value)) refuse("BAD_JOB", `${where}: "refines" must be an object with "surfaces" and "triangleOf".`);
   refuseUnknownKeys(value, REFINES_KEYS, `${where}: "refines"`);
@@ -245,6 +245,8 @@ export interface PackJobLod {
   faceIds?: string;
   /** Path to a JSON file with one colour, or null, per triangle of the STL. */
   faceColors?: string;
+  /** What the level was cut from, as `refines` of a body. */
+  refines?: JobRefinement;
 }
 
 /** One body of a pack job: a body of a job, and what a game asset has around it. */
@@ -349,7 +351,7 @@ const PACK_JOB_KEYS = [
 const KIT_JOB_KEYS = [...PACK_JOB_KEYS.filter((key) => key !== "bodies" && key !== "rows" && key !== "pivot" && key !== "pivots" && key !== "placement" && key !== "collisions"), "grid", "pieces", "mates", "layouts", "pieceChecks", "scenes"];
 const KIT_PIECE_KEYS = ["name", "bodies", "glb", "cells", "origin", "pivot", "sockets", "trim", "provenance"];
 const PACK_BODY_KEYS = [...BODY_KEYS, "lods", "collisionPieces", "collisionRemainder", "attachPoints"];
-const LOD_KEYS = ["stl", "faceIds", "faceColors"];
+const LOD_KEYS = ["stl", "faceIds", "faceColors", "refines"];
 const PIECE_KEYS = ["stl"];
 const ROW_KEYS = ["name", "bodies", "provenance"];
 const PACK_OUTPUT_KEYS = ["dir", "zip"];
@@ -371,6 +373,7 @@ function readPackBody(value: unknown, label: string, base: string): AssetBodyInp
       if (faceIds !== undefined) lod.faceIds = faceIds as number[];
       const faceColors = readList(level["faceColors"], "faceColors", levelWhere, base, FACE_COLORS);
       if (faceColors !== undefined) lod.faceColors = faceColors as (ColorInput | null)[];
+      if (level["refines"] !== undefined) lod.refines = readRefines(level["refines"], levelWhere, base);
       return lod;
     });
   }
@@ -543,6 +546,7 @@ each triangle, or null for the body's own colour.
 "triangleOf" is a JSON file with one whole number per triangle of the body's STL: a
 triangle of the surface it lies in. With more than one surface, "surfaceOf" is a file
 of the same kind that says which surface. A surface may name a "faceIds" file too.
+A lower detail level of a pack job takes "refines" the same way, for its own STL.
 
 Paths in the job are relative to the job file. --out and --facts are relative to the
 working directory and win over the job. Without a facts path, the facts go next to the

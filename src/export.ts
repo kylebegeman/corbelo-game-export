@@ -31,6 +31,7 @@ import type {
   PivotMode,
   PivotOption,
   Placement,
+  Refinement,
   SlotFacts,
   SurfaceMesh,
   Vec3,
@@ -186,6 +187,46 @@ export function checkMesh(mesh: { positions: ArrayLike<number>; indices?: ArrayL
 }
 
 /**
+ * Checks `refines` of a mesh of `triangles` triangles, a body or a lower detail level of one, and
+ * returns how many triangles the meshes it names have together.
+ */
+function checkRefines(refines: Refinement, label: string, triangles: number): number {
+  if (notObject(refines)) badRefinement(`${label}: refines must be { surfaces, triangleOf }.`);
+  const { surfaces, surfaceOf, triangleOf } = refines;
+  if (!Array.isArray(surfaces) || surfaces.length === 0) badRefinement(`${label}: refines.surfaces must be an array with at least one mesh.`);
+  const surfaceTriangles = surfaces.map((surface, at) => {
+    const surfaceLabel = `${label}, surface ${at} of refines`;
+    if (notObject(surface)) badRefinement(`${surfaceLabel} is not an object.`);
+    return checkMesh(surface, surfaceLabel, "the surface");
+  });
+  const wholeNumbers = (values: unknown, key: string): ArrayLike<number> => {
+    if (!isArrayLike(values)) badRefinement(`${label}: refines.${key} must be a typed array or an array of numbers.`);
+    if (values.length !== triangles) {
+      badRefinement(`${label}: refines.${key} holds ${values.length} numbers for ${triangles} triangles. It needs exactly one per triangle.`);
+    }
+    return values;
+  };
+  if (surfaceOf === undefined && surfaces.length > 1) {
+    badRefinement(`${label}: refines has ${surfaces.length} surfaces, so it needs surfaceOf to say which one each triangle lies in.`);
+  }
+  const ofSurface = surfaceOf === undefined ? undefined : wholeNumbers(surfaceOf, "surfaceOf");
+  const ofTriangle = wholeNumbers(triangleOf, "triangleOf");
+  for (let at = 0; at < triangles; at += 1) {
+    const surface = ofSurface === undefined ? 0 : ofSurface[at]!;
+    if (!Number.isInteger(surface) || surface < 0 || surface >= surfaces.length) {
+      badRefinement(`${label}: refines.surfaceOf says triangle ${at} lies in surface ${String(surface)}, but there are ${surfaces.length} surfaces, numbered from 0.`);
+    }
+    const triangle = ofTriangle[at]!;
+    if (!Number.isInteger(triangle) || triangle < 0 || triangle >= surfaceTriangles[surface]!) {
+      badRefinement(
+        `${label}: refines.triangleOf says triangle ${at} lies in triangle ${String(triangle)}, but ${surfaces.length > 1 ? `surface ${surface}` : "the surface"} has ${surfaceTriangles[surface]!} triangles, numbered from 0.`,
+      );
+    }
+  }
+  return surfaceTriangles.reduce((total, count) => total + count, 0);
+}
+
+/**
  * Checks one body's arrays and returns how many triangles it has, and how many the meshes it
  * refines have together. Refuses anything malformed.
  */
@@ -204,43 +245,7 @@ function checkBody(body: BodyInput, index: number): { triangles: number; refined
     }
   }
 
-  let refined = 0;
-  if (refines !== undefined) {
-    if (notObject(refines)) badRefinement(`${label}: refines must be { surfaces, triangleOf }.`);
-    const { surfaces, surfaceOf, triangleOf } = refines;
-    if (!Array.isArray(surfaces) || surfaces.length === 0) badRefinement(`${label}: refines.surfaces must be an array with at least one mesh.`);
-    const surfaceTriangles = surfaces.map((surface, at) => {
-      const surfaceLabel = `${label}, surface ${at} of refines`;
-      if (notObject(surface)) badRefinement(`${surfaceLabel} is not an object.`);
-      return checkMesh(surface, surfaceLabel, "the surface");
-    });
-    refined = surfaceTriangles.reduce((total, count) => total + count, 0);
-    const wholeNumbers = (values: unknown, key: string): ArrayLike<number> => {
-      if (!isArrayLike(values)) badRefinement(`${label}: refines.${key} must be a typed array or an array of numbers.`);
-      if (values.length !== triangles) {
-        badRefinement(`${label}: refines.${key} holds ${values.length} numbers for ${triangles} triangles. It needs exactly one per triangle.`);
-      }
-      return values;
-    };
-    if (surfaceOf === undefined && surfaces.length > 1) {
-      badRefinement(`${label}: refines has ${surfaces.length} surfaces, so it needs surfaceOf to say which one each triangle lies in.`);
-    }
-    const ofSurface = surfaceOf === undefined ? undefined : wholeNumbers(surfaceOf, "surfaceOf");
-    const ofTriangle = wholeNumbers(triangleOf, "triangleOf");
-    for (let at = 0; at < triangles; at += 1) {
-      const surface = ofSurface === undefined ? 0 : ofSurface[at]!;
-      if (!Number.isInteger(surface) || surface < 0 || surface >= surfaces.length) {
-        badRefinement(`${label}: refines.surfaceOf says triangle ${at} lies in surface ${String(surface)}, but there are ${surfaces.length} surfaces, numbered from 0.`);
-      }
-      const triangle = ofTriangle[at]!;
-      if (!Number.isInteger(triangle) || triangle < 0 || triangle >= surfaceTriangles[surface]!) {
-        badRefinement(
-          `${label}: refines.triangleOf says triangle ${at} lies in triangle ${String(triangle)}, but ${surfaces.length > 1 ? `surface ${surface}` : "the surface"} has ${surfaceTriangles[surface]!} triangles, numbered from 0.`,
-        );
-      }
-    }
-  }
-  return { triangles, refined };
+  return { triangles, refined: refines === undefined ? 0 : checkRefines(refines, label, triangles) };
 }
 
 export function boundsOf(positions: ArrayLike<number>): { min: Vec3; max: Vec3 } {
@@ -302,12 +307,16 @@ function gather(values: Float32Array, vertexOf: Uint32Array, size: number): Floa
   return out;
 }
 
+/** What a mesh given `refines` was shaded from, as the facts say it. */
+type ShadedFrom = NonNullable<BodyFacts["shadedFrom"]>;
+
 /** A lower detail level as the asset exporter hands it over: a mesh that takes colours as its body does. */
 export interface LevelSource {
   positions: ArrayLike<number>;
   indices?: ArrayLike<number>;
   faceIds?: ArrayLike<number>;
   faceColors?: readonly (ColorInput | null | undefined)[];
+  refines?: Refinement;
 }
 
 /** What the asset exporter adds to a plain export. Nothing here changes what a plain export writes. */
@@ -342,6 +351,8 @@ export interface DraftMesh {
   /** Index in the glTF `meshes` array. */
   meshIndex: number;
   slots: SlotFacts[];
+  /** Only for a lower level given `refines`: what its shading was taken from. */
+  shadedFrom?: ShadedFrom;
 }
 
 export interface DraftBody extends DraftMesh {
@@ -388,6 +399,7 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
     const counted = forBody(index, () => {
       const own = checkBody(body, index);
       let levelTriangles = 0;
+      let refined = own.refined;
       for (const [at, level] of levelsOf(index).entries()) {
         const label = `Body "${body.name}", detail level ${at + 1}`;
         if (notObject(level)) refuse("BAD_LOD", `${label} is not an object with positions.`);
@@ -396,8 +408,9 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
           refuse("BAD_FACE_COLORS", `${label}: faceColors needs exactly one colour, or null, for each of its ${triangles} triangles.`);
         }
         levelTriangles += triangles;
+        if (level.refines !== undefined) refined += checkRefines(level.refines, label, triangles);
       }
-      return { triangles: own.triangles + levelTriangles, refined: own.refined };
+      return { triangles: own.triangles + levelTriangles, refined };
     });
     inputTriangles += counted.triangles;
     if (inputTriangles > settings.maxTriangles) {
@@ -444,32 +457,34 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
     // With `refines` the body's own face ids have no say in the shading: the surfaces' have.
     return buildMesh(points, source.indices, coarse === undefined ? source.faceIds : undefined, meshOptions, coarse);
   };
+  // A mesh that refines others is shaded from them. They are built first, each by itself and by
+  // the same rules as a body, and are not written.
+  const shade = (source: LevelSource, where: string): { mesh: BuiltMesh; shadedFrom?: ShadedFrom } => {
+    const { refines } = source;
+    if (refines === undefined) return { mesh: construct(source) };
+    const meshes = refines.surfaces.map((surface) => construct(surface));
+    const keptOf = meshes.map((surfaceMesh) => {
+      const kept = new Int32Array(surfaceMesh.triangles + surfaceMesh.degenerateTrianglesDropped).fill(-1);
+      for (let t = 0; t < surfaceMesh.triangles; t += 1) kept[surfaceMesh.sourceTriangle[t]!] = t;
+      return kept;
+    });
+    return {
+      mesh: construct(source, { meshes, keptOf, surfaceOf: refines.surfaceOf, triangleOf: refines.triangleOf, where }),
+      shadedFrom: { surfaces: meshes.length, triangles: meshes.reduce((total, surface) => total + surface.triangles, 0) },
+    };
+  };
   const shaped = bodies.map((body, index) => forBody(index, () => {
-    // The meshes a body refines are built first, each by itself and by the same rules as a body.
-    let coarse: CoarseSurfaces | undefined;
-    if (body.refines !== undefined) {
-      const meshes: BuiltMesh[] = [];
-      const keptOf: Int32Array[] = [];
-      for (const surface of body.refines.surfaces) {
-        const surfaceMesh = construct(surface);
-        const kept = new Int32Array(surfaceMesh.triangles + surfaceMesh.degenerateTrianglesDropped).fill(-1);
-        for (let t = 0; t < surfaceMesh.triangles; t += 1) kept[surfaceMesh.sourceTriangle[t]!] = t;
-        meshes.push(surfaceMesh);
-        keptOf.push(kept);
-      }
-      coarse = { meshes, keptOf, surfaceOf: body.refines.surfaceOf, triangleOf: body.refines.triangleOf, where: `Body "${body.name}"` };
-    }
-    const mesh = construct(body, coarse);
+    const where = `Body "${body.name}"`;
+    const { mesh, shadedFrom } = shade(body, where);
     if (mesh.triangles === 0) {
-      refuse("ALL_DEGENERATE", `Body "${body.name}": all ${mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
+      refuse("ALL_DEGENERATE", `${where}: all ${mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
     }
-    const shadedFrom = coarse === undefined ? undefined : { surfaces: coarse.meshes.length, triangles: coarse.meshes.reduce((total, surface) => total + surface.triangles, 0) };
     const levels = levelsOf(index).map((level, at) => {
-      const levelMesh = construct(level);
-      if (levelMesh.triangles === 0) {
-        refuse("ALL_DEGENERATE", `Body "${body.name}", detail level ${at + 1}: all ${levelMesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
+      const shaded = shade(level, `${where}, detail level ${at + 1}`);
+      if (shaded.mesh.triangles === 0) {
+        refuse("ALL_DEGENERATE", `${where}, detail level ${at + 1}: all ${shaded.mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
       }
-      return levelMesh;
+      return shaded;
     });
     return { mesh, shadedFrom, levels };
   }));
@@ -522,7 +537,7 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
       pivot,
       translation,
       full: prepare(mesh, pivot, translation, index),
-      levels: levels.map((level, at) => prepare(level, pivot, translation, levelColorsAt[index]![at]!)),
+      levels: levels.map((level, at) => prepare(level.mesh, pivot, translation, levelColorsAt[index]![at]!)),
     };
   });
 
@@ -672,7 +687,10 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
   // The meshes of lower levels come after the meshes of every body, so a body's mesh keeps the
   // number of its body. Their names and nodes are for the caller to settle.
   for (const [index, { levels }] of prepared.entries()) {
-    draftBodies[index]!.levels = levels.map((level, at) => write(`${names[index]!}_LOD${at + 1}`, level));
+    draftBodies[index]!.levels = levels.map((level, at) => {
+      const { shadedFrom } = shaped[index]!.levels[at]!;
+      return { ...write(`${names[index]!}_LOD${at + 1}`, level), ...(shadedFrom !== undefined ? { shadedFrom } : {}) };
+    });
   }
 
   const sum = (pick: (facts: BodyFacts) => number) => bodyFacts.reduce((total, facts) => total + pick(facts), 0);

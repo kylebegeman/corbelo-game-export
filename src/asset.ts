@@ -187,6 +187,7 @@ export function exportGameAsset(input: AssetInput): ExportResult {
             vertices: written.slots.reduce((total, slot) => total + slot.vertices, 0),
             materialSlots: written.slots.length,
             materials: written.slots.map((slot) => slot.material),
+            ...(written.shadedFrom !== undefined ? { shadedFrom: written.shadedFrom } : {}),
             degenerateTrianglesDropped: written.mesh.degenerateTrianglesDropped,
             openEdges: written.mesh.openEdges,
             nonManifoldEdges: written.mesh.nonManifoldEdges,
