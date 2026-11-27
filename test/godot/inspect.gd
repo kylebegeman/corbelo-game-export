@@ -30,10 +30,18 @@ func _inspect_file(path: String) -> Dictionary:
 func _walk(root: Node, node: Node, out: Array) -> void:
 	if node != root:
 		var entry := {"name": String(node.name), "class": node.get_class(), "path": String(root.get_path_to(node))}
+		if node.get_parent() != root:
+			entry["parent"] = String(root.get_path_to(node.get_parent()))
 		if node is Node3D:
-			entry["position"] = _vector((node as Node3D).position)
+			var spatial := node as Node3D
+			entry["position"] = _vector(spatial.position)
+			# The node's own +Z axis, in its parent's axes.
+			entry["zAxis"] = _vector(spatial.basis.z)
+			entry["visible"] = spatial.visible
 		if node is MeshInstance3D:
 			entry["mesh"] = _inspect_mesh((node as MeshInstance3D).mesh)
+		if node is CollisionShape3D:
+			entry["shape"] = _inspect_shape((node as CollisionShape3D).shape)
 		out.append(entry)
 	for child in node.get_children():
 		_walk(root, child, out)
@@ -55,6 +63,15 @@ func _inspect_mesh(mesh: Mesh) -> Dictionary:
 			"normals": _vectors(normals) if normals != null else [],
 			"indices": Array(indices) if indices != null else [],
 		}
+		var uvs = arrays[Mesh.ARRAY_TEX_UV]
+		if uvs != null:
+			var flat: Array = []
+			for uv in uvs:
+				flat.append_array([uv.x, uv.y])
+			surface["uvs"] = flat
+		var tangents = arrays[Mesh.ARRAY_TANGENT]
+		if tangents != null:
+			surface["tangents"] = Array(tangents)
 		var material := mesh.surface_get_material(index) as BaseMaterial3D
 		if material != null:
 			surface["material"] = {
@@ -70,6 +87,19 @@ func _inspect_mesh(mesh: Mesh) -> Dictionary:
 		"aabbSize": _vector(aabb.size),
 		"surfaces": surfaces,
 	}
+
+
+func _inspect_shape(shape: Shape3D) -> Dictionary:
+	if shape == null:
+		return {"class": ""}
+	var result := {"class": shape.get_class()}
+	if shape is ConvexPolygonShape3D:
+		result["points"] = _vectors((shape as ConvexPolygonShape3D).points)
+	if shape is BoxShape3D:
+		result["size"] = _vector((shape as BoxShape3D).size)
+	if shape is ConcavePolygonShape3D:
+		result["faces"] = _vectors((shape as ConcavePolygonShape3D).get_faces())
+	return result
 
 
 func _vector(value: Vector3) -> Array:

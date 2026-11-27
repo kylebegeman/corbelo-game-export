@@ -12,8 +12,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeGlb } from "../src/glb-write.js";
-import { exportGameGlb, readGlb, type ExportResult, type PackFacts } from "../src/index.js";
-import { box, chamferedBlock, cutCylinder, cylinder, halfPaintedSide, MM_Z_UP, paintedPatch, paintedTop } from "./fixtures.js";
+import { checkGameAsset, exportGameAsset, exportGameGlb, readGlb, type ExportResult, type PackFacts } from "../src/index.js";
+import { box, chamferedBlock, cutCylinder, cylinder, doorFrame, halfPaintedSide, MM_Z_UP, paintedPatch, paintedTop, tube } from "./fixtures.js";
+import { loadKernel } from "./kernel.js";
 
 const GODOT = process.env["GODOT"] ?? "godot";
 const BEGIN = "CORBELO_GAME_EXPORT_JSON_BEGIN";
@@ -29,6 +30,10 @@ interface GodotSurface {
   vertices: number[];
   normals: number[];
   indices: number[];
+  /** u, v for each vertex, when the mesh has texture coordinates. */
+  uvs?: number[];
+  /** x, y, z, w for each vertex, when the mesh has tangents. */
+  tangents?: number[];
   material?: { name: string; albedo: string; metallic: number; roughness: number };
 }
 
@@ -36,8 +41,15 @@ interface GodotNode {
   name: string;
   class: string;
   path: string;
+  /** The path of the node it is a child of, when that is not the scene's root. */
+  parent?: string;
   position?: number[];
+  /** The node's own +Z axis, in its parent's axes. */
+  zAxis?: number[];
+  visible?: boolean;
   mesh?: { name: string; aabbPosition: number[]; aabbSize: number[]; surfaces: GodotSurface[] };
+  /** Only on a CollisionShape3D: the shape Godot built. `points` are x, y, z for each corner of a convex shape. */
+  shape?: { class: string; points?: number[]; size?: number[]; faces?: number[] };
 }
 
 interface GodotFile {
@@ -100,6 +112,33 @@ function onGodotBlindAxis(normal: readonly number[]): boolean {
   return Math.abs(dot(normal, [1, 1, -1])) / Math.sqrt(3) > 0.999999;
 }
 
+const RING_PIECES = 12;
+/** The side of one whole texture on the ring, in metres. */
+const RING_TILE = 0.5;
+
+/** One of the `count` wedges a ring is made of, Z up: the eight corners of a slice of it. */
+function wedge(outer: number, inner: number, height: number, piece: number, count: number): number[] {
+  const points: number[] = [];
+  for (const turn of [piece, piece + 1]) {
+    const angle = (turn / count) * 2 * Math.PI;
+    for (const radius of [inner, outer]) for (const z of [0, height]) points.push(radius * Math.cos(angle), radius * Math.sin(angle), z);
+  }
+  return points;
+}
+
+/** The box around points given as x, y, z after x, y, z, moved by `offset`. */
+function boxAround(points: readonly number[], offset: readonly number[]): { min: number[]; max: number[] } {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let at = 0; at < points.length; at += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis]!, points[at + axis]! + offset[axis]!);
+      max[axis] = Math.max(max[axis]!, points[at + axis]! + offset[axis]!);
+    }
+  }
+  return { min, max };
+}
+
 const PROJECT_FILE = 'config_version=5\n\n[application]\n\nconfig/name="corbelo-game-export import proof"\n';
 const COMPRESSION_OFF = '\n[importer_defaults]\n\nscene={"meshes/force_disable_compression": true}\n';
 
@@ -153,7 +192,7 @@ describe.skipIf(!usable)("Godot 4 editor import", () => {
     return exports[file]!.facts;
   }
 
-  beforeAll(() => {
+  beforeAll(async () => {
     const block = chamferedBlock([1000, 500, 250], 20);
     const round = cylinder(150, 400, SEGMENTS);
     exports["block.glb"] = exportGameGlb({
@@ -193,6 +232,25 @@ describe.skipIf(!usable)("Godot 4 editor import", () => {
       bodies: ["wall-col", "UCX_Crate", "part_LOD0", "Left Wall (v2)", "Left Wall (v2)"].map((name) => ({ name, positions: small })),
       source: MM_Z_UP,
     });
+    // A game asset with a hole through it: a ring 1.2 m across and 0.4 m tall, with the twelve
+    // wedges it could be built from as its collision, two lower detail levels, texture
+    // coordinates and two attach points.
+    exports["ring.glb"] = exportGameAsset({
+      bodies: [
+        {
+          name: "Ring",
+          positions: tube(600, 400, 400, SEGMENTS).positions,
+          color: "#8a5a2b",
+          lods: [{ positions: tube(600, 400, 400, 24).positions }, { positions: tube(600, 400, 400, 12).positions }],
+          collisionPieces: Array.from({ length: RING_PIECES }, (_, piece) => ({ positions: wedge(600, 400, 400, piece, RING_PIECES) })),
+          attachPoints: [{ name: "Top", position: [0, 0, 400], direction: [0, 0, 1] }, { name: "Hook", position: [600, 0, 200], direction: [1, 0, 0] }],
+        },
+      ],
+      source: MM_Z_UP,
+      texcoords: { tileMeters: RING_TILE },
+    });
+    // A wall with a doorway, with no pieces given: the kernel cuts it into convex pieces.
+    exports["frame.glb"] = exportGameAsset({ bodies: [{ name: "Door Frame", positions: doorFrame(3000, 300, 2800, 1200, 2200).positions }], source: MM_Z_UP, kernel: await loadKernel() });
     // A control this package would never write: the same kind of file with a node named the
     // way Godot reads as "make a collision shape". If the editor importer really ran, Godot
     // adds a physics body here, which shows its import-time name handling is in play.
@@ -573,6 +631,228 @@ describe.skipIf(!usable)("Godot 4 editor import", () => {
         ["color_2980ba", "#2980ba"],
       ]);
       expect(surfaces.reduce((total, surface) => total + surface.triangleCount, 0)).toBe(16 * CUT_SEGMENTS);
+    });
+  });
+
+  /** Where a node is in the scene: its own position added to those of the nodes it is in. None of them is turned. */
+  function placeOf(file: string, node: GodotNode): number[] {
+    const place = [...(node.position ?? [0, 0, 0])];
+    let parent = node.parent;
+    while (parent !== undefined) {
+      const above = files[file]!.nodes.find((candidate) => candidate.path === parent)!;
+      (above.position ?? [0, 0, 0]).forEach((value, axis) => (place[axis]! += value));
+      parent = above.parent;
+    }
+    return place;
+  }
+
+  /** The collision Godot built for a body: each physics body with the one shape in it, in the order of the file. */
+  function builtCollision(file: string, bodyName: string): { body: GodotNode; shape: GodotNode; box: { min: number[]; max: number[] } }[] {
+    return files[file]!.nodes
+      .filter((node) => node.class === "StaticBody3D" && node.parent === bodyName)
+      .map((body) => {
+        const shapes = files[file]!.nodes.filter((node) => node.parent === body.path);
+        expect(shapes.map((node) => node.class)).toEqual(["CollisionShape3D"]);
+        const [shape] = shapes;
+        expect(shape!.shape!.class).toBe("ConvexPolygonShape3D");
+        return { body, shape: shape!, box: boxAround(shape!.shape!.points!, placeOf(file, shape!)) };
+      });
+  }
+
+  describe("a game asset: a ring with a hole through it", () => {
+    const body = () => facts("ring.glb").bodies[0]!;
+    const ring = () => files["ring.glb"]!.nodes.find((node) => node.name === "Ring")!;
+
+    it("is the right size: 1.2 m across and 0.4 m tall, standing on the origin", () => {
+      expect(files["ring.glb"]!.error).toBeUndefined();
+      expect(ring().class).toBe("MeshInstance3D");
+      expect(ring().visible).toBe(true);
+      near(ring().position, [0, 0, 0]);
+      near(ring().mesh!.aabbSize, [1.2, 0.4, 1.2], 4);
+      near(ring().mesh!.aabbPosition, [-0.6, 0, -0.6], 4);
+      near(ring().mesh!.aabbSize, body().bounds.meters.size, 4);
+      expect(ring().mesh!.surfaces.map((surface) => [surface.triangleCount, surface.vertexCount])).toEqual([[body().triangles, body().vertices]]);
+      expect(body().triangles).toBe(8 * SEGMENTS);
+    });
+
+    it("gets the collision the file asks for: one convex shape for each wedge, built by Godot on import", () => {
+      const collision = body().collision!;
+      expect(collision).toMatchObject({ requested: "auto", shape: "pieces", pieces: RING_PIECES, withinTolerance: true });
+      // The twelve wedges hold a little less than the ring of 48 sides they stand in for.
+      expect(collision.volume.error).toBeGreaterThan(-0.05);
+      expect(collision.volume.error).toBeLessThan(0);
+      const built = builtCollision("ring.glb", "Ring");
+      expect(built).toHaveLength(RING_PIECES);
+      // Godot takes the ending off the name it built a shape from.
+      expect(collision.nodes.map((node) => node.name)).toEqual(Array.from({ length: RING_PIECES }, (_, piece) => `Ring_${String(piece).padStart(2, "0")}-convcolonly`));
+      expect(built.map((piece) => piece.body.name)).toEqual(collision.nodes.map((node) => node.name.replace("-convcolonly", "")));
+      built.forEach((piece, at) => {
+        const written = collision.nodes[at]!;
+        // Every corner of the wedge, where the facts say the piece is. Godot tidies the points
+        // it keeps, which moves them by a fraction of a millimetre.
+        expect(piece.shape.shape!.points!.length / 3).toBe(written.vertices);
+        expect(written.vertices).toBe(8);
+        near(piece.box.min, written.bounds.meters.min, 3);
+        near(piece.box.max, written.bounds.meters.max, 3);
+      });
+      // No collision piece is left behind as something to draw.
+      expect(files["ring.glb"]!.nodes.filter((node) => node.class === "MeshInstance3D").map((node) => node.name)).toEqual(["Ring", ...body().lods!.slice(1).map((level) => level.name)]);
+      expect(files["ring.glb"]!.nodes.some((node) => node.name.includes("convcolonly"))).toBe(false);
+    });
+
+    it("keeps the hole open: no collision shape reaches the middle of the ring", () => {
+      for (const piece of builtCollision("ring.glb", "Ring")) {
+        // The hole is 0.8 m across. Every corner of every shape is at least the hole's radius from the axis.
+        const points = piece.shape.shape!.points!;
+        const place = placeOf("ring.glb", piece.shape);
+        for (let at = 0; at < points.length; at += 3) expect(Math.hypot(points[at]! + place[0]!, points[at + 2]! + place[2]!)).toBeGreaterThan(0.4 - 1e-3);
+        // And each shape stays on its own side of the axis: its box does not hold the axis.
+        const holdsAxis = piece.box.min[0]! < -1e-3 && piece.box.max[0]! > 1e-3 && piece.box.min[2]! < -1e-3 && piece.box.max[2]! > 1e-3;
+        expect(holdsAxis).toBe(false);
+      }
+    });
+
+    it("has two lower detail levels, each a mesh of its own, hidden until the game shows it", () => {
+      const levels = body().lods!;
+      expect(facts("ring.glb").settings.lodLayout).toBe("children");
+      expect(levels.map((level) => [level.level, level.triangles, level.visible])).toEqual([[0, 8 * SEGMENTS, true], [1, 8 * 24, false], [2, 8 * 12, false]]);
+      for (const level of levels.slice(1)) {
+        const node = files["ring.glb"]!.nodes.find((candidate) => candidate.name === level.name)!;
+        expect(node, level.name).toBeDefined();
+        expect(node.class).toBe("MeshInstance3D");
+        expect(node.parent).toBe("Ring");
+        expect(node.visible).toBe(false);
+        near(node.position, [0, 0, 0]);
+        expect(node.mesh!.surfaces.map((surface) => [surface.triangleCount, surface.vertexCount])).toEqual([[level.triangles, level.vertices]]);
+        // The same ring, at the same size. A ring of 12 sides is a little narrower across its flats.
+        near([node.mesh!.aabbSize[0]!, node.mesh!.aabbSize[1]!], [1.2, 0.4], 4);
+        expect(node.mesh!.surfaces[0]!.material!.name).toBe(ring().mesh!.surfaces[0]!.material!.name);
+      }
+      // The outline moves by what a coarser circle moves it: the sagitta of one side.
+      expect(levels[1]!.deviation.meters).toBeCloseTo(0.6 * (1 - Math.cos(Math.PI / 24)), 3);
+      expect(levels[2]!.deviation.meters).toBeCloseTo(0.6 * (1 - Math.cos(Math.PI / 12)), 3);
+    });
+
+    it("has texture coordinates at the scale of the world, on every level", () => {
+      const meshes = [ring(), ...body().lods!.slice(1).map((level) => files["ring.glb"]!.nodes.find((node) => node.name === level.name)!)];
+      for (const node of meshes) {
+        const [surface] = node.mesh!.surfaces;
+        expect(surface!.uvs, node.name).toHaveLength(surface!.vertexCount * 2);
+        let flat = 0;
+        for (let triangle = 0; triangle < surface!.triangleCount; triangle += 1) {
+          const corner = [0, 1, 2].map((k) => surface!.indices[triangle * 3 + k]!);
+          const up = Math.abs(facing(surface!, triangle)[1]);
+          for (let k = 0; k < 3; k += 1) {
+            const [a, b] = [corner[k]!, corner[(k + 1) % 3]!];
+            const p = vectorAt(surface!.vertices, a);
+            const q = vectorAt(surface!.vertices, b);
+            const along = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+            const inTexture = Math.hypot(surface!.uvs![b * 2]! - surface!.uvs![a * 2]!, surface!.uvs![b * 2 + 1]! - surface!.uvs![a * 2 + 1]!) * RING_TILE;
+            // A projection never stretches: an edge is no longer in the texture than in the world.
+            expect(inTexture).toBeLessThan(along + 1e-3);
+            // The flat ends face straight up or down, so there an edge is exactly as long.
+            if (up > 0.999) {
+              expect(inTexture).toBeCloseTo(along, 3);
+              flat += 1;
+            }
+          }
+        }
+        expect(flat).toBeGreaterThan(0);
+        // One whole texture is half a metre, so the ring of 1.2 m spans more than two of them.
+        const us = surface!.uvs!.filter((_, at) => at % 2 === 0);
+        expect(Math.max(...us) - Math.min(...us)).toBeCloseTo(1.2 / RING_TILE, 2);
+      }
+    });
+
+    it("has tangents that follow the texture coordinates", () => {
+      const [surface] = ring().mesh!.surfaces;
+      expect(surface!.tangents).toHaveLength(surface!.vertexCount * 4);
+      for (let vertex = 0; vertex < surface!.vertexCount; vertex += 1) {
+        const tangent = [0, 1, 2].map((axis) => surface!.tangents![vertex * 4 + axis]!);
+        expect(Math.hypot(tangent[0]!, tangent[1]!, tangent[2]!)).toBeCloseTo(1, 2);
+        expect(Math.abs(dot(tangent, vectorAt(surface!.normals, vertex)))).toBeLessThan(0.02);
+        expect(Math.abs(surface!.tangents![vertex * 4 + 3]!)).toBe(1);
+      }
+      // On every triangle the tangent points the way u grows across it.
+      let checked = 0;
+      for (let triangle = 0; triangle < surface!.triangleCount; triangle += 1) {
+        const [a, b, c] = [0, 1, 2].map((k) => surface!.indices[triangle * 3 + k]!) as [number, number, number];
+        const pa = vectorAt(surface!.vertices, a);
+        const pb = vectorAt(surface!.vertices, b);
+        const pc = vectorAt(surface!.vertices, c);
+        const uv = (vertex: number) => [surface!.uvs![vertex * 2]!, surface!.uvs![vertex * 2 + 1]!];
+        const [du1, dv1] = [uv(b)[0]! - uv(a)[0]!, uv(b)[1]! - uv(a)[1]!];
+        const [du2, dv2] = [uv(c)[0]! - uv(a)[0]!, uv(c)[1]! - uv(a)[1]!];
+        const det = du1 * dv2 - du2 * dv1;
+        if (Math.abs(det) < 1e-6) continue;
+        // How the surface moves in space for a step along u.
+        const alongU = [0, 1, 2].map((axis) => ((pb[axis]! - pa[axis]!) * dv2 - (pc[axis]! - pa[axis]!) * dv1) / det);
+        const length = Math.hypot(alongU[0]!, alongU[1]!, alongU[2]!);
+        for (const vertex of [a, b, c]) {
+          const tangent = [0, 1, 2].map((axis) => surface!.tangents![vertex * 4 + axis]!);
+          expect(dot(tangent, alongU) / length).toBeGreaterThan(0.9);
+        }
+        checked += 1;
+      }
+      expect(checked).toBeGreaterThan(7 * SEGMENTS);
+    });
+
+    it("has its attach points as empty nodes, where the facts say and facing the way given", () => {
+      const points = body().attachPoints!;
+      expect(points.map((point) => [point.name, point.sourceName])).toEqual([["Top", "Top"], ["Hook", "Hook"]]);
+      for (const point of points) {
+        const node = files["ring.glb"]!.nodes.find((candidate) => candidate.name === point.name)!;
+        expect(node.class).toBe("Node3D");
+        expect(node.parent).toBe("Ring");
+        near(placeOf("ring.glb", node), point.meters);
+        near(node.zAxis, point.direction!, 4);
+      }
+      // On top of the ring, facing up, and on its side at +X, facing out.
+      near(points[0]!.meters, [0, 0.4, 0]);
+      near(points[0]!.direction!, [0, 1, 0]);
+      near(points[1]!.meters, [0.6, 0.2, 0]);
+      near(points[1]!.direction!, [1, 0, 0]);
+    });
+
+    it("passes the game checks it should, with the numbers Godot agrees with", () => {
+      const report = checkGameAsset(exports["ring.glb"]!.glb);
+      const status = Object.fromEntries(report.results.map((result) => [result.id, result.status]));
+      expect(status).toMatchObject({ size: "pass", pivot: "pass", triangles: "pass", vertices: "pass", shading: "pass", "clean-mesh": "pass", "material-slots": "pass", collision: "pass", "detail-levels": "pass" });
+      expect(report.status).toBe("pass");
+    });
+  });
+
+  describe("a game asset: a wall with a doorway, cut into convex pieces by the kernel", () => {
+    it("gets three convex shapes from Godot, and the doorway stays open", () => {
+      const body = facts("frame.glb").bodies[0]!;
+      expect(body.name).toBe("Door_Frame");
+      expect(body.collision).toMatchObject({ requested: "auto", shape: "decomposition", pieces: 3, withinTolerance: true });
+      expect(Math.abs(body.collision!.volume.error!)).toBeLessThan(1e-6);
+      const built = builtCollision("frame.glb", "Door_Frame");
+      expect(built.map((piece) => piece.body.name)).toEqual(["Door_Frame_00", "Door_Frame_01", "Door_Frame_02"]);
+      built.forEach((piece, at) => {
+        near(piece.box.min, body.collision!.nodes[at]!.bounds.meters.min, 3);
+        near(piece.box.max, body.collision!.nodes[at]!.bounds.meters.max, 3);
+      });
+      // The doorway is 1.2 m wide and 2.2 m tall in the middle of the wall. Each piece is a box,
+      // so it blocks the doorway only if its own box reaches into it.
+      for (const piece of built) {
+        const inDoorway = piece.box.min[0]! < 0.6 - 1e-3 && piece.box.max[0]! > -0.6 + 1e-3 && piece.box.min[1]! < 2.2 - 1e-3;
+        expect(inDoorway).toBe(false);
+      }
+      // Together the pieces are the whole wall around it.
+      const volume = built.reduce((total, piece) => total + (piece.box.max[0]! - piece.box.min[0]!) * (piece.box.max[1]! - piece.box.min[1]!) * (piece.box.max[2]! - piece.box.min[2]!), 0);
+      expect(volume).toBeCloseTo(3 * 0.3 * 2.8 - 1.2 * 0.3 * 2.2, 2);
+      const mesh = meshNodes("frame.glb");
+      expect(mesh.map((node) => node.name)).toEqual(["Door_Frame"]);
+      near(mesh[0]!.mesh!.aabbSize, [3, 2.8, 0.3], 4);
+    });
+
+    it("lets Godot's own character through the doorway, by the game checks", () => {
+      const report = checkGameAsset(exports["frame.glb"]!.glb, { assetClass: "kit-piece", expect: { opening: true } });
+      const opening = report.results.find((result) => result.id === "player-openings")!;
+      expect(opening.status).toBe("pass");
+      expect(report.results.find((result) => result.id === "collision")!.status).toBe("pass");
     });
   });
 
