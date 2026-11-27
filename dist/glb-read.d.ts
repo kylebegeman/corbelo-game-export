@@ -39,6 +39,8 @@ export interface PackBody {
     positions: Float32Array;
     /** One per vertex. Empty when a primitive of the mesh has none. */
     normals: Float32Array;
+    /** u, v per vertex. Empty when a primitive of the mesh has no texture coordinates. */
+    texcoords: Float32Array;
     /** Three vertex numbers per triangle, counted in `positions`: every surface's triangles, in the same order. */
     indices: Uint32Array;
     /** The material of the first surface. A body with several colours has one for each: see `surfaces`. */
@@ -55,8 +57,11 @@ export interface PackContents {
     bodies: PackBody[];
 }
 /**
- * Reads a GLB written by this package back into plain arrays: one entry per mesh node of the
- * scene, with every primitive of its mesh, plus the facts, profile and provenance from the
- * scene extras.
+ * Reads a GLB written by this package back into plain arrays: one entry per body, with every
+ * primitive of its mesh at full detail, plus the facts, profile and provenance from the scene
+ * extras. Collision shapes, lower detail levels and attach points are not bodies: the facts say
+ * which nodes and meshes they are.
+ *
+ * A file without facts gives one entry per mesh node at the top of the scene.
  */
 export declare function readPack(glb: Uint8Array | GlbDocument): PackContents;

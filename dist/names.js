@@ -5,15 +5,23 @@ const MAX_NAME_LENGTH = 60;
  * rules, so they are not part of a profile, but a body must not trigger them by accident.
  */
 const OTHER_GODOT_HINTS = ["noimp", "navmesh", "occ", "rigid", "vehicle", "wheel"];
-const reservedPrefixes = [];
-const reservedEndings = [...OTHER_GODOT_HINTS];
-for (const profile of Object.values(ENGINE_PROFILES)) {
-    for (const rule of [...profile.conventions.collision, ...profile.conventions.lod]) {
-        const list = rule.affix === "prefix" ? reservedPrefixes : reservedEndings;
-        const text = rule.affix === "prefix" ? rule.text.toLowerCase() : rule.text.replace(/^[-_]/, "").toLowerCase();
-        if (!list.includes(text))
-            list.push(text);
+let reserved;
+/** The prefixes and endings the built-in profiles act on, worked out the first time a name is checked. */
+function reservedAffixes() {
+    if (reserved === undefined) {
+        const prefixes = [];
+        const endings = [...OTHER_GODOT_HINTS];
+        for (const profile of Object.values(ENGINE_PROFILES)) {
+            for (const rule of [...profile.conventions.collision, ...profile.conventions.lod]) {
+                const list = rule.affix === "prefix" ? prefixes : endings;
+                const text = rule.affix === "prefix" ? rule.text.toLowerCase() : rule.text.replace(/^[-_]/, "").toLowerCase();
+                if (!list.includes(text))
+                    list.push(text);
+            }
+        }
+        reserved = { prefixes, endings };
     }
+    return reserved;
 }
 /** Letters, digits, `_` and `-` only. Accents are dropped from letters; anything else becomes `_`. */
 export function safeName(name, fallback) {
@@ -29,7 +37,7 @@ export function safeName(name, fallback) {
 /** True when a built-in engine profile would read the name as a collision shape or a detail level. */
 export function hasReservedPrefix(name) {
     const lower = name.toLowerCase();
-    return reservedPrefixes.some((prefix) => lower.startsWith(prefix));
+    return reservedAffixes().prefixes.some((prefix) => lower.startsWith(prefix));
 }
 /**
  * Importers ignore trailing digits and underscores when they look for an ending, and accept
@@ -37,7 +45,28 @@ export function hasReservedPrefix(name) {
  */
 export function hasReservedEnding(name) {
     const lower = name.toLowerCase().replace(/[0-9_]+$/, "");
-    return reservedEndings.some((ending) => lower.endsWith(`-${ending}`) || lower.endsWith(`_${ending}`));
+    return reservedAffixes().endings.some((ending) => lower.endsWith(`-${ending}`) || lower.endsWith(`_${ending}`));
+}
+/**
+ * A name nothing in `used` has yet, without regard to letter case: `base`, or `base_2`, `base_3`
+ * and so on. `wrap` gives the full name for a candidate, for a name that must keep an ending or
+ * a prefix. The name is added to `used`.
+ */
+export function uniqueName(used, base, wrap = (candidate) => candidate) {
+    let name = wrap(base);
+    for (let n = 2; used.has(name.toLowerCase()); n += 1)
+        name = wrap(`${base}_${n}`);
+    used.add(name.toLowerCase());
+    return name;
+}
+/** A safe name that no built-in engine profile reads as a collision shape or a detail level. */
+export function clearName(name, fallback) {
+    let base = safeName(name, fallback);
+    if (hasReservedPrefix(base))
+        base = `${fallback}_${base}`;
+    if (hasReservedEnding(base))
+        base = `${base}_${fallback}`;
+    return base;
 }
 /**
  * Node names for bodies, in order. Each is safe for the built-in engines, clear of their
@@ -46,16 +75,5 @@ export function hasReservedEnding(name) {
  */
 export function nodeNames(names) {
     const used = new Set();
-    return names.map((name) => {
-        let base = safeName(name, "body");
-        if (hasReservedPrefix(base))
-            base = `body_${base}`;
-        if (hasReservedEnding(base))
-            base = `${base}_body`;
-        let candidate = base;
-        for (let n = 2; used.has(candidate.toLowerCase()); n += 1)
-            candidate = `${base}_${n}`;
-        used.add(candidate.toLowerCase());
-        return candidate;
-    });
+    return names.map((name) => uniqueName(used, clearName(name, "body")));
 }

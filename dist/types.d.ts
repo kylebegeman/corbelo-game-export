@@ -1,4 +1,5 @@
-import type { EngineProfile, EngineProfileId } from "./profiles.js";
+import type { CollisionKernel } from "./collision.js";
+import type { EngineProfile, EngineProfileId, NodeRole } from "./profiles.js";
 export type Vec3 = [number, number, number];
 /** Anything `JSON.stringify` writes and `JSON.parse` reads back unchanged. */
 export type JsonValue = null | boolean | number | string | JsonValue[] | {
@@ -118,6 +119,69 @@ export interface ExportInput extends ExportOptions {
     bodies: readonly BodyInput[];
     source: SourceSpace;
 }
+/** A lower detail level of a body: a mesh the caller made, in the same units and axes as the body. */
+export interface LodInput {
+    /** x, y, z for each vertex. */
+    positions: ArrayLike<number>;
+    /** Three vertex numbers per triangle. Leave out for triangle soup. */
+    indices?: ArrayLike<number>;
+    /** One whole number per triangle, naming the exact CAD face the triangle came from. */
+    faceIds?: ArrayLike<number>;
+    /** One entry per triangle, as on a body. Without it the level is all in the body's own colour. */
+    faceColors?: readonly (ColorInput | null | undefined)[];
+}
+/** One piece the body was made from, in the same units and axes as the body. Only its points are used: it becomes their convex hull. */
+export interface CollisionPieceInput {
+    /** x, y, z for each point. */
+    positions: ArrayLike<number>;
+}
+/** A named point on a body, written as an empty node: where something else goes, like a hand, a light or a door. */
+export interface AttachPointInput {
+    /** Becomes the node name, after it is made safe and unique in the file. */
+    name: string;
+    /** In the body's units and axes. */
+    position: readonly [number, number, number];
+    /** Which way the point faces, in the body's axes. The node's own +Z axis is turned to point along it. */
+    direction?: readonly [number, number, number];
+}
+/** A body of a game asset: a body, and what a game needs around it. */
+export interface AssetBodyInput extends BodyInput {
+    /** Lower detail levels, the nearest to full detail first. */
+    lods?: readonly LodInput[];
+    /** The pieces the body was made from, for collision. */
+    collisionPieces?: readonly CollisionPieceInput[];
+    attachPoints?: readonly AttachPointInput[];
+}
+/** A collision shape, cheapest first. */
+export type CollisionShape = "box" | "hull" | "pieces" | "decomposition";
+/** `"none"` writes no collision. `"auto"` takes the cheapest shape whose volume is near enough the visible part's. */
+export type CollisionRequest = "none" | "auto" | CollisionShape;
+export interface CollisionSettings {
+    /** Default `"auto"`. */
+    shape?: CollisionRequest;
+    /** How far the collision volume may be from the visible volume, as a share of it. Default 0.05. */
+    tolerance?: number;
+    /** The most convex pieces a decomposition makes. Default 8. */
+    maxPieces?: number;
+    /** The most corners one convex piece has. Default 64. */
+    maxHullVertices?: number;
+}
+export interface TexcoordOptions {
+    /** The side of one whole texture in the world, in metres. Default 1. */
+    tileMeters?: number;
+}
+export interface AssetOptions extends ExportOptions {
+    /** Default `"auto"`. */
+    collision?: CollisionRequest | CollisionSettings;
+    /** `true` or `{ tileMeters }` writes box-projected texture coordinates. Default none. */
+    texcoords?: boolean | TexcoordOptions;
+    /** Needed only for a general convex decomposition. */
+    kernel?: CollisionKernel;
+}
+export interface AssetInput extends AssetOptions {
+    bodies: readonly AssetBodyInput[];
+    source: SourceSpace;
+}
 export interface Box {
     min: Vec3;
     max: Vec3;
@@ -141,13 +205,16 @@ export interface PivotFacts {
     source: Vec3;
 }
 export interface BodyFacts {
-    /** The node and mesh name as written. */
+    /**
+     * The node name as written, and the mesh name too, except where detail levels are laid out
+     * as a group: there the body's node is empty and its full-detail mesh is named as level 0.
+     */
     name: string;
     /** The name the caller gave. */
     sourceName: string;
     /** Index of the node in the glTF `nodes` array. */
     node: number;
-    /** Index of the mesh in the glTF `meshes` array. */
+    /** Index of the full-detail mesh in the glTF `meshes` array. */
     mesh: number;
     triangles: number;
     /** Vertices written, after splitting along hard edges and between colours. */
@@ -181,6 +248,103 @@ export interface BodyFacts {
     pivot: PivotFacts;
     /** The node translation in metres. All zero when `placement` is `"origin"`. */
     translation: Vec3;
+    /** Only from `exportGameAsset`, when collision was asked for. */
+    collision?: CollisionFacts;
+    /** Only from `exportGameAsset`, for a body given lower detail levels: every level, level 0 first. */
+    lods?: LodFacts[];
+    /** Only from `exportGameAsset`, for a body given attach points. */
+    attachPoints?: AttachPointFacts[];
+}
+/** A tier of collision that was built and measured. Volumes are cubic metres. */
+export interface CollisionTierFacts {
+    shape: CollisionShape;
+    pieces: number;
+    /** The volumes of the pieces added up. */
+    volume: number;
+    /** `(volume - visible) / visible`. Null when the body has no volume to compare with. */
+    error: number | null;
+    withinTolerance: boolean | null;
+}
+/** One node of a collision shape: one convex piece. */
+export interface CollisionNodeFacts {
+    /** The node and mesh name as written, in the way the engine reads it. */
+    name: string;
+    node: number;
+    mesh: number;
+    /** `"box"` is the box around the body. Everything else is `"convex"`. */
+    kind: "box" | "convex";
+    /** What the profile says the engine does with the name. Null when the profile has no rule for it. */
+    role: NodeRole | null;
+    vertices: number;
+    triangles: number;
+    /** Cubic metres. */
+    volume: number;
+    /** True when the piece was stopped at the most corners allowed and left points outside. */
+    capped: boolean;
+    /** Where the piece sits in the scene. */
+    bounds: MeasuredBox;
+}
+export interface CollisionFacts {
+    requested: CollisionRequest;
+    /** The shape written. `"none"` when none was asked for or none could be built. */
+    shape: CollisionShape | "none";
+    /** How many convex pieces, and so how many nodes. */
+    pieces: number;
+    tolerance: number;
+    /** Cubic metres. `visible` and `error` are null for a body that is not closed. */
+    volume: {
+        visible: number | null;
+        collision: number;
+        error: number | null;
+    };
+    withinTolerance: boolean | null;
+    nodes: CollisionNodeFacts[];
+    /** Every tier that was built on the way, cheapest first. */
+    tried: CollisionTierFacts[];
+    /** Why a tier was passed over, or why there is no shape. */
+    notes: string[];
+}
+/** One detail level of a body. Level 0 is the body at full detail. */
+export interface LodFacts {
+    level: number;
+    /** The node and mesh name as written. */
+    name: string;
+    node: number;
+    mesh: number;
+    /** False for a level written hidden with `KHR_node_visibility`, for the game to show in its turn. */
+    visible: boolean;
+    triangles: number;
+    vertices: number;
+    materialSlots: number;
+    materials: string[];
+    degenerateTrianglesDropped: number;
+    openEdges: number;
+    nonManifoldEdges: number;
+    /**
+     * How far the outline moved from level 0: the greatest distance from a vertex or the middle
+     * of a triangle of either mesh to the nearest point of the other. `share` is that distance
+     * over the diagonal of the box around level 0. All zero for level 0.
+     */
+    deviation: {
+        meters: number;
+        engine: number;
+        share: number;
+    };
+}
+export interface AttachPointFacts {
+    /** The node name as written. */
+    name: string;
+    /** The name the caller gave. */
+    sourceName: string;
+    node: number;
+    /** Where the point is in the scene: metres, +Y up. */
+    meters: Vec3;
+    /** The same in the engine's unit and up axis. */
+    engine: Vec3;
+    /** The same in the caller's units and axes. */
+    source: Vec3;
+    /** Only with a direction: the way the node's +Z axis points, in glTF axes, at length 1. */
+    direction?: Vec3;
 }
 /** One material slot of a body: one primitive of its mesh. */
 export interface SlotFacts {
@@ -233,6 +397,25 @@ export interface PackFacts {
         normals: NormalMode;
         weldTolerance: number;
         faceIds: boolean;
+        /** Only from `exportGameAsset`, with texture coordinates. */
+        texcoords?: {
+            projection: "box";
+            tileMeters: number;
+        };
+        /** Only from `exportGameAsset`. */
+        collision?: {
+            shape: CollisionRequest;
+            tolerance: number;
+            maxPieces: number;
+            maxHullVertices: number;
+            kernel: boolean;
+        };
+        /**
+         * Only from `exportGameAsset`, when a body has lower detail levels. `"group"`: the body's
+         * node is empty and every level is a child of it, named the way the engine reads levels.
+         * `"children"`: the body's node holds level 0 and the lower levels are its children, hidden.
+         */
+        lodLayout?: "group" | "children";
     };
     bodies: BodyFacts[];
     materials: MaterialFacts[];

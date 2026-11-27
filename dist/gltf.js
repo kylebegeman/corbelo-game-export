@@ -7,5 +7,7 @@ export const COMPONENT_FLOAT = 5126;
 export const TARGET_ARRAY_BUFFER = 34962;
 export const TARGET_ELEMENT_ARRAY_BUFFER = 34963;
 export const MODE_TRIANGLES = 4;
+/** The glTF extension that says whether a node is shown. */
+export const NODE_VISIBILITY_EXTENSION = "KHR_node_visibility";
 /** The key under `scenes[0].extras` that holds the profile, the facts and the provenance. */
 export const EXTRAS_KEY = "corbeloGameExport";
