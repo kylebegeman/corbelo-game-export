@@ -18,17 +18,20 @@ export function counting(kernel: CollisionKernel): { kernel: CollisionKernel; ma
   let freed = 0;
   const wrap = (solid: KernelSolid): KernelSolid => {
     made += 1;
-    return {
+    const wrapped: KernelSolid & { inner: KernelSolid } = {
       hull: () => wrap(solid.hull()),
       splitByPlane: (normal, offset) => solid.splitByPlane(normal, offset).map(wrap),
       volume: () => solid.volume(),
       getMesh: () => solid.getMesh(),
       decompose: () => solid.decompose!().map(wrap),
+      intersect: (other) => wrap(solid.intersect!((other as KernelSolid & { inner: KernelSolid }).inner)),
+      inner: solid,
       delete: () => {
         freed += 1;
         solid.delete!();
       },
     };
+    return wrapped;
   };
   return { kernel: { solid: (positions, indices) => wrap(kernel.solid(positions, indices)) }, made: () => made, freed: () => freed };
 }

@@ -326,12 +326,18 @@ function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
+/** Triangles where they sit in a scene, in metres, +Y up. */
+export interface SceneMesh {
+  /** x, y, z per vertex. */
+  positions: Float64Array;
+  /** Three vertex numbers per triangle. */
+  indices: ArrayLike<number>;
+}
+
 /** A body's full-detail triangles where they sit in the scene, in metres. */
-interface SceneBody {
+interface SceneBody extends SceneMesh {
   name: string;
   body: PackBody;
-  /** x, y, z per vertex, node translation added. */
-  positions: Float64Array;
 }
 
 /** Vertices that share a place, counted as one: the number of each vertex's place. */
@@ -496,7 +502,7 @@ function distanceSquared(solid: Uint8Array, columns: number, rows: number): Floa
  * windows, tunnels. The asset is drawn as a filled outline on a grid, standing on a floor at
  * its lowest point, and each free region the outline shuts in is one opening.
  */
-function openingsAlong(bodies: readonly SceneBody[], axis: "x" | "z", min: Vec3, max: Vec3, player: PlayerProfile): { cell: number; openings: OpeningValues["openings"]; ignored: number } {
+export function openingsAlong(bodies: readonly SceneMesh[], axis: "x" | "z", min: Vec3, max: Vec3, player: PlayerProfile): { cell: number; openings: OpeningValues["openings"]; ignored: number } {
   const across = axis === "x" ? 2 : 0;
   const width = max[across]! - min[across]!;
   const height = max[1] - min[1];
@@ -513,8 +519,7 @@ function openingsAlong(bodies: readonly SceneBody[], axis: "x" | "z", min: Vec3,
     const row = Math.min(rows - 2, Math.max(1, Math.floor(gy)));
     solid[row * columns + column] = 1;
   };
-  for (const { body, positions } of bodies) {
-    const { indices } = body;
+  for (const { indices, positions } of bodies) {
     for (let t = 0; t < indices.length; t += 3) {
       const xs: number[] = [];
       const ys: number[] = [];
@@ -628,14 +633,13 @@ function openingsAlong(bodies: readonly SceneBody[], axis: "x" | "z", min: Vec3,
 }
 
 /** Flat places and slopes a player could stand on, read off the triangles that face up. */
-function walkable(bodies: readonly SceneBody[], floor: number, player: PlayerProfile): { levels: number[]; ramps: RampValues["ramps"] } {
+export function walkable(bodies: readonly SceneMesh[], floor: number, player: PlayerProfile): { levels: number[]; ramps: RampValues["ramps"] } {
   const leastArea = (player.capsuleRadiusM * player.capsuleRadiusM) / 2;
   const flat = new Map<number, number>();
   const slopes: { nx: number; ny: number; nz: number; d: number; area: number }[] = [];
   const flatDot = Math.cos(RAMP_MIN_DEGREES / DEGREES);
   const steepDot = Math.cos(RAMP_MAX_DEGREES / DEGREES);
-  for (const { body, positions } of bodies) {
-    const { indices } = body;
+  for (const { indices, positions } of bodies) {
     for (let t = 0; t < indices.length; t += 3) {
       const a = indices[t]! * 3;
       const b = indices[t + 1]! * 3;
@@ -693,6 +697,31 @@ function walkable(bodies: readonly SceneBody[], floor: number, player: PlayerPro
   return { levels, ramps };
 }
 
+/** The player a check is run for: a profile of the caller's own, a built-in one by engine profile id, or the player of the engine a file was written for. */
+export function resolvePlayer(option: PlayerProfile | EngineProfileId | undefined, profile: string): PlayerProfile {
+  let player: PlayerProfile;
+  if (option === undefined) {
+    // The player of the engine the file was written for. A custom profile gets Godot's, the default profile's.
+    player = Object.hasOwn(PLAYER_PROFILES, profile) ? PLAYER_PROFILES[profile as EngineProfileId] : PLAYER_PROFILES.godot4;
+  } else if (typeof option === "string") {
+    if (!Object.hasOwn(PLAYER_PROFILES, option)) refuse("BAD_OPTION", `Unknown player "${option}". Built-in players go by engine profile: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
+    player = PLAYER_PROFILES[option];
+  } else {
+    player = option;
+    if (typeof player !== "object" || player === null || typeof player.id !== "string" || player.id === "") refuse("BAD_OPTION", "A player profile needs an id.");
+    for (const key of ["capsuleRadiusM", "capsuleHeightM"] as const) {
+      if (!(Number.isFinite(player[key]) && player[key] > 0)) refuse("BAD_OPTION", `Player "${player.id}": ${key} must be a positive number of metres.`);
+    }
+    for (const key of ["stepHeightM", "jumpHeightM"] as const) {
+      if (!(Number.isFinite(player[key]) && player[key] >= 0)) refuse("BAD_OPTION", `Player "${player.id}": ${key} must be zero or a positive number of metres.`);
+    }
+    if (!(Number.isFinite(player.walkableSlopeDeg) && player.walkableSlopeDeg >= 0 && player.walkableSlopeDeg <= 90)) {
+      refuse("BAD_OPTION", `Player "${player.id}": walkableSlopeDeg must be from 0 to 90 degrees.`);
+    }
+  }
+  return player;
+}
+
 function readOptions(options: CheckOptions, facts: PackFacts): { assetClass: AssetClass; budget: GameBudget; player: PlayerProfile; gridMeters: number; lodDeviationShare: number } {
   if (typeof options !== "object" || options === null) refuse("BAD_OPTION", "Check options must be an object.");
   const assetClass = options.assetClass ?? DEFAULT_ASSET_CLASS;
@@ -707,26 +736,7 @@ function readOptions(options: CheckOptions, facts: PackFacts): { assetClass: Ass
       budget[key] = value;
     }
   }
-  let player: PlayerProfile;
-  if (options.player === undefined) {
-    // The player of the engine the file was written for. A custom profile gets Godot's, the default profile's.
-    player = Object.hasOwn(PLAYER_PROFILES, facts.profile) ? PLAYER_PROFILES[facts.profile as EngineProfileId] : PLAYER_PROFILES.godot4;
-  } else if (typeof options.player === "string") {
-    if (!Object.hasOwn(PLAYER_PROFILES, options.player)) refuse("BAD_OPTION", `Unknown player "${options.player}". Built-in players go by engine profile: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
-    player = PLAYER_PROFILES[options.player];
-  } else {
-    player = options.player;
-    if (typeof player !== "object" || player === null || typeof player.id !== "string" || player.id === "") refuse("BAD_OPTION", "A player profile needs an id.");
-    for (const key of ["capsuleRadiusM", "capsuleHeightM"] as const) {
-      if (!(Number.isFinite(player[key]) && player[key] > 0)) refuse("BAD_OPTION", `Player "${player.id}": ${key} must be a positive number of metres.`);
-    }
-    for (const key of ["stepHeightM", "jumpHeightM"] as const) {
-      if (!(Number.isFinite(player[key]) && player[key] >= 0)) refuse("BAD_OPTION", `Player "${player.id}": ${key} must be zero or a positive number of metres.`);
-    }
-    if (!(Number.isFinite(player.walkableSlopeDeg) && player.walkableSlopeDeg >= 0 && player.walkableSlopeDeg <= 90)) {
-      refuse("BAD_OPTION", `Player "${player.id}": walkableSlopeDeg must be from 0 to 90 degrees.`);
-    }
-  }
+  const player = resolvePlayer(options.player, facts.profile);
   const gridMeters = options.gridMeters ?? DEFAULT_GRID_METERS;
   if (!(Number.isFinite(gridMeters) && gridMeters > 0)) refuse("BAD_OPTION", `gridMeters must be a positive number of metres. Got ${String(gridMeters)}.`);
   const lodDeviationShare = options.lodDeviationShare ?? DEFAULT_LOD_DEVIATION_SHARE;
@@ -766,7 +776,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
   const scene: SceneBody[] = pack.bodies.map((body, at) => {
     const positions = new Float64Array(body.positions.length);
     for (let n = 0; n < positions.length; n += 1) positions[n] = body.positions[n]! + body.translation[n % 3]!;
-    return { name: facts.bodies[at]?.name ?? body.name, body, positions };
+    return { name: facts.bodies[at]?.name ?? body.name, body, positions, indices: body.indices };
   });
 
   // Size.

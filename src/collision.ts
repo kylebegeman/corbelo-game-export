@@ -35,6 +35,8 @@ export interface KernelSolid {
   getMesh(): KernelMesh;
   /** The parts of the solid that do not touch, each a solid of its own. */
   decompose?(): KernelSolid[];
+  /** What this solid and another both fill. Only the kit checks use it, to measure where trim runs into the piece next to it. */
+  intersect?(other: KernelSolid): KernelSolid;
   /** Frees the solid. Called on every solid the package asked for, when it is done with it. */
   delete?(): void;
 }
@@ -146,7 +148,7 @@ function boxPiece(positions: ArrayLike<number>): CollisionPiece | null {
 }
 
 /** Each place in space once: the kernel needs a mesh whose triangles share vertices where they meet. */
-function weldExact(positions: ArrayLike<number>, indices: ArrayLike<number>): { positions: Float32Array; indices: Uint32Array } {
+export function weldExact(positions: ArrayLike<number>, indices: ArrayLike<number>): { positions: Float32Array; indices: Uint32Array } {
   const numberOf = new Map<string, number>();
   const remap = new Uint32Array(positions.length / 3);
   const kept: number[] = [];

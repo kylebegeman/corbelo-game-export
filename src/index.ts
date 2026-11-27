@@ -49,6 +49,55 @@ export { DEFAULT_CREASE_ANGLE, DEFAULT_MAX_TRIANGLES, DEFAULT_WELD_TOLERANCE, ex
 export { readAccessor, readGlb, readPack, type AccessorArray, type GlbDocument, type PackBody, type PackContents, type PackMaterial, type PackSurface } from "./glb-read.js";
 export { EXTRAS_KEY, type GltfJson } from "./gltf.js";
 export { convexHull, meshVolume, type Hull } from "./hull.js";
+export {
+  cellSize,
+  DEFAULT_TRIM_METERS,
+  KIT_LAYOUT_NAMES,
+  KIT_SIDES,
+  kitLayouts,
+  layoutJoints,
+  mateOf,
+  oppositeSide,
+  placePoint,
+  resolveKit,
+  SOCKET_AXIS_DEGREES,
+  turnCell,
+  turnSide,
+  type Kit,
+  type KitCell,
+  type KitGrid,
+  type KitGridInput,
+  type KitInput,
+  type KitLayout,
+  type KitLayoutInput,
+  type KitPiece,
+  type KitPieceInput,
+  type KitPlacement,
+  type KitPlacementInput,
+  type KitSide,
+  type KitSocket,
+  type KitSocketInput,
+  type LayoutJoint,
+  type LayoutJoints,
+  type PlacedSocket,
+} from "./kit.js";
+export {
+  checkKit,
+  DEFAULT_KIT_TOLERANCE_METERS,
+  KIT_CHECK_IDS,
+  SEAM_LINES,
+  type CollisionTileValues,
+  type CornerValues,
+  type InCellsValues,
+  type KitCheckId,
+  type KitCheckOptions,
+  type KitCheckReport,
+  type KitCheckResult,
+  type LayoutValues,
+  type OnGridValues,
+  type SeamValues,
+  type WalkableValues,
+} from "./kit-checks.js";
 export { DEVIATION_MAX_SAMPLES, meshDeviation } from "./lod.js";
 export { DEFAULT_COLOR } from "./materials.js";
 export { DEGENERATE_AREA_RATIO, FLAT_FACE_ANGLE_DEGREES } from "./mesh.js";

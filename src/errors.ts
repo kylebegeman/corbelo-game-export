@@ -23,7 +23,14 @@ export type GameExportErrorCode =
   | "BAD_LOD"
   | "BAD_COLLISION"
   | "BAD_ATTACH_POINT"
-  | "BAD_PACK";
+  | "BAD_PACK"
+  | "BAD_KIT"
+  | "BAD_LAYOUT"
+  | "BAD_ZIP"
+  | "BAD_LOCK"
+  | "PACK_MISMATCH"
+  | "OUTSIDE_PROJECT"
+  | "FILE_IN_THE_WAY";
 
 /** Thrown for input the package refuses. `code` says which rule was broken. */
 export class GameExportError extends Error {
