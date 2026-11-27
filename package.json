@@ -18,6 +18,8 @@
       "default": "./dist/node.js"
     },
     "./schema/pack.schema.json": "./schema/pack.schema.json",
+    "./schema/check-report.schema.json": "./schema/check-report.schema.json",
+    "./schema/pack-manifest.schema.json": "./schema/pack-manifest.schema.json",
     "./package.json": "./package.json"
   },
   "main": "./dist/index.js",

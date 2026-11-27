@@ -127,7 +127,7 @@
       ],
       "properties": {
         "name": {
-          "description": "The node and mesh name as written.",
+          "description": "The node name as written, and the mesh name too, except where detail levels are laid out as a group: there the body's node is empty and its full-detail mesh is named as level 0.",
           "type": "string"
         },
         "sourceName": {
@@ -140,7 +140,8 @@
         },
         "mesh": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Index of the full-detail mesh."
         },
         "triangles": {
           "type": "integer",
@@ -216,6 +217,26 @@
         },
         "translation": {
           "$ref": "#/$defs/Vec3"
+        },
+        "collision": {
+          "description": "Only from exportGameAsset, when collision was asked for.",
+          "$ref": "#/$defs/CollisionFacts"
+        },
+        "lods": {
+          "description": "Only from exportGameAsset, for a body given lower detail levels: every level, level 0 first.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LodFacts"
+          },
+          "minItems": 2
+        },
+        "attachPoints": {
+          "description": "Only from exportGameAsset, for a body given attach points.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AttachPointFacts"
+          },
+          "minItems": 1
         }
       }
     },
@@ -240,6 +261,372 @@
         "vertices": {
           "type": "integer",
           "minimum": 3
+        }
+      }
+    },
+    "CollisionShape": {
+      "description": "A collision shape, cheapest first.",
+      "enum": [
+        "box",
+        "hull",
+        "pieces",
+        "decomposition"
+      ]
+    },
+    "CollisionRequest": {
+      "description": "none writes no collision. auto takes the cheapest shape whose volume is near enough the visible part's.",
+      "enum": [
+        "none",
+        "auto",
+        "box",
+        "hull",
+        "pieces",
+        "decomposition"
+      ]
+    },
+    "CollisionTierFacts": {
+      "description": "A tier of collision that was built and measured.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shape",
+        "pieces",
+        "volume",
+        "error",
+        "withinTolerance"
+      ],
+      "properties": {
+        "shape": {
+          "$ref": "#/$defs/CollisionShape"
+        },
+        "pieces": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "volume": {
+          "description": "Cubic metres: the volumes of the pieces added up.",
+          "type": "number",
+          "minimum": 0
+        },
+        "error": {
+          "description": "(volume - visible) / visible. Null when the body has no volume to compare with.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "withinTolerance": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "CollisionNodeFacts": {
+      "description": "One node of a collision shape: one convex piece.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "node",
+        "mesh",
+        "kind",
+        "role",
+        "vertices",
+        "triangles",
+        "volume",
+        "capped",
+        "bounds"
+      ],
+      "properties": {
+        "name": {
+          "description": "The node and mesh name as written, in the way the engine reads it.",
+          "type": "string"
+        },
+        "node": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mesh": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "description": "box is the box around the body. Everything else is convex.",
+          "enum": [
+            "box",
+            "convex"
+          ]
+        },
+        "role": {
+          "description": "What the profile says the engine does with the name. Null when the profile has no rule for it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRole"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vertices": {
+          "type": "integer",
+          "minimum": 4
+        },
+        "triangles": {
+          "type": "integer",
+          "minimum": 4
+        },
+        "volume": {
+          "description": "Cubic metres.",
+          "type": "number",
+          "minimum": 0
+        },
+        "capped": {
+          "description": "True when the piece was stopped at the most corners allowed and left points outside.",
+          "type": "boolean"
+        },
+        "bounds": {
+          "$ref": "#/$defs/MeasuredBox"
+        }
+      }
+    },
+    "CollisionFacts": {
+      "description": "The collision shape of one body.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "shape",
+        "pieces",
+        "tolerance",
+        "volume",
+        "withinTolerance",
+        "nodes",
+        "tried",
+        "notes"
+      ],
+      "properties": {
+        "requested": {
+          "$ref": "#/$defs/CollisionRequest"
+        },
+        "shape": {
+          "description": "The shape written. none when none was asked for or none could be built.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CollisionShape"
+            },
+            {
+              "const": "none"
+            }
+          ]
+        },
+        "pieces": {
+          "description": "How many convex pieces, and so how many nodes.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "tolerance": {
+          "description": "How far the collision volume may be from the visible volume, as a share of it.",
+          "type": "number",
+          "minimum": 0
+        },
+        "volume": {
+          "description": "Cubic metres. visible and error are null for a body that is not closed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "visible",
+            "collision",
+            "error"
+          ],
+          "properties": {
+            "visible": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "collision": {
+              "type": "number",
+              "minimum": 0
+            },
+            "error": {
+              "description": "(collision - visible) / visible.",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          }
+        },
+        "withinTolerance": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CollisionNodeFacts"
+          }
+        },
+        "tried": {
+          "description": "Every tier that was built on the way, cheapest first.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CollisionTierFacts"
+          }
+        },
+        "notes": {
+          "description": "Why a tier was passed over, or why there is no shape.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "LodFacts": {
+      "description": "One detail level of a body. Level 0 is the full detail.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "name",
+        "node",
+        "mesh",
+        "visible",
+        "triangles",
+        "vertices",
+        "materialSlots",
+        "materials",
+        "degenerateTrianglesDropped",
+        "openEdges",
+        "nonManifoldEdges",
+        "deviation"
+      ],
+      "properties": {
+        "level": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "description": "The node and mesh name as written.",
+          "type": "string"
+        },
+        "node": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mesh": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "visible": {
+          "description": "False for a level written hidden with KHR_node_visibility, for the game to show in its turn.",
+          "type": "boolean"
+        },
+        "triangles": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "vertices": {
+          "type": "integer",
+          "minimum": 3
+        },
+        "materialSlots": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "materials": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "degenerateTrianglesDropped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "openEdges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nonManifoldEdges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deviation": {
+          "description": "How far the outline moved from level 0: the greatest distance from a vertex or the middle of a triangle of either mesh to the nearest point of the other. share is that distance over the diagonal of the box around level 0. All zero for level 0.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "meters",
+            "engine",
+            "share"
+          ],
+          "properties": {
+            "meters": {
+              "type": "number",
+              "minimum": 0
+            },
+            "engine": {
+              "type": "number",
+              "minimum": 0
+            },
+            "share": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "AttachPointFacts": {
+      "description": "A named point on a body, written as an empty node.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sourceName",
+        "node",
+        "meters",
+        "engine",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "description": "The node name as written.",
+          "type": "string"
+        },
+        "sourceName": {
+          "description": "The name the caller gave.",
+          "type": "string"
+        },
+        "node": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "meters": {
+          "description": "Where the point is in the scene: metres, +Y up.",
+          "$ref": "#/$defs/Vec3"
+        },
+        "engine": {
+          "description": "The same in the engine's unit and up axis.",
+          "$ref": "#/$defs/Vec3"
+        },
+        "source": {
+          "description": "The same in the caller's units and axes.",
+          "$ref": "#/$defs/Vec3"
+        },
+        "direction": {
+          "description": "Only with a direction: the way the node's +Z axis points, in glTF axes, at length 1.",
+          "$ref": "#/$defs/Vec3"
         }
       }
     },
@@ -547,6 +934,65 @@
             },
             "faceIds": {
               "type": "boolean"
+            },
+            "texcoords": {
+              "description": "Only from exportGameAsset, with texture coordinates.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "projection",
+                "tileMeters"
+              ],
+              "properties": {
+                "projection": {
+                  "const": "box"
+                },
+                "tileMeters": {
+                  "description": "The side of one whole texture in the world, in metres.",
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              }
+            },
+            "collision": {
+              "description": "Only from exportGameAsset: what collision was asked for.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "shape",
+                "tolerance",
+                "maxPieces",
+                "maxHullVertices",
+                "kernel"
+              ],
+              "properties": {
+                "shape": {
+                  "$ref": "#/$defs/CollisionRequest"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "maxPieces": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxHullVertices": {
+                  "type": "integer",
+                  "minimum": 4
+                },
+                "kernel": {
+                  "description": "True when the caller passed a kernel in, so a general convex decomposition could be built.",
+                  "type": "boolean"
+                }
+              }
+            },
+            "lodLayout": {
+              "description": "Only from exportGameAsset, when a body has lower detail levels. group: the body's node is empty and every level is a child of it, named the way the engine reads levels. children: the body's node holds level 0 and the lower levels are its children, hidden.",
+              "enum": [
+                "group",
+                "children"
+              ]
             }
           }
         },

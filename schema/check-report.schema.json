@@ -1,0 +1,1426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/check-report.schema.json",
+  "title": "corbelo-game-export check report",
+  "description": "What checkGameAsset returns and the check command prints: one result for every game check, always all twelve and always in the same order. Each result says pass, warn, fail or not-measured with a reason, and carries the numbers it was judged by.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "generator",
+    "profile",
+    "assetClass",
+    "budget",
+    "player",
+    "gridMeters",
+    "status",
+    "counts",
+    "results"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "generator": {
+      "type": "string"
+    },
+    "profile": {
+      "description": "The id of the engine profile the file was written for.",
+      "type": "string"
+    },
+    "assetClass": {
+      "$ref": "#/$defs/AssetClass"
+    },
+    "budget": {
+      "$ref": "#/$defs/GameBudget"
+    },
+    "player": {
+      "$ref": "#/$defs/PlayerProfile"
+    },
+    "gridMeters": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "status": {
+      "description": "The worst of the results: fail over warn over pass. What was not measured does not count.",
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass",
+        "warn",
+        "fail",
+        "notMeasured"
+      ],
+      "properties": {
+        "pass": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notMeasured": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/SizeResult"
+        },
+        {
+          "$ref": "#/$defs/PivotResult"
+        },
+        {
+          "$ref": "#/$defs/TrianglesResult"
+        },
+        {
+          "$ref": "#/$defs/VerticesResult"
+        },
+        {
+          "$ref": "#/$defs/ShadingResult"
+        },
+        {
+          "$ref": "#/$defs/CleanMeshResult"
+        },
+        {
+          "$ref": "#/$defs/MaterialSlotsResult"
+        },
+        {
+          "$ref": "#/$defs/CollisionResult"
+        },
+        {
+          "$ref": "#/$defs/DetailLevelsResult"
+        },
+        {
+          "$ref": "#/$defs/PlayerOpeningsResult"
+        },
+        {
+          "$ref": "#/$defs/PlayerStepsResult"
+        },
+        {
+          "$ref": "#/$defs/PlayerRampsResult"
+        }
+      ],
+      "items": false,
+      "minItems": 12
+    }
+  },
+  "$defs": {
+    "AssetClass": {
+      "description": "What kind of asset it is, which decides the starting budget and the size it is expected to have.",
+      "enum": [
+        "small-prop",
+        "large-prop",
+        "kit-piece"
+      ]
+    },
+    "GameBudget": {
+      "description": "Limits for one asset. Vertices are counted after hard edges split them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxTriangles",
+        "maxVertices",
+        "maxMaterialSlots"
+      ],
+      "properties": {
+        "maxTriangles": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxVertices": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxMaterialSlots": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "PlayerProfile": {
+      "description": "The body that moves through a level: a capsule, and what it can climb. Lengths are metres. A profile of the caller's own is written back as given, so it may hold other keys.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "capsuleRadiusM",
+        "capsuleHeightM",
+        "stepHeightM",
+        "walkableSlopeDeg",
+        "jumpHeightM"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "description": "For people.",
+          "type": "string"
+        },
+        "origin": {
+          "description": "built-in for the profiles of this package.",
+          "type": "string"
+        },
+        "engine": {
+          "description": "godot, unity or unreal for the built-in profiles.",
+          "type": "string"
+        },
+        "capsuleRadiusM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "capsuleHeightM": {
+          "description": "The whole capsule, end to end.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "stepHeightM": {
+          "description": "The tallest rise walked up without a jump. Zero when the character climbs no steps.",
+          "type": "number",
+          "minimum": 0
+        },
+        "walkableSlopeDeg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 90
+        },
+        "jumpHeightM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "CheckStatus": {
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "not-measured"
+      ]
+    },
+    "SizeValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "meters",
+        "engine",
+        "unit",
+        "largestMeters",
+        "expectedMeters",
+        "suggestedScale"
+      ],
+      "properties": {
+        "meters": {
+          "description": "The box around everything in the file, in metres.",
+          "$ref": "pack.schema.json#/$defs/Vec3"
+        },
+        "engine": {
+          "description": "The same in the engine's unit and up axis.",
+          "$ref": "pack.schema.json#/$defs/Vec3"
+        },
+        "unit": {
+          "description": "The engine's unit, for people: m or cm.",
+          "type": "string"
+        },
+        "largestMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "expectedMeters": {
+          "description": "The least and the most the longest side of this class of asset is expected to be.",
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "suggestedScale": {
+          "description": "What to multiply the size by to land in the expected range, when a mix-up of units would explain it. Otherwise null.",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "PivotValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gridMeters",
+        "bodies"
+      ],
+      "properties": {
+        "gridMeters": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "bodies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "mode",
+              "meters",
+              "fromMinCorner",
+              "inside",
+              "onGrid"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "mode": {
+                "$ref": "pack.schema.json#/$defs/PivotMode"
+              },
+              "meters": {
+                "description": "Where the pivot is in the scene, in metres.",
+                "$ref": "pack.schema.json#/$defs/Vec3"
+              },
+              "fromMinCorner": {
+                "description": "From the corner of the body's box with the least x, y and z to the pivot, in metres.",
+                "$ref": "pack.schema.json#/$defs/Vec3"
+              },
+              "inside": {
+                "description": "True when the pivot is in or on the body's box.",
+                "type": "boolean"
+              },
+              "onGrid": {
+                "description": "True when the pivot is a whole number of grid steps from a face of the body's box along every axis the body is at least one grid step long in.",
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "CountValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "budget",
+        "bodies"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bodies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "count"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "ShadingValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normals",
+        "creaseAngle",
+        "hardEdges",
+        "softEdges",
+        "backFacingNormals",
+        "maxNormalAngle"
+      ],
+      "properties": {
+        "normals": {
+          "enum": [
+            "angle-area",
+            "face-weighted"
+          ]
+        },
+        "creaseAngle": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 180
+        },
+        "hardEdges": {
+          "description": "Edges where two triangles meet with different normals.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "softEdges": {
+          "description": "Edges where two triangles meet with the same normals.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "backFacingNormals": {
+          "description": "Corners whose normal points away from the triangle it shades.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxNormalAngle": {
+          "description": "The widest angle between a vertex normal and the face of a triangle it shades, in degrees.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 180
+        }
+      }
+    },
+    "CleanMeshValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "degenerateTrianglesDropped",
+        "sliverTriangles",
+        "flippedEdges",
+        "insideOutBodies",
+        "openEdges",
+        "nonManifoldEdges"
+      ],
+      "properties": {
+        "degenerateTrianglesDropped": {
+          "description": "Triangles with no area that were left out when the file was written.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "sliverTriangles": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flippedEdges": {
+          "description": "Edges whose two triangles face opposite ways.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "insideOutBodies": {
+          "description": "Closed bodies whose faces point inwards.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "openEdges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nonManifoldEdges": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "MaterialSlotValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "budget",
+        "fileMaterials",
+        "bodies"
+      ],
+      "properties": {
+        "count": {
+          "description": "The most slots any one body has.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fileMaterials": {
+          "description": "Distinct materials in the file.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "bodies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "count"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "CollisionValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tolerance",
+        "bodies"
+      ],
+      "properties": {
+        "tolerance": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bodies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "requested",
+              "shape",
+              "pieces",
+              "error",
+              "withinTolerance"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "requested": {
+                "description": "What was asked for. none for a body with no collision facts.",
+                "$ref": "pack.schema.json#/$defs/CollisionRequest"
+              },
+              "shape": {
+                "anyOf": [
+                  {
+                    "$ref": "pack.schema.json#/$defs/CollisionShape"
+                  },
+                  {
+                    "const": "none"
+                  }
+                ]
+              },
+              "pieces": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "error": {
+                "description": "(collision - visible) / visible. Null when the body is not closed.",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "withinTolerance": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "DetailLevelValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxDeviationShare",
+        "bodies"
+      ],
+      "properties": {
+        "maxDeviationShare": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bodies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "levels"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "levels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "level",
+                    "triangles",
+                    "vertices",
+                    "openEdges",
+                    "deviationMeters",
+                    "deviationShare"
+                  ],
+                  "properties": {
+                    "level": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "triangles": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "vertices": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "openEdges": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "deviationMeters": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "deviationShare": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "OpeningValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "player",
+        "capsuleRadiusMeters",
+        "capsuleHeightMeters",
+        "cellMeters",
+        "openings",
+        "ignored"
+      ],
+      "properties": {
+        "player": {
+          "description": "The id of the player profile.",
+          "type": "string"
+        },
+        "capsuleRadiusMeters": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "capsuleHeightMeters": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "cellMeters": {
+          "description": "The size of one cell of the picture the openings were measured in. Sizes are good to about two cells.",
+          "type": "number",
+          "minimum": 0
+        },
+        "openings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "axis",
+              "widthMeters",
+              "heightMeters",
+              "sillMeters",
+              "fits",
+              "walkIn"
+            ],
+            "properties": {
+              "axis": {
+                "description": "The axis looked along, in glTF space: the way through the opening.",
+                "enum": [
+                  "x",
+                  "z"
+                ]
+              },
+              "widthMeters": {
+                "type": "number",
+                "minimum": 0
+              },
+              "heightMeters": {
+                "type": "number",
+                "minimum": 0
+              },
+              "sillMeters": {
+                "description": "How far above the bottom of the asset the player stands in it, or its lowest point when the player does not fit.",
+                "type": "number"
+              },
+              "fits": {
+                "description": "True when the capsule fits in it standing up.",
+                "type": "boolean"
+              },
+              "walkIn": {
+                "description": "True when it fits and the sill is no taller than the step height.",
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "ignored": {
+          "description": "Openings too small to be meant for the player: narrower than the capsule's radius or lower than half its height.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "StepValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "player",
+        "stepHeightMeters",
+        "jumpHeightMeters",
+        "levels",
+        "rises",
+        "maxRiseMeters"
+      ],
+      "properties": {
+        "player": {
+          "description": "The id of the player profile.",
+          "type": "string"
+        },
+        "stepHeightMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "jumpHeightMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "levels": {
+          "description": "Flat levels a player can stand on, as heights above the bottom of the asset, lowest first.",
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "rises": {
+          "description": "The rises of the stair found: from the bottom to the first level, then level to level.",
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "maxRiseMeters": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "RampValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "player",
+        "walkableSlopeDegrees",
+        "ramps"
+      ],
+      "properties": {
+        "player": {
+          "description": "The id of the player profile.",
+          "type": "string"
+        },
+        "walkableSlopeDegrees": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 90
+        },
+        "ramps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "angleDegrees",
+              "areaSquareMeters",
+              "walkable"
+            ],
+            "properties": {
+              "angleDegrees": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 90
+              },
+              "areaSquareMeters": {
+                "type": "number",
+                "minimum": 0
+              },
+              "walkable": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "SizeResult": {
+      "description": "Size in metres and in the engine's unit, with a warning for a wrong scale.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "size"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/SizeValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "PivotResult": {
+      "description": "Where the pivot is and whether it sits on the grid.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "pivot"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/PivotValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "TrianglesResult": {
+      "description": "Triangles against the budget.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "triangles"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/CountValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "VerticesResult": {
+      "description": "Vertices, after hard edges split them, against the budget.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "vertices"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/CountValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "ShadingResult": {
+      "description": "Hard and soft edges, and normals that shade their own triangles badly.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "shading"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/ShadingValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "CleanMeshResult": {
+      "description": "Degenerate and sliver triangles, flipped faces and open edges.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "clean-mesh"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/CleanMeshValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "MaterialSlotsResult": {
+      "description": "Material slots against the budget.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "material-slots"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/MaterialSlotValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "CollisionResult": {
+      "description": "The collision shape, and how far its volume is from the visible part's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "collision"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/CollisionValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "DetailLevelsResult": {
+      "description": "Lower detail levels: their counts and how far each moved the outline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "detail-levels"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/DetailLevelValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "PlayerOpeningsResult": {
+      "description": "Openings a player's capsule passes through.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "player-openings"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/OpeningValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "PlayerStepsResult": {
+      "description": "Stair rises against the player's step height.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "player-steps"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/StepValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "PlayerRampsResult": {
+      "description": "Ramp angles against the player's walkable slope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "player-ramps"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/RampValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    }
+  }
+}

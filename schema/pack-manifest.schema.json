@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/pack-manifest.schema.json",
+  "title": "corbelo-game-export pack manifest",
+  "description": "The <name>.pack.json file of a pack from exportGamePack: every GLB of one asset or of a family, with its size, its SHA-256, the facts measured from it and the results of the game checks.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "kind",
+    "name",
+    "generator",
+    "profile",
+    "engine",
+    "naming",
+    "materials",
+    "files"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "description": "asset: one GLB. family: one GLB for each row.",
+      "enum": [
+        "asset",
+        "family"
+      ]
+    },
+    "name": {
+      "description": "The pack's name: the asset's name, or the family's name by the pattern without a row.",
+      "type": "string",
+      "minLength": 1
+    },
+    "generator": {
+      "type": "string"
+    },
+    "generatedAt": {
+      "description": "Only when the caller gave a time. The package never reads the clock.",
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "description": "Only when given: the caller's own name for this revision of the source.",
+      "type": "string",
+      "minLength": 1
+    },
+    "profile": {
+      "description": "Engine profile id.",
+      "type": "string"
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit",
+        "unitMeters",
+        "up"
+      ],
+      "properties": {
+        "unit": {
+          "type": "string"
+        },
+        "unitMeters": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "up": {
+          "enum": [
+            "Y",
+            "Z"
+          ]
+        }
+      }
+    },
+    "naming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern"
+      ],
+      "properties": {
+        "pattern": {
+          "description": "The name pattern the asset names were made from, like SM_{Family}_{Row}.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "assetClass": {
+      "description": "Only when checks ran.",
+      "$ref": "check-report.schema.json#/$defs/AssetClass"
+    },
+    "budget": {
+      "description": "Only when checks ran.",
+      "$ref": "check-report.schema.json#/$defs/GameBudget"
+    },
+    "player": {
+      "description": "Only when checks ran.",
+      "$ref": "check-report.schema.json#/$defs/PlayerProfile"
+    },
+    "status": {
+      "description": "Only when checks ran: the worst status of any file.",
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "materials": {
+      "description": "Every material of the pack by name. A name means the same colour in every file.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "color",
+          "baseColorFactor",
+          "files"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "description": "sRGB.",
+            "type": "string",
+            "pattern": "^#[0-9a-f]{6}$"
+          },
+          "baseColorFactor": {
+            "description": "Linear, as written to the files.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "files": {
+            "description": "The files that use it.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "files": {
+      "description": "One entry for each GLB, in the order of the rows.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/File"
+      },
+      "minItems": 1
+    },
+    "provenance": {
+      "description": "Opaque JSON from the caller, stored as given."
+    }
+  },
+  "$defs": {
+    "File": {
+      "description": "One GLB of the pack.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "role",
+        "mediaType",
+        "bytes",
+        "sha256",
+        "asset",
+        "facts"
+      ],
+      "properties": {
+        "name": {
+          "description": "The file's name in the pack.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+\\.glb$"
+        },
+        "role": {
+          "const": "model"
+        },
+        "mediaType": {
+          "const": "model/gltf-binary"
+        },
+        "bytes": {
+          "description": "Size of the file.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "description": "SHA-256 of the file.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "asset": {
+          "description": "The asset's name: the file name without .glb.",
+          "type": "string",
+          "minLength": 1
+        },
+        "row": {
+          "description": "Only in a family: the row's name as given.",
+          "type": "string"
+        },
+        "facts": {
+          "description": "The same facts the GLB carries in its scene extras.",
+          "$ref": "pack.schema.json#/$defs/PackFacts"
+        },
+        "checks": {
+          "description": "Only when checks ran.",
+          "$ref": "check-report.schema.json"
+        },
+        "provenance": {
+          "description": "Only for a row given provenance of its own."
+        }
+      }
+    }
+  }
+}
