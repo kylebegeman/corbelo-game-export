@@ -60,7 +60,7 @@
       ],
       "properties": {
         "name": {
-          "description": "The pack's name, and the name of its folder.",
+          "description": "The pack's name.",
           "type": "string",
           "minLength": 1
         },
@@ -72,7 +72,7 @@
           ]
         },
         "into": {
-          "description": "The folder of the project the pack's own folder is in, from the project's root, with / between folders.",
+          "description": "The pack's own folder, from the project's root, with / between folders: assets/crate.",
           "type": "string",
           "minLength": 1,
           "pattern": "^(?!/)(?!.*(^|/)\\.{1,2}(/|$))[^\\\\:]+$"
@@ -123,7 +123,7 @@
       }
     },
     "File": {
-      "description": "One file. Its path in the project is the pack's `into`, the pack's name and this path.",
+      "description": "One file. Its path in the project is the pack's `into`, then this path.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -160,7 +160,7 @@
           "minLength": 1
         },
         "row": {
-          "description": "Only for a model of a family: the row's name.",
+          "description": "Only for a model of a family or of a kit: the row's name, or the piece's.",
           "type": "string",
           "minLength": 1
         },

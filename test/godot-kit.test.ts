@@ -454,13 +454,16 @@ describe.skipIf(!usable)("the add-on in a project that already imported its pack
     expect(plain.nodes.filter((node) => node.class === "MeshInstance3D").map((node) => [node.visible, node.range])).toEqual([[true, [0, 0]], [false, [0, 0]]]);
 
     cpSync(join(HERE, "../addons/corbelo_game_export"), join(project, "addons/corbelo_game_export"), { recursive: true });
-    writeFileSync(join(project, "project.godot"), PROJECT_FILE + ADDON_ON);
+    // Turned on, with the project's own distance for detail levels: half the one it starts with.
+    writeFileSync(join(project, "project.godot"), `${PROJECT_FILE}${ADDON_ON}\n[corbelo_game_export]\n\ndetail_levels/distance_per_deviation=350.0\n`);
     expect(importProject(project)).toContain("Corbelo Game Export: drum: 1 material made, 1 file imported again, 1 scene made");
     const [wired] = prove(project, [{ do: "scene", path: "res://props/drum/drum.tscn" }]) as [SeenScene];
     const levels = wired.nodes.filter((node) => node.class === "MeshInstance3D");
     expect(levels.map((node) => node.visible)).toEqual([true, true]);
     expect(levels[0]!.range![1]).toBe(levels[1]!.range![0]);
-    expect(levels[1]!.range![0]).toBeGreaterThan(1);
+    const deviation = pack.manifest.files[0]!.facts.bodies[0]!.lods![1]!.deviation.meters;
+    expect(deviation * 350).toBeGreaterThan(1);
+    expect(levels[1]!.range![0]).toBeCloseTo(deviation * 350, 4);
     expect(levels[0]!.surfaces![0]!.material).toEqual({ name: "Steel", path: "res://props/drum/materials/Steel.tres", albedo: "#3d6fd9" });
 
     // A material file that comes back under another identifier, as one replaced by a copy
