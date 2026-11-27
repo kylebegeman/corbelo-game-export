@@ -20,6 +20,7 @@ import type {
   BodyFacts,
   BodyInput,
   Box,
+  ColorInput,
   ExportInput,
   ExportResult,
   JsonValue,
@@ -62,7 +63,7 @@ function isArrayLike(value: unknown): value is ArrayLike<number> {
   return (Array.isArray(value) || ArrayBuffer.isView(value)) && typeof (value as { length?: unknown }).length === "number";
 }
 
-function assertJson(value: unknown, path: string, depth: number): void {
+export function assertJson(value: unknown, path: string, depth: number): void {
   if (value === null || typeof value === "boolean" || typeof value === "string") return;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) refuse("BAD_PROVENANCE", `${path} is not a finite number, so it cannot be stored as JSON.`);
@@ -137,7 +138,7 @@ function readSettings(input: ExportInput): Settings {
  * Checks the arrays of a mesh and returns how many triangles it has. Refuses anything malformed.
  * `label` starts the message and `what` is the mesh in the middle of a sentence: "the body".
  */
-function checkMesh(mesh: { positions: ArrayLike<number>; indices?: ArrayLike<number>; faceIds?: ArrayLike<number> }, label: string, what: string): number {
+export function checkMesh(mesh: { positions: ArrayLike<number>; indices?: ArrayLike<number>; faceIds?: ArrayLike<number> }, label: string, what: string): number {
   const { positions, indices, faceIds } = mesh;
   if (!isArrayLike(positions)) refuse("BAD_POSITIONS", `${label}: positions must be a Float32Array or an array of numbers.`);
   if (positions.length === 0) refuse("EMPTY_BODY", `${label} has no vertices.`);
@@ -240,7 +241,7 @@ function checkBody(body: BodyInput, index: number): { triangles: number; refined
   return { triangles, refined };
 }
 
-function boundsOf(positions: ArrayLike<number>): { min: Vec3; max: Vec3 } {
+export function boundsOf(positions: ArrayLike<number>): { min: Vec3; max: Vec3 } {
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (let at = 0; at < positions.length; at += 3) {
@@ -271,7 +272,7 @@ function pivotPoint(settings: Settings, bounds: { min: Vec3; max: Vec3 }, conver
 }
 
 /** glTF metres to the engine's unit, with the up axis moved to the engine's up axis. */
-function toEngine(point: Vec3, profile: EngineProfile): Vec3 {
+export function toEngine(point: Vec3, profile: EngineProfile): Vec3 {
   const scale = 1 / profile.unitMeters;
   const [x, y, z] = [point[0] * scale + 0, point[1] * scale + 0, point[2] * scale + 0];
   return profile.up === "Y" ? [x, y, z] : [x, z, y];
@@ -281,7 +282,7 @@ function box(min: Vec3, max: Vec3): Box {
   return { min: [min[0] + 0, min[1] + 0, min[2] + 0], max: [max[0] + 0, max[1] + 0, max[2] + 0], size: [max[0] - min[0], max[1] - min[1], max[2] - min[2]] };
 }
 
-function measuredBox(min: Vec3, max: Vec3, profile: EngineProfile): MeasuredBox {
+export function measuredBox(min: Vec3, max: Vec3, profile: EngineProfile): MeasuredBox {
   return { meters: box(min, max), engine: box(toEngine(min, profile), toEngine(max, profile)) };
 }
 
@@ -299,22 +300,101 @@ function gather(values: Float32Array, vertexOf: Uint32Array, size: number): Floa
   return out;
 }
 
+/** A lower detail level as the asset exporter hands it over: a mesh that takes colours as its body does. */
+export interface LevelSource {
+  positions: ArrayLike<number>;
+  indices?: ArrayLike<number>;
+  faceIds?: ArrayLike<number>;
+  faceColors?: readonly (ColorInput | null | undefined)[];
+}
+
+/** What the asset exporter adds to a plain export. Nothing here changes what a plain export writes. */
+export interface SceneExtension {
+  /** The function a person called, for the message of a refusal. */
+  caller?: string;
+  /** For each body, its lower detail levels, the nearest to full detail first. */
+  levels?: readonly (readonly LevelSource[] | undefined)[];
+  /**
+   * Gives a built mesh texture coordinates, and tangents that follow them. `offset` moves a
+   * stored position to where the vertex sits in the scene.
+   */
+  texture?: (mesh: BuiltMesh, offset: Vec3) => { mesh: BuiltMesh; uvs: Float32Array };
+  /**
+   * `"first-use"` writes materials, and a body's slots, in the order triangles first use them.
+   * `"name"` writes both in the order of the material names, so the order does not move when
+   * the triangles do.
+   */
+  slotOrder?: "first-use" | "name";
+}
+
+/** One mesh of a draft: a body at full detail, or one of its lower levels. */
+export interface DraftMesh {
+  mesh: BuiltMesh;
+  /** u, v per written vertex. Undefined without texture coordinates. */
+  uvs: Float32Array | undefined;
+  /** x, y, z per written vertex as stored: 32-bit floats, relative to the pivot. */
+  stored: Float32Array;
+  local: { min: Vec3; max: Vec3 };
+  /** Index in the glTF `meshes` array. */
+  meshIndex: number;
+  slots: SlotFacts[];
+}
+
+export interface DraftBody extends DraftMesh {
+  /** In glTF space, before it was taken off the positions. */
+  pivot: Vec3;
+  translation: Vec3;
+  levels: DraftMesh[];
+}
+
+/** A scene with every body written and nothing encoded yet, so more can be added to it. */
+export interface SceneDraft {
+  json: GltfJson;
+  binary: BinaryBuilder;
+  profile: EngineProfile;
+  conversion: SpaceConversion;
+  /** Node names of the bodies, in order. */
+  names: string[];
+  bodies: DraftBody[];
+  facts: PackFacts;
+  provenance: JsonValue | undefined;
+}
+
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /**
- * Turns bodies into one GLB (glTF 2.0, metres, +Y up, right-handed) and the facts measured
- * from the geometry that was written. Throws `GameExportError` for input it refuses.
+ * Checks the input, builds every body and writes its mesh and node into a glTF document that is
+ * not encoded yet. `exportGameGlb` is this and `finishScene`, one after the other.
  */
-export function exportGameGlb(input: ExportInput): ExportResult {
-  if (typeof input !== "object" || input === null) refuse("NO_BODIES", "exportGameGlb needs { bodies, source }.");
+export function draftScene(input: ExportInput, extension: SceneExtension = {}): SceneDraft {
+  const caller = extension.caller ?? "exportGameGlb";
+  if (typeof input !== "object" || input === null) refuse("NO_BODIES", `${caller} needs { bodies, source }.`);
   const settings = readSettings(input);
   const conversion = spaceConversion(input.source);
   const { bodies } = input;
   if (!Array.isArray(bodies) || bodies.length === 0) refuse("NO_BODIES", "There are no bodies to export.");
+  const levelsOf = (index: number): readonly LevelSource[] => extension.levels?.[index] ?? [];
 
   // The meshes that bodies refine are not written, so they are counted on their own.
   let inputTriangles = 0;
   let refinedTriangles = 0;
   for (const [index, body] of bodies.entries()) {
-    const counted = forBody(index, () => checkBody(body, index));
+    const counted = forBody(index, () => {
+      const own = checkBody(body, index);
+      let levelTriangles = 0;
+      for (const [at, level] of levelsOf(index).entries()) {
+        const label = `Body "${body.name}", detail level ${at + 1}`;
+        if (typeof level !== "object" || level === null) refuse("BAD_LOD", `${label} is not an object with positions.`);
+        const triangles = checkMesh(level, label, "the level");
+        if (level.faceColors !== undefined && (!Array.isArray(level.faceColors) || level.faceColors.length !== triangles)) {
+          refuse("BAD_FACE_COLORS", `${label}: faceColors needs exactly one colour, or null, for each of its ${triangles} triangles.`);
+        }
+        levelTriangles += triangles;
+      }
+      return { triangles: own.triangles + levelTriangles, refined: own.refined };
+    });
     inputTriangles += counted.triangles;
     if (inputTriangles > settings.maxTriangles) {
       refuse("TOO_MANY_TRIANGLES", `The bodies hold more than ${settings.maxTriangles} triangles, the limit for one export. Simplify the mesh or raise maxTriangles.`);
@@ -326,7 +406,26 @@ export function exportGameGlb(input: ExportInput): ExportResult {
   }
 
   const names = nodeNames(bodies.map((body) => body.name));
-  const colors = planColors(bodies, settings.colorSpace);
+  // A lower level takes its colours as a body of its own would, with its body's own colour and
+  // names, so the same colour is the same material at every level.
+  const levelColorsAt: number[][] = [];
+  const colorSources: BodyInput[] = [...bodies];
+  for (const [index, body] of bodies.entries()) {
+    levelColorsAt.push(
+      levelsOf(index).map((level, at) => {
+        colorSources.push({
+          name: `${body.name}, detail level ${at + 1}`,
+          positions: level.positions,
+          ...(body.color !== undefined ? { color: body.color } : {}),
+          ...(body.materialName !== undefined ? { materialName: body.materialName } : {}),
+          ...(level.faceColors !== undefined ? { faceColors: level.faceColors } : {}),
+          ...(body.faceMaterialNames !== undefined ? { faceMaterialNames: body.faceMaterialNames } : {}),
+        });
+        return colorSources.length - 1;
+      }),
+    );
+  }
+  const colors = planColors(colorSources, settings.colorSpace);
   const { profile } = settings;
 
   const meshOptions = {
@@ -335,18 +434,20 @@ export function exportGameGlb(input: ExportInput): ExportResult {
     creaseAngle: settings.creaseAngle,
     normals: settings.normals,
   };
-  const built = bodies.map((body, index) => forBody(index, () => {
-    const points = new Float64Array(body.positions.length);
-    toGltfSpace(body.positions, conversion, points);
+  const construct = (source: LevelSource, coarse?: CoarseSurfaces): BuiltMesh => {
+    const points = new Float64Array(source.positions.length);
+    toGltfSpace(source.positions, conversion, points);
+    // With `refines` the body's own face ids have no say in the shading: the surfaces' have.
+    return buildMesh(points, source.indices, coarse === undefined ? source.faceIds : undefined, meshOptions, coarse);
+  };
+  const shaped = bodies.map((body, index) => forBody(index, () => {
     // The meshes a body refines are built first, each by itself and by the same rules as a body.
     let coarse: CoarseSurfaces | undefined;
     if (body.refines !== undefined) {
       const meshes: BuiltMesh[] = [];
       const keptOf: Int32Array[] = [];
       for (const surface of body.refines.surfaces) {
-        const surfacePoints = new Float64Array(surface.positions.length);
-        toGltfSpace(surface.positions, conversion, surfacePoints);
-        const surfaceMesh = buildMesh(surfacePoints, surface.indices, surface.faceIds, meshOptions);
+        const surfaceMesh = construct(surface);
         const kept = new Int32Array(surfaceMesh.triangles + surfaceMesh.degenerateTrianglesDropped).fill(-1);
         for (let t = 0; t < surfaceMesh.triangles; t += 1) kept[surfaceMesh.sourceTriangle[t]!] = t;
         meshes.push(surfaceMesh);
@@ -354,28 +455,94 @@ export function exportGameGlb(input: ExportInput): ExportResult {
       }
       coarse = { meshes, keptOf, surfaceOf: body.refines.surfaceOf, triangleOf: body.refines.triangleOf, where: `Body "${body.name}"` };
     }
-    // With `refines` the body's own face ids have no say in the shading: the surfaces' have.
-    const mesh = buildMesh(points, body.indices, coarse === undefined ? body.faceIds : undefined, meshOptions, coarse);
+    const mesh = construct(body, coarse);
     if (mesh.triangles === 0) {
       refuse("ALL_DEGENERATE", `Body "${body.name}": all ${mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
     }
-    // One part per colour that a kept triangle has. Normals are settled by now, on the whole body.
     const shadedFrom = coarse === undefined ? undefined : { surfaces: coarse.meshes.length, triangles: coarse.meshes.reduce((total, surface) => total + surface.triangles, 0) };
-    return { mesh, parts: splitMesh(mesh, colors.ofTriangle[index], colors.ofBody[index]!), shadedFrom };
+    const levels = levelsOf(index).map((level, at) => {
+      const levelMesh = construct(level);
+      if (levelMesh.triangles === 0) {
+        refuse("ALL_DEGENERATE", `Body "${body.name}", detail level ${at + 1}: all ${levelMesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
+      }
+      return levelMesh;
+    });
+    return { mesh, shadedFrom, levels };
   }));
+
+  // An assembly has one pivot of its own, taken from the box around every body as modelled.
+  // It ends up at the scene origin, and each body keeps its place relative to it.
+  let assemblyPivot: Vec3 | undefined;
+  if (settings.placement === "assembly") {
+    const min: Vec3 = [Infinity, Infinity, Infinity];
+    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+    for (const { mesh } of shaped) {
+      const bounds = boundsOf(mesh.positions);
+      for (let axis = 0; axis < 3; axis += 1) {
+        min[axis] = Math.min(min[axis]!, bounds.min[axis]!);
+        max[axis] = Math.max(max[axis]!, bounds.max[axis]!);
+      }
+    }
+    assemblyPivot = pivotPoint(settings, { min, max }, conversion);
+  }
+
+  const byName = extension.slotOrder === "name";
+  // Vertex data is stored relative to the pivot, as 32-bit floats. Everything reported is
+  // measured from those stored values. A lower level shares the pivot of its body.
+  const prepare = (built: BuiltMesh, pivot: Vec3, translation: Vec3, colorsAt: number) => {
+    let mesh = built;
+    let uvs: Float32Array | undefined;
+    if (extension.texture !== undefined) {
+      ({ mesh, uvs } = extension.texture(built, [translation[0] - pivot[0], translation[1] - pivot[1], translation[2] - pivot[2]]));
+    }
+    const stored = new Float32Array(mesh.positions.length);
+    for (let at = 0; at < stored.length; at += 3) {
+      stored[at] = mesh.positions[at]! - pivot[0];
+      stored[at + 1] = mesh.positions[at + 1]! - pivot[1];
+      stored[at + 2] = mesh.positions[at + 2]! - pivot[2];
+    }
+    // One part per colour that a kept triangle has. Normals are settled by now, on the whole mesh.
+    let parts = splitMesh(mesh, colors.ofTriangle[colorsAt], colors.ofBody[colorsAt]!);
+    if (byName) parts = [...parts].sort((a, b) => compareText(colors.candidates[a.group]!.name, colors.candidates[b.group]!.name));
+    return { mesh, uvs, stored, local: boundsOf(stored), parts };
+  };
+  const prepared = shaped.map(({ mesh, levels }, index) => {
+    const pivot = pivotPoint(settings, boundsOf(mesh.positions), conversion);
+    const translation: Vec3 =
+      assemblyPivot !== undefined
+        ? [pivot[0] - assemblyPivot[0] + 0, pivot[1] - assemblyPivot[1] + 0, pivot[2] - assemblyPivot[2] + 0]
+        : settings.placement === "designed"
+          ? [pivot[0] + 0, pivot[1] + 0, pivot[2] + 0]
+          : [0, 0, 0];
+    return {
+      pivot,
+      translation,
+      full: prepare(mesh, pivot, translation, index),
+      levels: levels.map((level, at) => prepare(level, pivot, translation, levelColorsAt[index]![at]!)),
+    };
+  });
 
   // The materials written are the ones a kept triangle uses, in the order bodies and their
   // parts first use them. A colour whose triangles were all dropped is not in the file.
-  const materials: MaterialDef[] = [];
+  let materials: MaterialDef[] = [];
   const slotOfCandidate = new Int32Array(colors.candidates.length).fill(-1);
-  for (const { parts } of built) {
-    for (const part of parts) {
-      if (slotOfCandidate[part.group]! < 0) {
-        slotOfCandidate[part.group] = materials.length;
-        materials.push(colors.candidates[part.group]!);
+  for (const { full, levels } of prepared) {
+    const counted = new Set<number>();
+    for (const { parts } of [full, ...levels]) {
+      for (const part of parts) {
+        if (slotOfCandidate[part.group]! < 0) {
+          slotOfCandidate[part.group] = materials.length;
+          materials.push(colors.candidates[part.group]!);
+        }
+        if (counted.has(part.group)) continue;
+        counted.add(part.group);
+        materials[slotOfCandidate[part.group]!]!.bodies += 1;
       }
-      materials[slotOfCandidate[part.group]!]!.bodies += 1;
     }
+  }
+  if (byName) {
+    materials = [...materials].sort((a, b) => compareText(a.name, b.name));
+    for (const [candidate, material] of colors.candidates.entries()) slotOfCandidate[candidate] = materials.indexOf(material);
   }
 
   const binary = new BinaryBuilder();
@@ -394,55 +561,10 @@ export function exportGameGlb(input: ExportInput): ExportResult {
     buffers: [],
   };
 
-  const bodyFacts: BodyFacts[] = [];
-  const totalMin: Vec3 = [Infinity, Infinity, Infinity];
-  const totalMax: Vec3 = [-Infinity, -Infinity, -Infinity];
-
-  // An assembly has one pivot of its own, taken from the box around every body as modelled.
-  // It ends up at the scene origin, and each body keeps its place relative to it.
-  let assemblyPivot: Vec3 | undefined;
-  if (settings.placement === "assembly") {
-    const min: Vec3 = [Infinity, Infinity, Infinity];
-    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
-    for (const { mesh } of built) {
-      const bounds = boundsOf(mesh.positions);
-      for (let axis = 0; axis < 3; axis += 1) {
-        min[axis] = Math.min(min[axis]!, bounds.min[axis]!);
-        max[axis] = Math.max(max[axis]!, bounds.max[axis]!);
-      }
-    }
-    assemblyPivot = pivotPoint(settings, { min, max }, conversion);
-  }
-
-  for (const [index, body] of bodies.entries()) {
-    const name = names[index]!;
-    const { mesh, parts, shadedFrom } = built[index]!;
-
-    // Vertex data is stored relative to the pivot, as 32-bit floats. Everything reported below
-    // is measured from those stored values.
-    const pivot = pivotPoint(settings, boundsOf(mesh.positions), conversion);
-    const stored = new Float32Array(mesh.positions.length);
-    for (let at = 0; at < stored.length; at += 3) {
-      stored[at] = mesh.positions[at]! - pivot[0];
-      stored[at + 1] = mesh.positions[at + 1]! - pivot[1];
-      stored[at + 2] = mesh.positions[at + 2]! - pivot[2];
-    }
-    const local = boundsOf(stored);
-    const translation: Vec3 =
-      assemblyPivot !== undefined
-        ? [pivot[0] - assemblyPivot[0] + 0, pivot[1] - assemblyPivot[1] + 0, pivot[2] - assemblyPivot[2] + 0]
-        : settings.placement === "designed"
-          ? [pivot[0] + 0, pivot[1] + 0, pivot[2] + 0]
-          : [0, 0, 0];
-    const sceneMin = add(local.min, translation);
-    const sceneMax = add(local.max, translation);
-    for (let axis = 0; axis < 3; axis += 1) {
-      totalMin[axis] = Math.min(totalMin[axis]!, sceneMin[axis]!);
-      totalMax[axis] = Math.max(totalMax[axis]!, sceneMax[axis]!);
-    }
-
-    // One primitive per part, each with index and vertex data of its own. A vertex on the border
-    // between two parts is taken from the same stored numbers for both.
+  // One primitive per part, each with index and vertex data of its own. A vertex on the border
+  // between two parts is taken from the same stored numbers for both.
+  const write = (name: string, item: ReturnType<typeof prepare>): DraftMesh => {
+    const { mesh, uvs, stored, local, parts } = item;
     const accessors = json.accessors!;
     const primitives: GltfPrimitive[] = [];
     const slots: SlotFacts[] = [];
@@ -473,19 +595,48 @@ export function exportGameGlb(input: ExportInput): ExportResult {
           type: "VEC4",
         },
       );
+      const attributes: Record<string, number> = { POSITION: accessors.length - 3, NORMAL: accessors.length - 2, TANGENT: accessors.length - 1 };
+      const indices = accessors.length - 4;
+      if (uvs !== undefined) {
+        accessors.push({
+          bufferView: binary.add(vertexOf === undefined ? uvs : gather(uvs, vertexOf, 2), TARGET_ARRAY_BUFFER),
+          componentType: COMPONENT_FLOAT,
+          count: part.vertices,
+          type: "VEC2",
+        });
+        attributes["TEXCOORD_0"] = accessors.length - 1;
+      }
       const material = slotOfCandidate[part.group]!;
-      primitives.push({
-        attributes: { POSITION: accessors.length - 3, NORMAL: accessors.length - 2, TANGENT: accessors.length - 1 },
-        indices: accessors.length - 4,
-        material,
-        mode: MODE_TRIANGLES,
-      });
+      primitives.push({ attributes, indices, material, mode: MODE_TRIANGLES });
       slots.push({ material: materials[material]!.name, triangles: part.triangles, vertices: part.vertices });
     }
     json.meshes!.push({ name, primitives });
+    return { mesh, uvs, stored, local, meshIndex: json.meshes!.length - 1, slots };
+  };
+
+  const bodyFacts: BodyFacts[] = [];
+  const draftBodies: DraftBody[] = [];
+  const totalMin: Vec3 = [Infinity, Infinity, Infinity];
+  const totalMax: Vec3 = [-Infinity, -Infinity, -Infinity];
+
+  for (const [index, body] of bodies.entries()) {
+    const name = names[index]!;
+    const { pivot, translation, full } = prepared[index]!;
+    const { mesh, local } = full;
+    const { shadedFrom } = shaped[index]!;
+    const sceneMin = add(local.min, translation);
+    const sceneMax = add(local.max, translation);
+    for (let axis = 0; axis < 3; axis += 1) {
+      totalMin[axis] = Math.min(totalMin[axis]!, sceneMin[axis]!);
+      totalMax[axis] = Math.max(totalMax[axis]!, sceneMax[axis]!);
+    }
+
+    const written = write(name, full);
+    const { slots } = written;
     const moved = translation.some((value) => value !== 0);
     json.nodes!.push(moved ? { name, mesh: index, translation } : { name, mesh: index });
     json.scenes![0]!.nodes!.push(index);
+    draftBodies.push({ ...written, pivot, translation, levels: [] });
 
     bodyFacts.push({
       name,
@@ -512,6 +663,12 @@ export function exportGameGlb(input: ExportInput): ExportResult {
       },
       translation,
     });
+  }
+
+  // The meshes of lower levels come after the meshes of every body, so a body's mesh keeps the
+  // number of its body. Their names and nodes are for the caller to settle.
+  for (const [index, { levels }] of prepared.entries()) {
+    draftBodies[index]!.levels = levels.map((level, at) => write(`${names[index]!}_LOD${at + 1}`, level));
   }
 
   const sum = (pick: (facts: BodyFacts) => number) => bodyFacts.reduce((total, facts) => total + pick(facts), 0);
@@ -553,11 +710,25 @@ export function exportGameGlb(input: ExportInput): ExportResult {
     };
   }
 
-  const extras: PackExtras = { schema: 1, profile, facts };
-  if (settings.provenance !== undefined) extras.provenance = settings.provenance;
+  return { json, binary, profile, conversion, names, bodies: draftBodies, facts, provenance: settings.provenance };
+}
+
+/** Writes the facts into the scene and encodes the draft as one GLB. */
+export function finishScene(draft: SceneDraft): ExportResult {
+  const { json, facts } = draft;
+  const extras: PackExtras = { schema: 1, profile: draft.profile, facts };
+  if (draft.provenance !== undefined) extras.provenance = draft.provenance;
   json.scenes![0]!.extras = { [EXTRAS_KEY]: extras };
 
-  const bin = binary.finish();
+  const bin = draft.binary.finish();
   json.buffers = [{ byteLength: bin.length }];
   return { glb: encodeGlb(json, bin), facts };
+}
+
+/**
+ * Turns bodies into one GLB (glTF 2.0, metres, +Y up, right-handed) and the facts measured
+ * from the geometry that was written. Throws `GameExportError` for input it refuses.
+ */
+export function exportGameGlb(input: ExportInput): ExportResult {
+  return finishScene(draftScene(input));
 }

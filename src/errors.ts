@@ -19,7 +19,11 @@ export type GameExportErrorCode =
   | "BAD_PROVENANCE"
   | "BAD_STL"
   | "BAD_GLB"
-  | "BAD_JOB";
+  | "BAD_JOB"
+  | "BAD_LOD"
+  | "BAD_COLLISION"
+  | "BAD_ATTACH_POINT"
+  | "BAD_PACK";
 
 /** Thrown for input the package refuses. `code` says which rule was broken. */
 export class GameExportError extends Error {
