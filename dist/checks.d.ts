@@ -285,6 +285,30 @@ export interface CheckReport {
     /** One result for every check, always all twelve, in the order of `CHECK_IDS`. */
     results: CheckResult[];
 }
+/** Triangles where they sit in a scene, in metres, +Y up. */
+export interface SceneMesh {
+    /** x, y, z per vertex. */
+    positions: Float64Array;
+    /** Three vertex numbers per triangle. */
+    indices: ArrayLike<number>;
+}
+/**
+ * Looks along one level axis for openings that are closed over the top: doorways, arches,
+ * windows, tunnels. The asset is drawn as a filled outline on a grid, standing on a floor at
+ * its lowest point, and each free region the outline shuts in is one opening.
+ */
+export declare function openingsAlong(bodies: readonly SceneMesh[], axis: "x" | "z", min: Vec3, max: Vec3, player: PlayerProfile): {
+    cell: number;
+    openings: OpeningValues["openings"];
+    ignored: number;
+};
+/** Flat places and slopes a player could stand on, read off the triangles that face up. */
+export declare function walkable(bodies: readonly SceneMesh[], floor: number, player: PlayerProfile): {
+    levels: number[];
+    ramps: RampValues["ramps"];
+};
+/** The player a check is run for: a profile of the caller's own, a built-in one by engine profile id, or the player of the engine a file was written for. */
+export declare function resolvePlayer(option: PlayerProfile | EngineProfileId | undefined, profile: string): PlayerProfile;
 /**
  * Checks a GLB this package wrote against what a game needs of it, and returns one result for
  * every check: pass, warn, fail, or not measured with the reason, each with the numbers it was

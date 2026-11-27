@@ -1,6 +1,6 @@
 {
   "name": "corbelo-game-export",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Turns exact CAD bodies into a game-engine-ready GLB plus computed facts.",
   "license": "MIT",
   "type": "module",
@@ -34,6 +34,7 @@
   "files": [
     "dist",
     "schema",
+    "addons",
     "README.md",
     "LICENSE"
   ],

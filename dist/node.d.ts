@@ -1,7 +1,10 @@
 import { type CheckOptions, type CheckReport } from "./checks.js";
 import { type CollisionKernel } from "./collision.js";
+import { type KitPackInput } from "./kit-pack.js";
+import type { KitPieceInput } from "./kit.js";
 import { type GamePack } from "./pack.js";
 import type { AssetOptions, AttachPointInput, ColorInput, ExportOptions, JsonValue, PackFacts, SourceSpace } from "./types.js";
+export { installPack, pinProject, projectStatus, readPackFiles, readPackFrom, type InstallResult, type ProjectStatus } from "./install.js";
 /** One body of a job: an STL file plus what the file cannot say about itself. */
 export interface JobBody {
     name: string;
@@ -106,6 +109,27 @@ export interface PackJob extends Omit<AssetOptions, "kernel"> {
         zip?: string;
     };
 }
+/** One piece of a kit job: its bodies as a pack job gives them, or a GLB this package wrote, as a file. */
+export interface KitJobPiece extends Omit<KitPieceInput, "bodies" | "glb"> {
+    bodies?: PackJobBody[];
+    /** Path to a GLB this package wrote, relative to the job's folder. */
+    glb?: string;
+}
+/**
+ * The JSON job the `pack` command reads for a kit: what `exportKitPack` takes, with files in
+ * place of numbers and the name of a kernel in place of the kernel. A job with `pieces` is a kit.
+ */
+export interface KitJob extends Omit<KitPackInput, "kernel" | "pieces" | "checks"> {
+    pieces: KitJobPiece[];
+    /** Options for the kit checks, without a kernel: the one the job names is used. */
+    checks?: false | Omit<NonNullable<Exclude<KitPackInput["checks"], false>>, "kernel">;
+    /** `"manifold-3d"` loads that package, which must be installed: for general convex decomposition, and to measure what two pieces both fill. */
+    kernel?: "manifold-3d";
+    output?: {
+        dir?: string;
+        zip?: string;
+    };
+}
 export interface PackJobOptions {
     /** The folder paths in the job are relative to. Default: the working directory. */
     base?: string;
@@ -151,7 +175,7 @@ export interface CliIo {
 /** The command line. Returns the exit code and never throws. */
 export declare function runCli(argv: readonly string[], io?: CliIo): number;
 /**
- * The whole command line: `pack`, `check`, and everything `runCli` does. Returns the exit code
- * and never throws.
+ * The whole command line: `pack`, `check`, `install`, `status`, `pin`, and everything `runCli`
+ * does. Returns the exit code and never throws.
  */
 export declare function runCommand(argv: readonly string[], io?: CliIo): Promise<number>;

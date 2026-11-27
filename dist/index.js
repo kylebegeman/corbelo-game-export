@@ -1,4 +1,5 @@
 export { exportGameAsset } from "./asset.js";
+export { exportBlockout } from "./blockout.js";
 export { ASSET_BUDGETS, ASSET_SIZE_RANGES, CHECK_IDS, checkGameAsset, DEFAULT_ASSET_CLASS, DEFAULT_GRID_METERS, DEFAULT_LOD_DEVIATION_SHARE, NORMAL_ANGLE_WARNING_DEGREES, OPENING_GRID_CELLS, PLAYER_PROFILES, RAMP_MAX_DEGREES, RAMP_MIN_DEGREES, SLIVER_AREA_RATIO, STEP_MAX_RISE_METERS, } from "./checks.js";
 export { DECOMPOSITION_CUTS_PER_AXIS, DEFAULT_COLLISION_TOLERANCE, DEFAULT_MAX_COLLISION_PIECES, DEFAULT_MAX_HULL_VERTICES, manifoldKernel, } from "./collision.js";
 export { GameExportError } from "./errors.js";
@@ -6,6 +7,9 @@ export { DEFAULT_CREASE_ANGLE, DEFAULT_MAX_TRIANGLES, DEFAULT_WELD_TOLERANCE, ex
 export { readAccessor, readGlb, readPack } from "./glb-read.js";
 export { EXTRAS_KEY } from "./gltf.js";
 export { convexHull, meshVolume } from "./hull.js";
+export { cellSize, DEFAULT_TRIM_METERS, KIT_LAYOUT_NAMES, KIT_SIDES, isKit, kitLayouts, kitOf, layoutJoints, layoutOf, mateOf, oppositeSide, placePoint, resolveKit, SOCKET_AXIS_DEGREES, turnCell, turnSide, } from "./kit.js";
+export { checkKit, DEFAULT_KIT_TOLERANCE_METERS, KIT_CHECK_IDS, SEAM_LINES, } from "./kit-checks.js";
+export { exportKitPack } from "./kit-pack.js";
 export { DEVIATION_MAX_SAMPLES, meshDeviation } from "./lod.js";
 export { DEFAULT_COLOR } from "./materials.js";
 export { DEGENERATE_AREA_RATIO, FLAT_FACE_ANGLE_DEGREES } from "./mesh.js";
@@ -18,3 +22,5 @@ export { readStl } from "./stl.js";
 export { DEFAULT_TILE_METERS } from "./uv.js";
 export { GENERATOR, VERSION } from "./version.js";
 export { crc32, writeZip, ZIP_MAX_BYTES, ZIP_MAX_ENTRIES } from "./zip.js";
+export { DEFAULT_INSTALL_FOLDER, LOCK_FILE_NAME, lockJson, lockStatus, parseLock, pinLock, planInstall, verifyPack, } from "./lock.js";
+export { readZip } from "./unzip.js";

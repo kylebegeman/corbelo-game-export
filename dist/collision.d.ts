@@ -27,6 +27,8 @@ export interface KernelSolid {
     getMesh(): KernelMesh;
     /** The parts of the solid that do not touch, each a solid of its own. */
     decompose?(): KernelSolid[];
+    /** What this solid and another both fill. Only the kit checks use it, to measure where trim runs into the piece next to it. */
+    intersect?(other: KernelSolid): KernelSolid;
     /** Frees the solid. Called on every solid the package asked for, when it is done with it. */
     delete?(): void;
 }
@@ -96,6 +98,11 @@ export interface CollisionSource {
     /** Pieces the caller made the body from, each a list of points. Each becomes its convex hull. */
     pieces: readonly ArrayLike<number>[] | undefined;
 }
+/** Each place in space once: the kernel needs a mesh whose triangles share vertices where they meet. */
+export declare function weldExact(positions: ArrayLike<number>, indices: ArrayLike<number>): {
+    positions: Float32Array;
+    indices: Uint32Array;
+};
 /**
  * Plans the collision shape of one body.
  *

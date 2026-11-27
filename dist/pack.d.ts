@@ -1,4 +1,6 @@
+import type { BlockoutFacts } from "./blockout.js";
 import { type AssetClass, type CheckOptions, type CheckReport, type GameBudget, type PlayerProfile } from "./checks.js";
+import type { KitManifest } from "./kit-pack.js";
 import type { AssetBodyInput, AssetOptions, JsonValue, PackFacts, SourceSpace } from "./types.js";
 /** One asset of a family: a row of the table the family was made from. */
 export interface PackRowInput {
@@ -54,11 +56,25 @@ export interface PackManifestFile {
     /** Only for a row given provenance. */
     provenance?: JsonValue;
 }
+/** What the manifest says about a scene made of the pack's pieces: a layout of a kit, written by `exportBlockout`. */
+export interface PackManifestScene {
+    name: string;
+    role: "blockout";
+    mediaType: "model/gltf-binary";
+    /** Size of the file. */
+    bytes: number;
+    /** SHA-256 of the file, as 64 small hexadecimal digits. */
+    sha256: string;
+    /** The layout's name. */
+    layout: string;
+    /** The same facts the GLB carries in its scene extras. */
+    facts: BlockoutFacts;
+}
 export interface PackManifest {
     /** Version of this manifest layout. */
     schema: 1;
-    /** `"asset"`: one GLB. `"family"`: one GLB for each row. */
-    kind: "asset" | "family";
+    /** `"asset"`: one GLB. `"family"`: one GLB for each row. `"kit"`: one GLB for each piece of a kit, from `exportKitPack`. */
+    kind: "asset" | "family" | "kit";
     /** The pack's name: the asset's name, or the family's name by the pattern without a row. */
     name: string;
     generator: string;
@@ -88,6 +104,10 @@ export interface PackManifest {
         files: string[];
     }[];
     files: PackManifestFile[];
+    /** Only in a kit pack written with its layouts: one scene for each layout, made of the pieces. */
+    scenes?: PackManifestScene[];
+    /** Only in a kit pack: the grid, the pieces with their sockets, the layouts, the checks and what a grid of tiles needs. */
+    kit?: KitManifest;
     /** The pack's own provenance, as given. */
     provenance?: JsonValue;
 }
@@ -98,6 +118,11 @@ export interface GamePack {
     /** Every GLB in the order of the rows, then the manifest as `<name>.pack.json`. */
     files: PackFile[];
 }
+/**
+ * JSON for people as well as programs: two spaces a level, and a list of plain values, like a
+ * point or a list of names, on one line.
+ */
+export declare function manifestJson(value: unknown, indent?: string): string;
 export declare const MANIFEST_MEDIA_TYPE = "application/json";
 export declare const GLB_MEDIA_TYPE = "model/gltf-binary";
 /**

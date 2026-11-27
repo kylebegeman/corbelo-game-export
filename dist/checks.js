@@ -261,7 +261,7 @@ function distanceSquared(solid, columns, rows) {
  * windows, tunnels. The asset is drawn as a filled outline on a grid, standing on a floor at
  * its lowest point, and each free region the outline shuts in is one opening.
  */
-function openingsAlong(bodies, axis, min, max, player) {
+export function openingsAlong(bodies, axis, min, max, player) {
     const across = axis === "x" ? 2 : 0;
     const width = max[across] - min[across];
     const height = max[1] - min[1];
@@ -279,8 +279,7 @@ function openingsAlong(bodies, axis, min, max, player) {
         const row = Math.min(rows - 2, Math.max(1, Math.floor(gy)));
         solid[row * columns + column] = 1;
     };
-    for (const { body, positions } of bodies) {
-        const { indices } = body;
+    for (const { indices, positions } of bodies) {
         for (let t = 0; t < indices.length; t += 3) {
             const xs = [];
             const ys = [];
@@ -404,14 +403,13 @@ function openingsAlong(bodies, axis, min, max, player) {
     return { cell, openings, ignored };
 }
 /** Flat places and slopes a player could stand on, read off the triangles that face up. */
-function walkable(bodies, floor, player) {
+export function walkable(bodies, floor, player) {
     const leastArea = (player.capsuleRadiusM * player.capsuleRadiusM) / 2;
     const flat = new Map();
     const slopes = [];
     const flatDot = Math.cos(RAMP_MIN_DEGREES / DEGREES);
     const steepDot = Math.cos(RAMP_MAX_DEGREES / DEGREES);
-    for (const { body, positions } of bodies) {
-        const { indices } = body;
+    for (const { indices, positions } of bodies) {
         for (let t = 0; t < indices.length; t += 3) {
             const a = indices[t] * 3;
             const b = indices[t + 1] * 3;
@@ -473,6 +471,36 @@ function walkable(bodies, floor, player) {
         .sort((p, q) => p.angleDegrees - q.angleDegrees || q.areaSquareMeters - p.areaSquareMeters);
     return { levels, ramps };
 }
+/** The player a check is run for: a profile of the caller's own, a built-in one by engine profile id, or the player of the engine a file was written for. */
+export function resolvePlayer(option, profile) {
+    let player;
+    if (option === undefined) {
+        // The player of the engine the file was written for. A custom profile gets Godot's, the default profile's.
+        player = Object.hasOwn(PLAYER_PROFILES, profile) ? PLAYER_PROFILES[profile] : PLAYER_PROFILES.godot4;
+    }
+    else if (typeof option === "string") {
+        if (!Object.hasOwn(PLAYER_PROFILES, option))
+            refuse("BAD_OPTION", `Unknown player "${option}". Built-in players go by engine profile: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
+        player = PLAYER_PROFILES[option];
+    }
+    else {
+        player = option;
+        if (typeof player !== "object" || player === null || typeof player.id !== "string" || player.id === "")
+            refuse("BAD_OPTION", "A player profile needs an id.");
+        for (const key of ["capsuleRadiusM", "capsuleHeightM"]) {
+            if (!(Number.isFinite(player[key]) && player[key] > 0))
+                refuse("BAD_OPTION", `Player "${player.id}": ${key} must be a positive number of metres.`);
+        }
+        for (const key of ["stepHeightM", "jumpHeightM"]) {
+            if (!(Number.isFinite(player[key]) && player[key] >= 0))
+                refuse("BAD_OPTION", `Player "${player.id}": ${key} must be zero or a positive number of metres.`);
+        }
+        if (!(Number.isFinite(player.walkableSlopeDeg) && player.walkableSlopeDeg >= 0 && player.walkableSlopeDeg <= 90)) {
+            refuse("BAD_OPTION", `Player "${player.id}": walkableSlopeDeg must be from 0 to 90 degrees.`);
+        }
+    }
+    return player;
+}
 function readOptions(options, facts) {
     if (typeof options !== "object" || options === null)
         refuse("BAD_OPTION", "Check options must be an object.");
@@ -492,32 +520,7 @@ function readOptions(options, facts) {
             budget[key] = value;
         }
     }
-    let player;
-    if (options.player === undefined) {
-        // The player of the engine the file was written for. A custom profile gets Godot's, the default profile's.
-        player = Object.hasOwn(PLAYER_PROFILES, facts.profile) ? PLAYER_PROFILES[facts.profile] : PLAYER_PROFILES.godot4;
-    }
-    else if (typeof options.player === "string") {
-        if (!Object.hasOwn(PLAYER_PROFILES, options.player))
-            refuse("BAD_OPTION", `Unknown player "${options.player}". Built-in players go by engine profile: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
-        player = PLAYER_PROFILES[options.player];
-    }
-    else {
-        player = options.player;
-        if (typeof player !== "object" || player === null || typeof player.id !== "string" || player.id === "")
-            refuse("BAD_OPTION", "A player profile needs an id.");
-        for (const key of ["capsuleRadiusM", "capsuleHeightM"]) {
-            if (!(Number.isFinite(player[key]) && player[key] > 0))
-                refuse("BAD_OPTION", `Player "${player.id}": ${key} must be a positive number of metres.`);
-        }
-        for (const key of ["stepHeightM", "jumpHeightM"]) {
-            if (!(Number.isFinite(player[key]) && player[key] >= 0))
-                refuse("BAD_OPTION", `Player "${player.id}": ${key} must be zero or a positive number of metres.`);
-        }
-        if (!(Number.isFinite(player.walkableSlopeDeg) && player.walkableSlopeDeg >= 0 && player.walkableSlopeDeg <= 90)) {
-            refuse("BAD_OPTION", `Player "${player.id}": walkableSlopeDeg must be from 0 to 90 degrees.`);
-        }
-    }
+    const player = resolvePlayer(options.player, facts.profile);
     const gridMeters = options.gridMeters ?? DEFAULT_GRID_METERS;
     if (!(Number.isFinite(gridMeters) && gridMeters > 0))
         refuse("BAD_OPTION", `gridMeters must be a positive number of metres. Got ${String(gridMeters)}.`);
@@ -559,7 +562,7 @@ export function checkGameAsset(glb, options = {}) {
         const positions = new Float64Array(body.positions.length);
         for (let n = 0; n < positions.length; n += 1)
             positions[n] = body.positions[n] + body.translation[n % 3];
-        return { name: facts.bodies[at]?.name ?? body.name, body, positions };
+        return { name: facts.bodies[at]?.name ?? body.name, body, positions, indices: body.indices };
     });
     // Size.
     {

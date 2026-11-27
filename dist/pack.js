@@ -11,7 +11,7 @@ import { writeZip } from "./zip.js";
  * JSON for people as well as programs: two spaces a level, and a list of plain values, like a
  * point or a list of names, on one line.
  */
-function manifestJson(value, indent = "") {
+export function manifestJson(value, indent = "") {
     if (Array.isArray(value)) {
         if (value.every((item) => typeof item !== "object" || item === null))
             return `[${value.map((item) => JSON.stringify(item)).join(", ")}]`;

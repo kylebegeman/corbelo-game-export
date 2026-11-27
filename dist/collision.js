@@ -65,7 +65,7 @@ function boxPiece(positions) {
     return { positions: corners, indices, volume, capped: false, kind: "box" };
 }
 /** Each place in space once: the kernel needs a mesh whose triangles share vertices where they meet. */
-function weldExact(positions, indices) {
+export function weldExact(positions, indices) {
     const numberOf = new Map();
     const remap = new Uint32Array(positions.length / 3);
     const kept = [];
