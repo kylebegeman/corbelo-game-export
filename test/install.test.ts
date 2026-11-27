@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   crc32,
@@ -726,6 +727,11 @@ describe("install, status and pin", () => {
       };
     });
     const job = { name: "hall", source: kit.source, grid: kit.grid, collision: "pieces", pieces, revision: "k1", output: { zip: "hall.zip" } };
+    // The job is one the published schema for kit jobs takes.
+    const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
+    for (const name of ["pack", "check-report", "kit-check-report"]) ajv.addSchema(JSON.parse(readFileSync(join(import.meta.dirname, "..", "schema", `${name}.schema.json`), "utf8")) as object);
+    const validJob = ajv.compile(JSON.parse(readFileSync(join(import.meta.dirname, "..", "schema", "kit-job.schema.json"), "utf8")) as object);
+    expect(validJob(job), JSON.stringify(validJob.errors)).toBe(true);
     const result = await runPackJob(job, { base: jobDir });
     expect(result.name).toBe("hall");
     expect(result.pack.manifest.kind).toBe("kit");

@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/lock.schema.json",
+  "title": "corbelo-game-export lock file",
+  "description": "The corbelo-game-export.lock.json file install writes at the root of a game project: for every installed pack, where its files are, the checksum of each file, the provenance the pack carries, the revision installed and the revision pinned as in the build. Packs are in the order of their names and files in the order of their paths, and every file is one line, so that a new revision changes few lines.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packs"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "packs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Pack"
+      }
+    }
+  },
+  "$defs": {
+    "Sha256": {
+      "description": "A SHA-256 as 64 small hexadecimal digits.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Revision": {
+      "description": "A revision of a pack: the caller's own name for it, when the pack has one, and the SHA-256 of its manifest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digest"
+      ],
+      "properties": {
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/Sha256"
+        }
+      }
+    },
+    "Pack": {
+      "description": "One installed pack.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "into",
+        "manifest",
+        "generator",
+        "profile",
+        "digest",
+        "inTheBuild",
+        "files"
+      ],
+      "properties": {
+        "name": {
+          "description": "The pack's name, and the name of its folder.",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "asset",
+            "family",
+            "kit"
+          ]
+        },
+        "into": {
+          "description": "The folder of the project the pack's own folder is in, from the project's root, with / between folders.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(^|/)\\.{1,2}(/|$))[^\\\\:]+$"
+        },
+        "manifest": {
+          "description": "The manifest's file name in the pack's folder.",
+          "type": "string",
+          "minLength": 1
+        },
+        "generator": {
+          "description": "What wrote the pack.",
+          "type": "string",
+          "minLength": 1
+        },
+        "profile": {
+          "description": "Engine profile id.",
+          "type": "string",
+          "minLength": 1
+        },
+        "generatedAt": {
+          "description": "Only when the pack states a time.",
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "description": "Only when the pack states one: the caller's own name for the revision whose files are in the project.",
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "description": "SHA-256 of the manifest of the pack whose files are in the project. Two packs with one digest are the same pack.",
+          "$ref": "#/$defs/Sha256"
+        },
+        "inTheBuild": {
+          "description": "The revision pinned as in the build. Set by the first install, and moved only when asked.",
+          "$ref": "#/$defs/Revision"
+        },
+        "provenance": {
+          "description": "The pack's own provenance, as its manifest has it. Opaque JSON."
+        },
+        "files": {
+          "description": "Every file of the pack in the project, in the order of the paths.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/File"
+          }
+        }
+      }
+    },
+    "File": {
+      "description": "One file. Its path in the project is the pack's `into`, the pack's name and this path.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "role",
+        "bytes",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "description": "From the pack's folder, with / between folders.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(^|/)\\.{1,2}(/|$))[^\\\\:]+$"
+        },
+        "role": {
+          "enum": [
+            "model",
+            "blockout",
+            "manifest"
+          ]
+        },
+        "bytes": {
+          "description": "Size of the file.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "asset": {
+          "description": "Only for a model: the asset's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "row": {
+          "description": "Only for a model of a family: the row's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "layout": {
+          "description": "Only for a blockout: the layout's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "description": "Only when the manifest has provenance for this file. Opaque JSON."
+        }
+      }
+    }
+  }
+}

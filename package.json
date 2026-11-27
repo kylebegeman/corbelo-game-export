@@ -20,6 +20,10 @@
     "./schema/pack.schema.json": "./schema/pack.schema.json",
     "./schema/check-report.schema.json": "./schema/check-report.schema.json",
     "./schema/pack-manifest.schema.json": "./schema/pack-manifest.schema.json",
+    "./schema/kit-check-report.schema.json": "./schema/kit-check-report.schema.json",
+    "./schema/blockout.schema.json": "./schema/blockout.schema.json",
+    "./schema/kit-job.schema.json": "./schema/kit-job.schema.json",
+    "./schema/lock.schema.json": "./schema/lock.schema.json",
     "./package.json": "./package.json"
   },
   "main": "./dist/index.js",

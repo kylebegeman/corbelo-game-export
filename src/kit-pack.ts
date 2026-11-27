@@ -12,7 +12,10 @@ import type { PackFacts, Vec3 } from "./types.js";
 import { GENERATOR } from "./version.js";
 
 export interface KitPackInput extends KitInput {
-  /** Options for the kit checks, or `false` to run none. Default: checks with their own defaults. */
+  /**
+   * Options for the kit checks, or `false` to run none. Default: checks with their own
+   * defaults, and with the kit's own `kernel` when it has one.
+   */
   checks?: false | Omit<KitCheckOptions, "grid">;
   /**
    * Options for the game checks run on every piece, or `false` to run none. Default: every
@@ -113,7 +116,8 @@ export function exportKitPack(input: KitPackInput): GamePack {
   const generated = kitLayouts(kit);
   const layouts = [...generated.layouts, ...kit.layouts];
 
-  const report = checks === false ? undefined : checkKit(kit, checks ?? {});
+  // The kernel that made the collision also measures what two pieces both fill.
+  const report = checks === false ? undefined : checkKit(kit, { ...(input.kernel !== undefined ? { kernel: input.kernel } : {}), ...checks });
   const files: PackFile[] = [];
   const listed: PackManifestFile[] = [];
   const materials = new Map<string, PackManifest["materials"][number]>();

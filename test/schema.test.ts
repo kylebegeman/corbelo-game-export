@@ -1,25 +1,57 @@
 // The published JSON Schema against what the exporter really writes. Every object in the schema
 // refuses unknown keys, so a fact added to the code without the schema fails here.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { beforeAll } from "vitest";
-import { checkGameAsset, ENGINE_PROFILES, EXTRAS_KEY, exportGameAsset, exportGameGlb, exportGamePack, PLAYER_PROFILES, readGlb, type AssetInput, type CollisionKernel, type ExportInput, type PackInput } from "../src/index.js";
-import { box, chamferedBlock, cutCylinder, cylinder, doorFrame, ell, halfPaintedSide, MM_Z_UP, paintedPatch, paintedTop, ramp, stairs } from "./fixtures.js";
+import {
+  checkGameAsset,
+  checkKit,
+  ENGINE_PROFILES,
+  EXTRAS_KEY,
+  exportBlockout,
+  exportGameAsset,
+  exportGameGlb,
+  exportGamePack,
+  exportKitPack,
+  lockJson,
+  PLAYER_PROFILES,
+  planInstall,
+  readGlb,
+  verifyPack,
+  type AssetInput,
+  type CollisionKernel,
+  type ExportInput,
+  type KitGrid,
+  type KitPackInput,
+  type KitPieceInput,
+  type PackInput,
+} from "../src/index.js";
+import { box, chamferedBlock, cutCylinder, cylinder, doorFrame, ell, halfPaintedSide, joined, MM_Z_UP, paintedPatch, paintedTop, ramp, stairs } from "./fixtures.js";
 import { loadKernel } from "./kernel.js";
+import { bodyOf, corridorKit, corridorPieces, flatBoxes, SLAB, swap, WALL, withLamp } from "./kit-fixtures.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (name: string) => JSON.parse(readFileSync(join(root, "schema", name), "utf8")) as Record<string, unknown>;
 const schema = read("pack.schema.json");
 const reportSchema = read("check-report.schema.json");
 const manifestSchema = read("pack-manifest.schema.json");
+const kitReportSchema = read("kit-check-report.schema.json");
+const blockoutSchema = read("blockout.schema.json");
+const kitJobSchema = read("kit-job.schema.json");
+const lockSchema = read("lock.schema.json");
 const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
 const validPack = ajv.compile(schema);
 const validReport = ajv.compile(reportSchema);
-// The manifest refers to the other two by file name, next to its own address.
+// The others refer to the ones before them by file name, next to their own address.
+const validKitReport = ajv.compile(kitReportSchema);
+const validBlockout = ajv.compile(blockoutSchema);
+const validBlockoutFacts = ajv.compile({ $ref: `${blockoutSchema["$id"] as string}#/$defs/BlockoutFacts` });
 const validManifest = ajv.compile(manifestSchema);
+const validKitJob = ajv.compile(kitJobSchema);
+const validLock = ajv.compile(lockSchema);
 const validFacts = ajv.compile({ $ref: `${schema["$id"] as string}#/$defs/PackFacts` });
 const validProfile = ajv.compile({ $ref: `${schema["$id"] as string}#/$defs/EngineProfile` });
 
@@ -283,7 +315,11 @@ describe("schema/pack-manifest.schema.json", () => {
     const files = manifest["files"] as Record<string, unknown>[];
     expect(validManifest(manifest)).toBe(true);
     expect(validManifest({ ...manifest, guessed: true })).toBe(false);
+    // A kit has the part that says what the kit is, and nothing else has it.
     expect(validManifest({ ...manifest, kind: "kit" })).toBe(false);
+    expect(validManifest({ ...manifest, kit: {} })).toBe(false);
+    expect(validManifest({ ...manifest, scenes: [] })).toBe(false);
+    expect(validManifest({ ...manifest, kind: "terrain" })).toBe(false);
     expect(validManifest({ ...manifest, files: [] })).toBe(false);
     const withFile = (changed: Record<string, unknown>) => validManifest({ ...manifest, files: [{ ...files[0], ...changed }, files[1]] });
     expect(withFile({ sha256: "abc" })).toBe(false);
@@ -300,10 +336,276 @@ describe("schema/pack-manifest.schema.json", () => {
   });
 });
 
-describe("the three schema files", () => {
+/** Kits that end in every status: as they should be, and each with something wrong or left out. */
+const sizesOf = (grid: KitGrid): { M: number; S: number } => ({ M: grid.moduleMeters * 1000, S: grid.storeyMeters * 1000 });
+const threshold = (grid: KitGrid): KitPieceInput => {
+  const { M } = sizesOf(grid);
+  const good = corridorPieces(grid)[0]!;
+  return { ...good, bodies: [...good.bodies!, bodyOf("threshold", [[[M - 100, 500, 150], [M + 50, M - 500, 250]]])], trim: ["threshold"] };
+};
+const splitWall = (grid: KitGrid): KitPieceInput => {
+  const { M, S } = sizesOf(grid);
+  const boxes = flatBoxes(grid, ["+x", "-x"]);
+  const split: typeof boxes = [boxes[0]!, [[0, 0, SLAB], [M, WALL, 1500]], [[0, 0, 1500], [M, WALL, S]], boxes[2]!];
+  return { ...corridorPieces(grid)[0]!, bodies: [bodyOf("straight", boxes, { visible: joined(...split.map(([min, max]) => box(min, max))) })] };
+};
+const skirting = (grid: KitGrid): KitPieceInput => {
+  const { M } = sizesOf(grid);
+  const good = corridorPieces(grid)[5]!;
+  return { ...good, bodies: [...good.bodies!, bodyOf("skirting", [[[-300, 500, 0], [100, M - 500, 100]]])], trim: ["skirting"] };
+};
+const kits: Record<string, KitPackInput> = {
+  "the corridor kit": corridorKit(undefined, { revision: "r7", generatedAt: "2026-01-01T00:00:00Z", provenance: { part: "corridor kit" } }),
+  "a kit with a lamp of three detail levels": corridorKit(withLamp),
+  "a kit for Unreal, with a layout of the caller's own and mates": corridorKit(undefined, {
+    profile: "unreal5",
+    mates: { corridor: "corridor" },
+    layouts: [{ name: "dead end", placements: [{ piece: "endcap", cell: [0, 0, 0] }, { piece: "straight", cell: [1, 0, 0] }, { piece: "endcap", cell: [2, 0, 0], turn: 2 }] }],
+  }),
+  "a pivot off the grid": corridorKit(swap((grid) => ({ ...corridorPieces(grid)[0]!, pivot: [100, 0, 0] }))),
+  "a wall in two parts": corridorKit(swap(splitWall)),
+  "trim that runs into the next piece": corridorKit(swap(threshold)),
+  "trim that reaches too far": corridorKit(swap(skirting)),
+  "no collision": corridorKit(undefined, { collision: "none" }),
+  "no sockets": corridorKit((pieces) => pieces.slice(0, 2).map((piece) => ({ ...piece, sockets: [] }))),
+  "layouts that do not close": corridorKit(undefined, {
+    layouts: [
+      { name: "gap", placements: [{ piece: "straight", cell: [0, 0, 0] }, { piece: "straight", cell: [2, 0, 0] }] },
+      { name: "twice", placements: [{ piece: "straight", cell: [0, 0, 0] }, { piece: "doorway", cell: [0, 0, 0] }, { piece: "straight", cell: [1, 0, 0] }] },
+    ],
+  }),
+  "a kit with no checks and no scenes": corridorKit(undefined, { checks: false, pieceChecks: false, scenes: false }),
+};
+const json = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+describe("schema/kit-check-report.schema.json", () => {
+  let kernel: CollisionKernel;
+  beforeAll(async () => {
+    kernel = await loadKernel();
+  });
+
+  it.each(Object.entries(kits))("accepts the report for %s", (_, input) => {
+    const report = checkKit(input);
+    expect(validKitReport(json(report)), JSON.stringify(validKitReport.errors)).toBe(true);
+  });
+
+  it("accepts a report made with a kernel, for another module size and another player", () => {
+    const report = checkKit(kits["trim that runs into the next piece"]!, { kernel, player: "unity6" });
+    expect(report.kernel).toBe(true);
+    expect(validKitReport(json(report)), JSON.stringify(validKitReport.errors)).toBe(true);
+    const other = checkKit(kits["the corridor kit"]!, { grid: { moduleMeters: 4, storeyMeters: 3.5 }, toleranceMeters: 0.001 });
+    expect(validKitReport(json(other)), JSON.stringify(validKitReport.errors)).toBe(true);
+  });
+
+  it("sees every status in the reports it was given", () => {
+    const seen = new Set<string>();
+    for (const input of Object.values(kits)) for (const result of checkKit(input).results) seen.add(`${result.id}:${result.status}`);
+    for (const result of checkKit(kits["trim that runs into the next piece"]!, { kernel }).results) seen.add(`${result.id}:${result.status}`);
+    for (const status of ["pass", "warn", "fail", "not-measured"]) expect([...seen].some((entry) => entry.endsWith(`:${status}`)), status).toBe(true);
+    for (const id of ["on-grid", "seams", "in-cells", "layouts", "corners", "walkable", "collision-tiles"]) {
+      expect([...seen].filter((entry) => entry.startsWith(`${id}:`)).length, id).toBeGreaterThan(1);
+    }
+  });
+
+  it("refuses a report with a result missing, out of order, or of a kind it does not know", () => {
+    const report = json(checkKit(kits["the corridor kit"]!)) as unknown as Record<string, unknown>;
+    const results = report["results"] as Record<string, unknown>[];
+    expect(validKitReport(report)).toBe(true);
+    expect(validKitReport({ ...report, results: results.slice(0, 6) })).toBe(false);
+    expect(validKitReport({ ...report, results: [results[1], results[0], ...results.slice(2)] })).toBe(false);
+    expect(validKitReport({ ...report, results: [...results, results[0]] })).toBe(false);
+    expect(validKitReport({ ...report, status: "not-measured" })).toBe(false);
+    expect(validKitReport({ ...report, guessed: true })).toBe(false);
+    expect(validKitReport({ ...report, grid: { moduleMeters: 0, storeyMeters: 3, trimMeters: 0.1 } })).toBe(false);
+    expect(validKitReport({ ...report, layouts: [{ name: "run", origin: "guessed", placements: [] }] })).toBe(false);
+    expect(validKitReport({ ...report, layouts: [{ name: "run", origin: "given", placements: [{ piece: "straight", cell: [0, 0, 0], turn: 4 }] }] })).toBe(false);
+    const withFirst = (changed: Record<string, unknown>) => validKitReport({ ...report, results: [{ ...results[0], ...changed }, ...results.slice(1)] });
+    expect(withFirst({ status: "unknown" })).toBe(false);
+    expect(withFirst({ values: {} })).toBe(false);
+    expect(withFirst({ values: { ...(results[0]!["values"] as object), extra: 1 } })).toBe(false);
+    // A reason goes with not-measured, and only with it.
+    expect(withFirst({ reason: "because" })).toBe(false);
+    expect(withFirst({ status: "not-measured" })).toBe(false);
+    expect(withFirst({ status: "not-measured", reason: "because" })).toBe(true);
+  });
+});
+
+describe("schema/blockout.schema.json", () => {
+  it.each(Object.entries(kits))("accepts every layout of %s as a scene", (_, input) => {
+    const names = checkKit(input).layouts.map((layout) => layout.name);
+    for (const name of names) {
+      const { glb, facts } = exportBlockout(input, name, { provenance: { layout: name } });
+      expect(validBlockout(readGlb(glb).json.scenes![0]!.extras![EXTRAS_KEY]), JSON.stringify(validBlockout.errors)).toBe(true);
+      expect(validBlockoutFacts(json(facts)), JSON.stringify(validBlockoutFacts.errors)).toBe(true);
+    }
+  });
+
+  it("knows the nodes that hold detail levels, and refuses facts that cannot be", () => {
+    const facts = json(exportBlockout(kits["a kit with a lamp of three detail levels"]!, "run").facts) as unknown as Record<string, unknown>;
+    const lods = facts["lods"] as Record<string, unknown>[];
+    expect(lods.length).toBeGreaterThan(0);
+    expect(validBlockoutFacts(facts)).toBe(true);
+    expect(validBlockoutFacts({ ...facts, guessed: true })).toBe(false);
+    expect(validBlockoutFacts({ ...facts, kind: "asset" })).toBe(false);
+    expect(validBlockoutFacts({ ...facts, lods: [] })).toBe(false);
+    // One level is a body without lower levels, which is not listed.
+    expect(validBlockoutFacts({ ...facts, lods: [{ ...lods[0], levels: (lods[0]!["levels"] as unknown[]).slice(0, 1) }] })).toBe(false);
+    const placements = facts["placements"] as Record<string, unknown>[];
+    expect(validBlockoutFacts({ ...facts, placements: [{ ...placements[0], degrees: 45 }, ...placements.slice(1)] })).toBe(false);
+    const { meshes: _meshes, ...rest } = facts;
+    expect(validBlockoutFacts(rest)).toBe(false);
+    // A layout of pieces with one level each is written without the list.
+    expect(exportBlockout(kits["the corridor kit"]!, "run").facts).not.toHaveProperty("lods");
+  });
+});
+
+describe("schema/pack-manifest.schema.json for a kit", () => {
+  let kernel: CollisionKernel;
+  beforeAll(async () => {
+    kernel = await loadKernel();
+  });
+
+  it.each(Object.entries(kits))("accepts the manifest of %s", (_, input) => {
+    const pack = exportKitPack(input);
+    expect(pack.manifest.kind).toBe("kit");
+    expect(validManifest(json(pack.manifest)), JSON.stringify(validManifest.errors)).toBe(true);
+    expect(validManifest(JSON.parse(new TextDecoder().decode(pack.files.at(-1)!.bytes))), JSON.stringify(validManifest.errors)).toBe(true);
+  });
+
+  it("accepts the manifest of a kit made with a kernel", () => {
+    const pack = exportKitPack({ ...kits["trim that runs into the next piece"]!, kernel });
+    expect(pack.manifest.kit!.checks!.kernel).toBe(true);
+    expect(validManifest(json(pack.manifest)), JSON.stringify(validManifest.errors)).toBe(true);
+  });
+
+  it("refuses a kit it cannot be, a scene it cannot trust and a kit with no kit in it", () => {
+    const manifest = json(exportKitPack(kits["the corridor kit"]!).manifest) as unknown as Record<string, unknown>;
+    const kit = manifest["kit"] as Record<string, unknown>;
+    const scenes = manifest["scenes"] as Record<string, unknown>[];
+    expect(validManifest(manifest)).toBe(true);
+    const { kit: _kit, ...noKit } = manifest;
+    expect(validManifest(noKit)).toBe(false);
+    expect(validManifest({ ...manifest, kind: "family" })).toBe(false);
+    const withKit = (changed: Record<string, unknown>) => validManifest({ ...manifest, kit: { ...kit, ...changed } });
+    expect(withKit({})).toBe(true);
+    expect(withKit({ guessed: true })).toBe(false);
+    expect(withKit({ frame: { up: "Y", toFile: "as it is" } })).toBe(false);
+    expect(withKit({ cellSize: [3, 3] })).toBe(false);
+    const pieces = kit["pieces"] as Record<string, unknown>[];
+    const sockets = pieces[0]!["sockets"] as Record<string, unknown>[];
+    const withSocket = (changed: Record<string, unknown>) => withKit({ pieces: [{ ...pieces[0], sockets: [{ ...sockets[0], ...changed }] }, ...pieces.slice(1)] });
+    expect(withSocket({})).toBe(true);
+    expect(withSocket({ side: "up" })).toBe(false);
+    expect(withSocket({ region: [[0, 0, 0]] })).toBe(false);
+    expect(withSocket({ passage: "yes" })).toBe(false);
+    const library = kit["meshLibrary"] as Record<string, unknown>;
+    expect(withKit({ meshLibrary: { ...library, items: [{ id: 0, name: "corridor_straight" }] } })).toBe(false);
+    // The kit checks are held to their own schema.
+    expect(withKit({ checks: { ...(kit["checks"] as object), status: "unknown" } })).toBe(false);
+    const withScene = (changed: Record<string, unknown>) => validManifest({ ...manifest, scenes: [{ ...scenes[0], ...changed }, ...scenes.slice(1)] });
+    expect(withScene({})).toBe(true);
+    expect(withScene({ sha256: "abc" })).toBe(false);
+    expect(withScene({ name: "../corridor_layout_run.glb" })).toBe(false);
+    expect(withScene({ role: "model" })).toBe(false);
+    expect(withScene({ facts: { ...(scenes[0]!["facts"] as object), guessed: true } })).toBe(false);
+  });
+});
+
+describe("schema/kit-job.schema.json", () => {
+  const bodies = [{ name: "straight", stl: "straight.stl", color: "#8a8f98", materialName: "Concrete", collisionPieces: [{ stl: "straight-0.stl" }], lods: [{ stl: "straight-lod1.stl" }] }];
+  const job = {
+    name: "hall",
+    source: MM_Z_UP,
+    grid: { moduleMeters: 3, storeyMeters: 3 },
+    collision: "pieces",
+    pieces: [
+      { name: "straight", bodies, sockets: [{ type: "corridor", side: "+x", passage: true }, { name: "back", type: "corridor", plane: { point: [0, 1500, 1500], normal: [-1, 0, 0] }, region: [[0, 0, 0], [0, 3000, 0], [0, 3000, 3000]] }], trim: ["skirting"], provenance: { part: 1 } },
+      { name: "stairs", glb: "hall_stairs.glb", cells: [2, 1, 2], origin: [0, 0, 0], sockets: [{ type: "corridor", side: "+x", cell: [1, 0, 1] }] },
+    ],
+    mates: { plug: "hole" },
+    layouts: [{ name: "pair", placements: [{ piece: "straight", cell: [0, 0, 0] }, { piece: "straight", cell: [1, 0, 0], turn: 2 }] }],
+    checks: { player: "godot4", toleranceMeters: 0.0005 },
+    pieceChecks: { gridMeters: 0.5 },
+    scenes: true,
+    kernel: "manifold-3d",
+    revision: "k1",
+    generatedAt: "2026-01-01T00:00:00Z",
+    provenance: { project: "p-1" },
+    output: { dir: "out", zip: "hall.zip" },
+  };
+
+  it("accepts a kit written as data", () => {
+    expect(validKitJob(job), JSON.stringify(validKitJob.errors)).toBe(true);
+    expect(validKitJob({ name: "hall", source: MM_Z_UP, grid: job.grid, pieces: [{ name: "a", glb: "a.glb" }], checks: false, pieceChecks: false, scenes: false })).toBe(true);
+  });
+
+  it("refuses what the pack command refuses", () => {
+    const withPiece = (changed: Record<string, unknown>) => validKitJob({ ...job, pieces: [{ ...job.pieces[0], ...changed }] });
+    expect(withPiece({})).toBe(true);
+    expect(validKitJob({ ...job, pieces: [] })).toBe(false);
+    expect(validKitJob({ ...job, pieces: [{ name: "a" }] })).toBe(false);
+    expect(withPiece({ glb: "a.glb" })).toBe(false);
+    expect(withPiece({ colour: "red" })).toBe(false);
+    expect(withPiece({ bodies: [{ name: "a" }] })).toBe(false);
+    expect(withPiece({ bodies: [{ ...bodies[0], positions: [0, 0, 0] }] })).toBe(false);
+    expect(withPiece({ sockets: [{ type: "corridor" }] })).toBe(false);
+    expect(withPiece({ sockets: [{ side: "+x" }] })).toBe(false);
+    expect(validKitJob({ ...job, rows: [] })).toBe(false);
+    expect(validKitJob({ ...job, bodies })).toBe(false);
+    expect(validKitJob({ ...job, grid: { moduleMeters: 3 } })).toBe(false);
+    expect(validKitJob({ ...job, kernel: "another" })).toBe(false);
+    expect(validKitJob({ ...job, output: { folder: "out" } })).toBe(false);
+    const { grid: _grid, ...noGrid } = job;
+    expect(validKitJob(noGrid)).toBe(false);
+  });
+});
+
+describe("schema/lock.schema.json", () => {
+  const nothing = (): undefined => undefined;
+  const crate = { name: "Crate", positions: box([0, 0, 0], [400, 400, 400]).positions, color: "#8a5a2b", materialName: "Wood" };
+  const family = verifyPack(exportGamePack({ name: "crate", source: MM_Z_UP, rows: [{ name: "small", bodies: [crate], provenance: { part: "crate-small" } }, { name: "large", bodies: [crate] }], revision: "r1", generatedAt: "2026-01-02T03:04:05Z", provenance: { part: "crates" } }).files);
+  const asset = verifyPack(exportGamePack({ name: "post", source: MM_Z_UP, bodies: [crate] }).files);
+  const kit = verifyPack(exportKitPack(kits["the corridor kit"]!).files);
+
+  it("accepts the lock file of a family, an asset and a kit, in one project", () => {
+    let lock = planInstall(family, undefined, nothing).lock;
+    lock = planInstall(asset, lock, nothing, { into: "art/props" }).lock;
+    lock = planInstall(kit, lock, nothing).lock;
+    expect(lock.packs.map((pack) => [pack.name, pack.kind, pack.into])).toEqual([["corridor", "kit", "assets/corridor"], ["crate", "family", "assets/crate"], ["post", "asset", "art/props/post"]]);
+    expect(validLock(JSON.parse(lockJson(lock))), JSON.stringify(validLock.errors)).toBe(true);
+    expect(validLock({ schema: 1, packs: [] })).toBe(true);
+  });
+
+  it("refuses what the package does not read back", () => {
+    const lock = JSON.parse(lockJson(planInstall(family, undefined, nothing).lock)) as { schema: number; packs: Record<string, unknown>[] };
+    const pack = lock.packs[0]!;
+    const files = pack["files"] as Record<string, unknown>[];
+    const withPack = (changed: Record<string, unknown>) => validLock({ ...lock, packs: [{ ...pack, ...changed }] });
+    const withFile = (changed: Record<string, unknown>) => withPack({ files: [{ ...files[0], ...changed }, ...files.slice(1)] });
+    expect(withPack({})).toBe(true);
+    expect(validLock({ ...lock, schema: 2 })).toBe(false);
+    expect(validLock({ ...lock, guessed: true })).toBe(false);
+    expect(withPack({ guessed: true })).toBe(false);
+    expect(withPack({ kind: "terrain" })).toBe(false);
+    expect(withPack({ digest: "abc" })).toBe(false);
+    expect(withPack({ inTheBuild: { revision: "r1" } })).toBe(false);
+    for (const into of ["../outside", "/tmp/assets", "assets/../..", "assets\\crate", "C:/assets", "./assets", ""]) expect(withPack({ into }), into).toBe(false);
+    for (const path of ["../crate_small.glb", "/crate_small.glb", "a/../../b.glb", "a\\b.glb"]) expect(withFile({ path }), path).toBe(false);
+    expect(withFile({ path: "scenes/crate_small.glb" })).toBe(true);
+    expect(withFile({ role: "texture" })).toBe(false);
+    expect(withFile({ bytes: -1 })).toBe(false);
+    expect(withFile({ bytes: 1.5 })).toBe(false);
+    expect(withFile({ sha256: (files[0]!["sha256"] as string).toUpperCase() })).toBe(false);
+    expect(withFile({ guessed: true })).toBe(false);
+  });
+});
+
+describe("the schema files", () => {
   it("are what the package publishes, each under an address of its own", () => {
     const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { exports: Record<string, unknown>; files: string[] };
-    for (const [name, file] of [["pack.schema.json", schema], ["check-report.schema.json", reportSchema], ["pack-manifest.schema.json", manifestSchema]] as const) {
+    const published = { "pack.schema.json": schema, "check-report.schema.json": reportSchema, "pack-manifest.schema.json": manifestSchema, "kit-check-report.schema.json": kitReportSchema, "blockout.schema.json": blockoutSchema, "kit-job.schema.json": kitJobSchema, "lock.schema.json": lockSchema };
+    expect(readdirSync(join(root, "schema")).sort()).toEqual(Object.keys(published).sort());
+    for (const [name, file] of Object.entries(published)) {
       expect(manifest.exports[`./schema/${name}`]).toBe(`./schema/${name}`);
       expect(file["$id"]).toBe(`https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/${name}`);
       expect(file["$schema"]).toBe("https://json-schema.org/draft/2020-12/schema");

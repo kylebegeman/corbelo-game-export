@@ -1,0 +1,514 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/kit-job.schema.json",
+  "title": "corbelo-game-export kit job",
+  "description": "A kit written as data: the JSON job the pack command reads for a kit, and what runPackJob takes. It is what exportKitPack takes, with files in place of numbers and the name of a kernel in place of the kernel. Paths are relative to the job's folder.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "source",
+    "grid",
+    "pieces"
+  ],
+  "properties": {
+    "name": {
+      "description": "The kit's name: corridor.",
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "description": "The space the bodies, origins, pivots, planes and regions are given in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit",
+        "up"
+      ],
+      "properties": {
+        "unit": {
+          "description": "Metres for one unit: 0.001 for millimetres.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "up": {
+          "enum": [
+            "Y",
+            "Z"
+          ]
+        },
+        "handedness": {
+          "enum": [
+            "right",
+            "left"
+          ]
+        }
+      }
+    },
+    "grid": {
+      "description": "The grid the pieces share, in metres.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "moduleMeters",
+        "storeyMeters"
+      ],
+      "properties": {
+        "moduleMeters": {
+          "description": "The side of one cell on the ground.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "storeyMeters": {
+          "description": "The height of one cell.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "trimMeters": {
+          "description": "How far a body declared as trim may reach past its piece's cells. Default 0.1.",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "pieces": {
+      "type": "array",
+      "items": {
+        "description": "One piece: its bodies, or a GLB this package wrote.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "description": "What tells this piece from the others: straight, corner. Goes into its file name by the pattern.",
+            "type": "string",
+            "minLength": 1
+          },
+          "bodies": {
+            "description": "The piece as bodies, in the kit's source space. Give this or `glb`.",
+            "type": "array",
+            "items": {
+              "description": "One body: an STL file, with what exportGameAsset takes for a body. Lists the size of the file's triangles may also be given as a path to a JSON file.",
+              "type": "object",
+              "required": [
+                "stl"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "stl": {
+                  "description": "Path to the body's mesh, relative to the job's folder.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "color": {},
+                "materialName": {
+                  "type": "string"
+                },
+                "faceIds": {},
+                "faceColors": {},
+                "faceMaterialNames": {
+                  "type": "object"
+                },
+                "refines": {
+                  "type": "object"
+                },
+                "lods": {
+                  "description": "Lower detail levels, the nearest to full detail first.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "stl"
+                    ],
+                    "properties": {
+                      "stl": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "faceIds": {},
+                      "faceColors": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "collisionPieces": {
+                  "description": "The pieces the body was made from. Only their points are used.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "stl"
+                    ],
+                    "properties": {
+                      "stl": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                },
+                "attachPoints": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "glb": {
+            "description": "The piece as an asset this package already wrote. Its own origin is the piece's pivot, and its origin, planes and regions are read in glTF space: metres, +Y up.",
+            "type": "string",
+            "minLength": 1
+          },
+          "cells": {
+            "description": "Default [1, 1, 1].",
+            "$ref": "kit-check-report.schema.json#/$defs/Cells"
+          },
+          "origin": {
+            "description": "The corner of the piece's cells that is lowest along every kit axis, in the piece's units and axes. Default [0, 0, 0].",
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "items": false,
+            "minItems": 3
+          },
+          "pivot": {
+            "description": "The piece's own origin in the engine, in the piece's units and axes. Default: `origin`. Not for a `glb` piece.",
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "items": false,
+            "minItems": 3
+          },
+          "sockets": {
+            "type": "array",
+            "items": {
+              "description": "A face where the piece meets another piece. Give `side`, with the cell when the piece has more than one, or give `plane` as a point and a normal, the way a face a person clicked comes.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "name": {
+                  "description": "Default: the side and the cell, like +x or +x@1,0,0. Unique in its piece.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "description": "What meets what: sockets of one type meet each other, or the type `mates` names.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "side": {
+                  "enum": [
+                    "+x",
+                    "-x",
+                    "+y",
+                    "-y",
+                    "+z",
+                    "-z"
+                  ]
+                },
+                "cell": {
+                  "description": "Which cell of the piece the socket is a face of. Default [0, 0, 0].",
+                  "$ref": "kit-check-report.schema.json#/$defs/Cell"
+                },
+                "plane": {
+                  "description": "In the piece's units and axes. The normal points out of the piece.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "point",
+                    "normal"
+                  ],
+                  "properties": {
+                    "point": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 3
+                    },
+                    "normal": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 3
+                    }
+                  }
+                },
+                "region": {
+                  "description": "The outline of the part of the face that meets, as points on the plane in the piece's units and axes. Default: the whole face of the cell.",
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "items": false,
+                    "minItems": 3
+                  },
+                  "minItems": 3
+                },
+                "passage": {
+                  "description": "True when the player walks through this socket. Default false.",
+                  "type": "boolean"
+                }
+              },
+              "anyOf": [
+                {
+                  "properties": {
+                    "side": true
+                  },
+                  "required": [
+                    "side"
+                  ]
+                },
+                {
+                  "properties": {
+                    "plane": true
+                  },
+                  "required": [
+                    "plane"
+                  ]
+                }
+              ]
+            }
+          },
+          "trim": {
+            "description": "Names of bodies that are trim: declared to overlap what is next to the piece.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "provenance": {
+            "description": "Opaque JSON about this piece. Stored in its GLB and in the manifest."
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "bodies": true
+            },
+            "required": [
+              "bodies"
+            ]
+          },
+          {
+            "properties": {
+              "glb": true
+            },
+            "required": [
+              "glb"
+            ]
+          }
+        ]
+      },
+      "minItems": 1
+    },
+    "mates": {
+      "description": "Socket types that meet a type other than their own: { \"plug\": \"hole\" }. It reads both ways.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "layouts": {
+      "description": "Layouts of the caller's own, checked and exported with the test layouts.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "placements"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "description": "One piece in its place.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "piece",
+                "cell"
+              ],
+              "properties": {
+                "piece": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "cell": {
+                  "description": "The cell the piece's first cell lands on.",
+                  "$ref": "kit-check-report.schema.json#/$defs/Cell"
+                },
+                "turn": {
+                  "description": "Quarter turns about the up axis, anticlockwise seen from above, about the middle of the piece's first cell. Default 0.",
+                  "type": "integer"
+                }
+              }
+            },
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "naming": {
+      "description": "The name pattern, as assetName reads it, with the kit as the family and the piece as the row.",
+      "type": "string"
+    },
+    "checks": {
+      "description": "Options for the kit checks, or false to run none.",
+      "anyOf": [
+        {
+          "const": false
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "player": {},
+            "toleranceMeters": {
+              "description": "How near is near enough, in metres. Default 0.0001.",
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "pieceChecks": {
+      "description": "Options for the game checks run on every piece, as checkGameAsset takes them, or false to run none.",
+      "anyOf": [
+        {
+          "const": false
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "scenes": {
+      "description": "false leaves the scenes of the layouts out of the pack. Default: one scene for each layout.",
+      "type": "boolean"
+    },
+    "kernel": {
+      "description": "Loads that package, which must be installed: for general convex decomposition, and to measure what two pieces both fill.",
+      "const": "manifold-3d"
+    },
+    "generatedAt": {
+      "description": "A time to write into the manifest, as text. The clock is never read.",
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "description": "The caller's own name for this revision of the source.",
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "description": "Opaque JSON about the kit. Stored in every GLB and in the manifest."
+    },
+    "output": {
+      "description": "Where to write, relative to the job's folder: every file into `dir`, one archive at `zip`, or both.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "zip": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "profile": {
+      "description": "The id of an engine profile, or a profile of the caller's own."
+    },
+    "creaseAngle": {
+      "type": "number"
+    },
+    "normals": {
+      "type": "string"
+    },
+    "weldTolerance": {
+      "type": "number"
+    },
+    "maxTriangles": {
+      "type": "number"
+    },
+    "colorSpace": {
+      "type": "string"
+    },
+    "collision": {
+      "description": "How collision is made for every piece, as exportGameAsset takes it."
+    },
+    "texcoords": {
+      "description": "Texture coordinates, as exportGameAsset takes them."
+    }
+  }
+}

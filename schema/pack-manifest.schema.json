@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/pack-manifest.schema.json",
   "title": "corbelo-game-export pack manifest",
-  "description": "The <name>.pack.json file of a pack from exportGamePack: every GLB of one asset or of a family, with its size, its SHA-256, the facts measured from it and the results of the game checks.",
+  "description": "The <name>.pack.json file of a pack from exportGamePack or exportKitPack: every GLB of one asset, of a family or of a kit, with its size, its SHA-256, the facts measured from it and the results of the game checks. A kit's manifest also holds its grid, its pieces with their sockets, its layouts, the results of the kit checks and what a grid of tiles needs.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -21,10 +21,11 @@
       "const": 1
     },
     "kind": {
-      "description": "asset: one GLB. family: one GLB for each row.",
+      "description": "asset: one GLB. family: one GLB for each row. kit: one GLB for each piece of a kit.",
       "enum": [
         "asset",
-        "family"
+        "family",
+        "kit"
       ]
     },
     "name": {
@@ -159,6 +160,17 @@
       },
       "minItems": 1
     },
+    "scenes": {
+      "description": "Only in a kit pack written with its layouts: one scene for each layout, made of the pieces.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Scene"
+      }
+    },
+    "kit": {
+      "description": "Only in a kit pack.",
+      "$ref": "#/$defs/Kit"
+    },
     "provenance": {
       "description": "Opaque JSON from the caller, stored as given."
     }
@@ -220,6 +232,344 @@
           "description": "Only for a row given provenance of its own."
         }
       }
+    },
+    "Scene": {
+      "description": "A scene made of the pack's pieces: a layout of a kit, written by exportBlockout.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "role",
+        "mediaType",
+        "bytes",
+        "sha256",
+        "layout",
+        "facts"
+      ],
+      "properties": {
+        "name": {
+          "description": "The file's name in the pack.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+\\.glb$"
+        },
+        "role": {
+          "const": "blockout"
+        },
+        "mediaType": {
+          "const": "model/gltf-binary"
+        },
+        "bytes": {
+          "description": "Size of the file.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "description": "SHA-256 of the file.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "layout": {
+          "description": "The layout's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "facts": {
+          "description": "The same facts the GLB carries in its scene extras.",
+          "$ref": "blockout.schema.json#/$defs/BlockoutFacts"
+        }
+      }
+    },
+    "KitSocket": {
+      "description": "A face where the piece meets another piece, placed on its cell.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "side",
+        "cell",
+        "passage",
+        "offsetMeters",
+        "region"
+      ],
+      "properties": {
+        "name": {
+          "description": "Unique in its piece.",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "side": {
+          "enum": [
+            "+x",
+            "-x",
+            "+y",
+            "-y",
+            "+z",
+            "-z"
+          ]
+        },
+        "cell": {
+          "$ref": "kit-check-report.schema.json#/$defs/Cell"
+        },
+        "passage": {
+          "description": "True when the player walks through this socket.",
+          "type": "boolean"
+        },
+        "offsetMeters": {
+          "description": "How far the plane given is from the face of the cell, along the normal, in metres. Zero for a socket given by side.",
+          "type": "number"
+        },
+        "region": {
+          "description": "The outline in the socket's own frame, in metres from the middle of the face. Null for the whole face.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "items": false,
+                "minItems": 2
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "KitPiece": {
+      "description": "One piece of the kit.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "asset",
+        "file",
+        "cells",
+        "pivotMeters",
+        "sockets",
+        "trim"
+      ],
+      "properties": {
+        "name": {
+          "description": "The piece's name in the kit.",
+          "type": "string",
+          "minLength": 1
+        },
+        "asset": {
+          "description": "The piece's asset name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "file": {
+          "description": "The piece's file in the pack.",
+          "type": "string",
+          "minLength": 1
+        },
+        "cells": {
+          "$ref": "kit-check-report.schema.json#/$defs/Cells"
+        },
+        "pivotMeters": {
+          "description": "Where its own origin is from the lowest corner of its cells, in metres, in the kit's frame.",
+          "$ref": "kit-check-report.schema.json#/$defs/Vec3"
+        },
+        "sockets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KitSocket"
+          }
+        },
+        "trim": {
+          "description": "Names of its bodies that are trim.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Kit": {
+      "description": "The kit: its grid, its pieces with their sockets, its layouts, the results of the kit checks and what a grid of tiles needs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frame",
+        "grid",
+        "cellSize",
+        "mates",
+        "pieces",
+        "layouts",
+        "skippedLayouts",
+        "meshLibrary"
+      ],
+      "properties": {
+        "frame": {
+          "description": "The kit's frame against the files': both in metres, the kit's with Z up.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "up",
+            "toFile"
+          ],
+          "properties": {
+            "up": {
+              "const": "Z"
+            },
+            "toFile": {
+              "const": "x, y, z in the kit is x, z, -y in the files"
+            }
+          }
+        },
+        "grid": {
+          "$ref": "kit-check-report.schema.json#/$defs/Grid"
+        },
+        "cellSize": {
+          "description": "One cell in the files' axes, in metres: along X, up, and along Z.",
+          "$ref": "kit-check-report.schema.json#/$defs/Vec3"
+        },
+        "mates": {
+          "description": "Which socket type meets which, for every type that meets another than itself.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KitPiece"
+          }
+        },
+        "layouts": {
+          "description": "Every layout: the test layouts built from the sockets, then the caller's own.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "origin",
+              "placements"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "origin": {
+                "$ref": "kit-check-report.schema.json#/$defs/LayoutOrigin"
+              },
+              "placements": {
+                "type": "array",
+                "items": {
+                  "$ref": "kit-check-report.schema.json#/$defs/Placement"
+                }
+              },
+              "scene": {
+                "description": "The layout's file, when the pack has one.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "skippedLayouts": {
+          "$ref": "kit-check-report.schema.json#/$defs/SkippedLayouts"
+        },
+        "checks": {
+          "description": "Only when the kit checks ran.",
+          "$ref": "kit-check-report.schema.json"
+        },
+        "meshLibrary": {
+          "description": "What a grid of tiles needs: a mesh library with one item for each piece, at the kit's cell size. The kit's cell [i, j, k] is the grid's cell (i, k, -j - 1), and a quarter turn is one about +Y.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cellSize",
+            "items"
+          ],
+          "properties": {
+            "cellSize": {
+              "description": "One cell in the files' axes, in metres: along X, up, and along Z.",
+              "$ref": "kit-check-report.schema.json#/$defs/Vec3"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "piece",
+                  "file",
+                  "offset"
+                ],
+                "properties": {
+                  "id": {
+                    "description": "The item's number in a new library: the piece's place in the kit.",
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "name": {
+                    "description": "The item's name: the piece's asset name.",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "piece": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "file": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "offset": {
+                    "description": "Where the piece's own origin is from the middle of its first cell, in metres, in the files' axes.",
+                    "$ref": "kit-check-report.schema.json#/$defs/Vec3"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": {
+      "kind": {
+        "const": "kit"
+      }
+    },
+    "required": [
+      "kind"
+    ]
+  },
+  "then": {
+    "properties": {
+      "kit": true
+    },
+    "required": [
+      "kit"
+    ]
+  },
+  "else": {
+    "properties": {
+      "kit": false,
+      "scenes": false
     }
   }
 }

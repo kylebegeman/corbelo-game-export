@@ -444,11 +444,8 @@ export async function runPackJob(job: unknown, options: PackJobOptions = {}): Pr
       return { ...(given as unknown as KitPieceInput), bodies: readPackBodies(piece["bodies"], where, base) };
     });
     const kitInput = { ...rest, pieces } as unknown as KitPackInput;
-    if (kernel !== undefined) {
-      kitInput.kernel = kernel;
-      // The kit checks measure what two pieces both fill with the same kernel.
-      if (kitInput.checks !== false) kitInput.checks = { ...kitInput.checks, kernel };
-    }
+    // The kit checks measure what two pieces both fill with the same kernel.
+    if (kernel !== undefined) kitInput.kernel = kernel;
     pack = exportKitPack(kitInput);
     return writePack(pack, output, options, base);
   }

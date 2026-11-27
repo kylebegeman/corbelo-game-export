@@ -1,0 +1,1285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/kit-check-report.schema.json",
+  "title": "corbelo-game-export kit check report",
+  "description": "What checkKit returns and a kit pack's manifest holds as kit.checks: one result for every kit check, always all seven and always in the same order. Each result says pass, warn, fail or not-measured with a reason, and carries the numbers it was judged by.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "generator",
+    "kit",
+    "profile",
+    "grid",
+    "toleranceMeters",
+    "player",
+    "kernel",
+    "pieces",
+    "status",
+    "counts",
+    "results",
+    "layouts"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "generator": {
+      "type": "string"
+    },
+    "kit": {
+      "description": "The kit's name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "profile": {
+      "description": "Engine profile id.",
+      "type": "string"
+    },
+    "grid": {
+      "$ref": "#/$defs/Grid"
+    },
+    "toleranceMeters": {
+      "description": "How near is near enough, in metres.",
+      "type": "number",
+      "minimum": 0
+    },
+    "player": {
+      "$ref": "check-report.schema.json#/$defs/PlayerProfile"
+    },
+    "kernel": {
+      "description": "True when a kernel was given, so that what trim and the piece next to it both fill was measured.",
+      "type": "boolean"
+    },
+    "pieces": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "description": "The worst of the results: fail over warn over pass. What was not measured does not count.",
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass",
+        "warn",
+        "fail",
+        "notMeasured"
+      ],
+      "properties": {
+        "pass": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notMeasured": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/OnGridResult"
+        },
+        {
+          "$ref": "#/$defs/SeamResult"
+        },
+        {
+          "$ref": "#/$defs/InCellsResult"
+        },
+        {
+          "$ref": "#/$defs/LayoutResult"
+        },
+        {
+          "$ref": "#/$defs/CornerResult"
+        },
+        {
+          "$ref": "#/$defs/WalkableResult"
+        },
+        {
+          "$ref": "#/$defs/CollisionTileResult"
+        }
+      ],
+      "items": false,
+      "minItems": 7
+    },
+    "layouts": {
+      "description": "Every layout that was checked: the test layouts built from the sockets, then the caller's own.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Layout"
+      }
+    }
+  },
+  "$defs": {
+    "Vec3": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "items": false,
+      "minItems": 3
+    },
+    "Cell": {
+      "description": "A cell by number: along X, along Y, and the storey.",
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "integer"
+        }
+      ],
+      "items": false,
+      "minItems": 3
+    },
+    "Cells": {
+      "description": "How many cells a piece takes: along X, along Y, and storeys.",
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ],
+      "items": false,
+      "minItems": 3
+    },
+    "Grid": {
+      "description": "The grid the pieces share, in metres.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "moduleMeters",
+        "storeyMeters",
+        "trimMeters"
+      ],
+      "properties": {
+        "moduleMeters": {
+          "description": "The side of one cell on the ground.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "storeyMeters": {
+          "description": "The height of one cell.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "trimMeters": {
+          "description": "How far a body declared as trim may reach past its piece's cells.",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "LayoutOrigin": {
+      "description": "generated: a test layout built from the sockets. given: one the caller wrote.",
+      "enum": [
+        "generated",
+        "given"
+      ]
+    },
+    "Placement": {
+      "description": "One piece in its place.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "piece",
+        "cell",
+        "turn"
+      ],
+      "properties": {
+        "piece": {
+          "description": "The piece's name in the kit.",
+          "type": "string",
+          "minLength": 1
+        },
+        "cell": {
+          "description": "The cell the piece's first cell lands on.",
+          "$ref": "#/$defs/Cell"
+        },
+        "turn": {
+          "description": "Quarter turns about the up axis, anticlockwise seen from above, about the middle of the piece's first cell.",
+          "enum": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      }
+    },
+    "Layout": {
+      "description": "Pieces in their places.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "origin",
+        "placements"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "origin": {
+          "$ref": "#/$defs/LayoutOrigin"
+        },
+        "placements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Placement"
+          }
+        }
+      }
+    },
+    "SkippedLayouts": {
+      "description": "Test layouts the kit has no pieces for, and why.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "reason"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "SeamTypes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "mates",
+          "sockets",
+          "pairs",
+          "outlineSquareMeters",
+          "mismatchSquareMeters",
+          "worst"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mates": {
+            "description": "The type this one meets: itself, unless the kit says another.",
+            "type": "string",
+            "minLength": 1
+          },
+          "sockets": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pairs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outlineSquareMeters": {
+            "description": "The area of the largest outline of the type.",
+            "type": "number",
+            "minimum": 0
+          },
+          "mismatchSquareMeters": {
+            "description": "The most any two outlines that can meet differ by: the area one covers and the other does not.",
+            "type": "number",
+            "minimum": 0
+          },
+          "worst": {
+            "description": "The two sockets that differ the most, as piece/socket. Null when nothing differs.",
+            "anyOf": [
+              {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "items": false,
+                "minItems": 2
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "OnGridValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "moduleMeters",
+        "storeyMeters",
+        "toleranceMeters",
+        "pieces",
+        "worstMeters"
+      ],
+      "properties": {
+        "moduleMeters": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "storeyMeters": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "toleranceMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "piece",
+              "cells",
+              "sizeMeters",
+              "modules",
+              "sizeOffMeters",
+              "pivotOffMeters",
+              "socketOffMeters"
+            ],
+            "properties": {
+              "piece": {
+                "type": "string",
+                "minLength": 1
+              },
+              "cells": {
+                "$ref": "#/$defs/Cells"
+              },
+              "sizeMeters": {
+                "description": "The box around the piece without its trim: along X, along Y and up.",
+                "$ref": "#/$defs/Vec3"
+              },
+              "modules": {
+                "description": "The same in modules, modules and storeys.",
+                "$ref": "#/$defs/Vec3"
+              },
+              "sizeOffMeters": {
+                "description": "How far the size is from a whole number of modules, at worst.",
+                "type": "number",
+                "minimum": 0
+              },
+              "pivotOffMeters": {
+                "description": "How far the pivot is from a corner of the grid.",
+                "type": "number",
+                "minimum": 0
+              },
+              "socketOffMeters": {
+                "description": "How far a socket's plane is from the face of its cell, at worst.",
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "worstMeters": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "SeamValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "toleranceSquareMeters",
+        "lineMeters",
+        "types",
+        "empty",
+        "maxMismatchSquareMeters"
+      ],
+      "properties": {
+        "toleranceSquareMeters": {
+          "description": "The most two outlines may differ by: the tolerance times the side of a square as large as the face.",
+          "type": "number",
+          "minimum": 0
+        },
+        "lineMeters": {
+          "description": "The distance between two lines the faces are measured along, at most.",
+          "type": "number",
+          "minimum": 0
+        },
+        "types": {
+          "$ref": "#/$defs/SeamTypes"
+        },
+        "empty": {
+          "description": "Sockets with nothing of the piece on their plane, as piece/socket.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxMismatchSquareMeters": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "InCellsValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "toleranceMeters",
+        "trimMeters",
+        "pieces",
+        "maxPokeMeters",
+        "maxTrimPokeMeters"
+      ],
+      "properties": {
+        "toleranceMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "trimMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "piece",
+              "pokeMeters",
+              "trimPokeMeters"
+            ],
+            "properties": {
+              "piece": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pokeMeters": {
+                "description": "How far the piece without its trim reaches past its cells.",
+                "type": "number",
+                "minimum": 0
+              },
+              "trimPokeMeters": {
+                "description": "How far its trim does. Null for a piece with no trim.",
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "maxPokeMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxTrimPokeMeters": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "LayoutValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layouts",
+        "skipped",
+        "kernel"
+      ],
+      "properties": {
+        "layouts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "origin",
+              "pieces",
+              "cells",
+              "joints",
+              "open",
+              "blocked",
+              "mismatched",
+              "doubledCells",
+              "apart",
+              "minContactSquareMeters",
+              "maxGapMeters",
+              "maxOverlapMeters",
+              "trimOverlapCubicMeters",
+              "trimPairs"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "origin": {
+                "$ref": "#/$defs/LayoutOrigin"
+              },
+              "pieces": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cells": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "joints": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "open": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "blocked": {
+                "description": "Sockets that face a side of a piece with no socket.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "mismatched": {
+                "description": "Sockets face to face whose types do not meet.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "doubledCells": {
+                "description": "Cells more than one piece is in.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "apart": {
+                "description": "Joints where the two pieces share no area on the plane between them.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "minContactSquareMeters": {
+                "description": "The least area two pieces share at a joint. Null with no joints.",
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "maxGapMeters": {
+                "description": "The widest gap at a joint that does not touch.",
+                "type": "number",
+                "minimum": 0
+              },
+              "maxOverlapMeters": {
+                "description": "How far a piece reaches past the plane of a joint, into the piece it meets, at most.",
+                "type": "number",
+                "minimum": 0
+              },
+              "trimOverlapCubicMeters": {
+                "description": "What trim and the bodies of other pieces both fill. Null when it was not measured.",
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "trimPairs": {
+                "description": "Pairs of a trim body and a body of another piece whose boxes cross, so that only a kernel can say whether they overlap.",
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "skipped": {
+          "$ref": "#/$defs/SkippedLayouts"
+        },
+        "kernel": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CornerValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "toleranceMeters",
+        "pairs",
+        "pairsSkipped",
+        "points",
+        "coincident",
+        "onEdge",
+        "off",
+        "maxOffMeters",
+        "worst"
+      ],
+      "properties": {
+        "toleranceMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pairs": {
+          "description": "Pairs of sockets that can meet and whose outlines match, so that their points can be compared.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "pairsSkipped": {
+          "description": "Pairs left out because their outlines differ: Seams match says by how much.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "points": {
+          "description": "Points on the outlines, counted once for each pair they were compared in.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "coincident": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "onEdge": {
+          "description": "Points that lie on an edge of the other outline, with no point of it there.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "off": {
+          "description": "Points that lie off the other outline.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxOffMeters": {
+          "description": "How far the worst point that is off is from the nearest point of the other outline.",
+          "type": "number",
+          "minimum": 0
+        },
+        "worst": {
+          "description": "The two sockets with the worst point, as piece/socket.",
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "items": false,
+              "minItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "WalkableValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "player",
+        "capsuleRadiusMeters",
+        "capsuleHeightMeters",
+        "stepHeightMeters",
+        "walkableSlopeDegrees",
+        "pieces",
+        "maxFloorStepMeters",
+        "maxRiseMeters",
+        "maxRampDegrees"
+      ],
+      "properties": {
+        "player": {
+          "type": "string"
+        },
+        "capsuleRadiusMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "capsuleHeightMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stepHeightMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "walkableSlopeDegrees": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "piece",
+              "geometry",
+              "passages",
+              "rises",
+              "ramps"
+            ],
+            "properties": {
+              "piece": {
+                "type": "string",
+                "minLength": 1
+              },
+              "geometry": {
+                "description": "What was measured: the collision shapes the piece brings, or its visible mesh when it brings none.",
+                "enum": [
+                  "collision",
+                  "visible"
+                ]
+              },
+              "passages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "socket",
+                    "fits",
+                    "widthMeters",
+                    "heightMeters",
+                    "floorMeters"
+                  ],
+                  "properties": {
+                    "socket": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "fits": {
+                      "type": "boolean"
+                    },
+                    "widthMeters": {
+                      "description": "The opening the player passes, or the largest there is when the player fits none. Zero when the way is shut.",
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "heightMeters": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "floorMeters": {
+                      "description": "How far above the bottom of the socket's cell the player stands.",
+                      "type": "number"
+                    }
+                  }
+                }
+              },
+              "rises": {
+                "description": "The rises a player would have to step up, from a floor at a passage.",
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "ramps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "angleDegrees",
+                    "areaSquareMeters",
+                    "walkable"
+                  ],
+                  "properties": {
+                    "angleDegrees": {
+                      "type": "number"
+                    },
+                    "areaSquareMeters": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "walkable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "maxFloorStepMeters": {
+          "description": "The greatest difference between the floors of two passages that can meet.",
+          "type": "number",
+          "minimum": 0
+        },
+        "maxRiseMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxRampDegrees": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "CollisionTileValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "toleranceSquareMeters",
+        "types",
+        "without",
+        "empty",
+        "maxMismatchSquareMeters"
+      ],
+      "properties": {
+        "toleranceSquareMeters": {
+          "type": "number",
+          "minimum": 0
+        },
+        "types": {
+          "$ref": "#/$defs/SeamTypes"
+        },
+        "without": {
+          "description": "Pieces with sockets and no collision shape.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "empty": {
+          "description": "Sockets with no collision on their plane, as piece/socket.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxMismatchSquareMeters": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "OnGridResult": {
+      "description": "On the grid: every piece is a whole number of modules, with its pivot on a corner of the grid and its sockets on the faces of its cells.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "on-grid"
+        },
+        "status": {
+          "$ref": "check-report.schema.json#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/OnGridValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "SeamResult": {
+      "description": "Seams match: two sockets that can meet show the same outline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "seams"
+        },
+        "status": {
+          "$ref": "check-report.schema.json#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/SeamValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "InCellsResult": {
+      "description": "Stays in its cells: nothing but declared trim reaches past a piece's cells.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "in-cells"
+        },
+        "status": {
+          "$ref": "check-report.schema.json#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/InCellsValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "LayoutResult": {
+      "description": "Layouts close: in every layout the pieces meet with no gap and no overlap.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "layouts"
+        },
+        "status": {
+          "$ref": "check-report.schema.json#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/LayoutValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "CornerResult": {
+      "description": "Corners line up: where two outlines meet, their points do too.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "corners"
+        },
+        "status": {
+          "$ref": "check-report.schema.json#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/CornerValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "WalkableResult": {
+      "description": "Walkable: the player passes every passage, and floors, steps and ramps can be walked.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "walkable"
+        },
+        "status": {
+          "$ref": "check-report.schema.json#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/WalkableValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    },
+    "CollisionTileResult": {
+      "description": "Collision tiles: the collision shapes of two pieces that meet show the same outline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "message",
+        "values"
+      ],
+      "properties": {
+        "id": {
+          "const": "collision-tiles"
+        },
+        "status": {
+          "$ref": "check-report.schema.json#/$defs/CheckStatus"
+        },
+        "message": {
+          "description": "One sentence for a person.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Only with not-measured: why there is nothing to judge.",
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/CollisionTileValues"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not-measured"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "reason": false
+        }
+      }
+    }
+  }
+}

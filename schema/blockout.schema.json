@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kylebegeman/corbelo-game-export/main/schema/blockout.schema.json",
+  "title": "corbelo-game-export blockout",
+  "description": "What scenes[0].extras.corbeloGameExport holds in a scene exportBlockout wrote: a layout of kit pieces as one scene, in which a piece placed many times is one mesh shown by many nodes. The facts on their own are #/$defs/BlockoutFacts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "blockout"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "blockout": {
+      "$ref": "#/$defs/BlockoutFacts"
+    },
+    "provenance": {
+      "description": "Opaque JSON, exactly as the caller gave it."
+    }
+  },
+  "$defs": {
+    "BlockoutFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "generator",
+        "kind",
+        "kit",
+        "layout",
+        "origin",
+        "profile",
+        "grid",
+        "cellSize",
+        "placements",
+        "pieces",
+        "meshes",
+        "nodes",
+        "materials",
+        "triangles",
+        "bounds"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "generator": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "blockout"
+        },
+        "kit": {
+          "description": "The kit's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "layout": {
+          "description": "The layout's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "origin": {
+          "$ref": "kit-check-report.schema.json#/$defs/LayoutOrigin"
+        },
+        "profile": {
+          "description": "Engine profile id.",
+          "type": "string"
+        },
+        "grid": {
+          "$ref": "kit-check-report.schema.json#/$defs/Grid"
+        },
+        "cellSize": {
+          "description": "One cell in the file's axes, in metres: along X, up, and along Z.",
+          "$ref": "kit-check-report.schema.json#/$defs/Vec3"
+        },
+        "placements": {
+          "type": "array",
+          "items": {
+            "description": "One piece in its place.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "piece",
+              "asset",
+              "cell",
+              "turn",
+              "name",
+              "node",
+              "translation",
+              "degrees"
+            ],
+            "properties": {
+              "piece": {
+                "description": "The piece's name in the kit.",
+                "type": "string",
+                "minLength": 1
+              },
+              "asset": {
+                "description": "The piece's asset name: its file name without .glb.",
+                "type": "string",
+                "minLength": 1
+              },
+              "cell": {
+                "$ref": "kit-check-report.schema.json#/$defs/Cell"
+              },
+              "turn": {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3
+                ]
+              },
+              "name": {
+                "description": "The name of the node that holds the piece: the asset name and the cell.",
+                "type": "string",
+                "minLength": 1
+              },
+              "node": {
+                "description": "Index of that node in the glTF nodes array.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "translation": {
+                "description": "Where the piece's own origin is in the scene: metres, +Y up.",
+                "$ref": "kit-check-report.schema.json#/$defs/Vec3"
+              },
+              "degrees": {
+                "description": "The turn about +Y, in degrees.",
+                "enum": [
+                  0,
+                  90,
+                  180,
+                  270
+                ]
+              }
+            }
+          }
+        },
+        "pieces": {
+          "description": "Distinct pieces of the kit in the layout.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "meshes": {
+          "description": "Every mesh is stored once, however many nodes show it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "visible",
+            "collision"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "visible": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "collision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "nodes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "placements",
+            "visible",
+            "collision"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "placements": {
+              "description": "Nodes that hold a piece: one for each placement.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "visible": {
+              "description": "Nodes that show a mesh.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "collision": {
+              "description": "Nodes that are a collision shape.",
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "materials": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "triangles": {
+          "description": "Triangles of the meshes that are seen: as stored, and as drawn when every node shows its mesh.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stored",
+            "drawn"
+          ],
+          "properties": {
+            "stored": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "drawn": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "bounds": {
+          "description": "The box around every piece in its place, in metres.",
+          "$ref": "pack.schema.json#/$defs/Box"
+        },
+        "lods": {
+          "description": "Only when a piece has detail levels: for each body with levels, in each place, the nodes that hold them.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "placement",
+              "body",
+              "levels"
+            ],
+            "properties": {
+              "placement": {
+                "description": "Which placement, counted from 0.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "body": {
+                "description": "The body's node name in the scene.",
+                "type": "string",
+                "minLength": 1
+              },
+              "levels": {
+                "description": "Level 0 first.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "level",
+                    "name",
+                    "node",
+                    "visible",
+                    "deviationMeters"
+                  ],
+                  "properties": {
+                    "level": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "node": {
+                      "description": "Index of the node that holds the level in the glTF nodes array.",
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "visible": {
+                      "description": "False when the file hides the node, for an engine with no rule of its own for detail levels.",
+                      "type": "boolean"
+                    },
+                    "deviationMeters": {
+                      "description": "How far the level's outline is from level 0.",
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "minItems": 2
+              }
+            }
+          },
+          "minItems": 1
+        }
+      }
+    }
+  }
+}
