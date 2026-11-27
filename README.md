@@ -6,12 +6,18 @@ It takes triangles as a CAD kernel tessellates them (often triangle soup, in mil
 
 On request it also writes what a game needs around the mesh: a collision shape named the way the engine reads it, lower detail levels, texture coordinates and attach points. It checks the result against a budget and against the engine's own player, and packs one asset or a family of them with a manifest.
 
+It also makes kits: pieces that share a grid and meet at sockets, with seven checks on the kit as a whole, a scene for a layout of the pieces, and what a grid of tiles needs. A small [add-on for Godot](#godot-add-on) imports a pack into a project, and [`install`](#installing-into-a-game-project) puts a pack into any game project and records it in a lock file.
+
 | Function | What it does |
 | --- | --- |
 | [`exportGameGlb`](#use) | The plain export: one GLB and its facts. |
 | [`exportGameAsset`](#game-assets) | The same, with collision, detail levels, texture coordinates and attach points. |
 | [`checkGameAsset`](#game-checks) | Twelve checks on a GLB this package wrote: pass, warn, fail or not measured, with the numbers. |
 | [`exportGamePack`](#packs) | One asset or a family of them: the GLBs and a JSON manifest, and a ZIP archive of both. |
+| [`checkKit`](#kit-checks) | Seven checks on a kit of pieces: on the grid, seams, cells, layouts, corners, walkable, collision. |
+| [`exportKitPack`](#kit-packs) | A kit as a pack: a GLB for each piece, a scene for each layout, and the manifest. |
+| [`exportBlockout`](#blockouts) | A layout of kit pieces as one scene, each mesh stored once. |
+| [`planInstall`](#installing-into-a-game-project) | What installing a pack into a game project writes, takes away and records. |
 
 It is used by Corbelo and Corbelo Studio. It has no runtime dependencies and runs in Node 22 or later and in browsers. A bundler leaves out what you do not import: the plain export alone is about 32 kB minified (about 12 kB gzipped). See [Size in a browser bundle](#size-in-a-browser-bundle).
 
@@ -20,13 +26,13 @@ It is used by Corbelo and Corbelo Studio. It has no runtime dependencies and run
 The built `dist/` folder is committed, so the package installs straight from a git tag with no build step:
 
 ```sh
-npm install github:kylebegeman/corbelo-game-export#v0.1.5
+npm install github:kylebegeman/corbelo-game-export#v0.1.6
 ```
 
 Where the build machine has no `git` program, install the tag's tarball instead. The lock file then holds a plain HTTPS address and a checksum:
 
 ```sh
-npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.5.tar.gz
+npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.6.tar.gz
 ```
 
 ## Use
@@ -234,7 +240,7 @@ Facts are measured from the geometry that was written, not from the input. A sho
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.5",
+  "generator": "corbelo-game-export 0.1.6",
   "profile": "unreal5",
   "engine": { "unit": "cm", "unitMeters": 0.01, "up": "Z" },
   "source": { "unit": 0.001, "up": "Z", "handedness": "right" },
@@ -282,19 +288,29 @@ Facts are measured from the geometry that was written, not from the input. A sho
 
 A program that checks facts against its own copy of this schema must take the 0.1.5 copy before it reads a file from `exportGameAsset`, since the older copy refuses the new keys.
 
-Two more schemas sit next to it, both checked against real output in the same way:
+Six more schemas sit next to it, all checked against real output in the same way:
 
 | File | What it describes |
 | --- | --- |
 | `schema/pack.schema.json` | The scene extras of a GLB, and the facts in them. |
 | `schema/check-report.schema.json` | What [`checkGameAsset`](#game-checks) returns and the `check` command prints. The player profile is its `#/$defs/PlayerProfile`. |
-| `schema/pack-manifest.schema.json` | The `<name>.pack.json` file of a [pack](#packs). It refers to the other two by file name, so keep the three together. |
+| `schema/pack-manifest.schema.json` | The `<name>.pack.json` file of a [pack](#packs), a [kit pack](#kit-packs) included. |
+| `schema/kit-check-report.schema.json` | What [`checkKit`](#kit-checks) returns, with the values of each of the seven checks. A layout is its `#/$defs/Layout` and a grid its `#/$defs/Grid`. |
+| `schema/blockout.schema.json` | The scene extras of a [blockout](#blockouts). The facts on their own are its `#/$defs/BlockoutFacts`. |
+| `schema/kit-job.schema.json` | The job of a kit, as the [`pack`](#pack) command reads it. |
+| `schema/lock.schema.json` | The [lock file](#the-lock-file) `install` keeps in a game project. |
 
 ```js
 import facts from "corbelo-game-export/schema/pack.schema.json" with { type: "json" };
 import report from "corbelo-game-export/schema/check-report.schema.json" with { type: "json" };
 import manifest from "corbelo-game-export/schema/pack-manifest.schema.json" with { type: "json" };
+import kitReport from "corbelo-game-export/schema/kit-check-report.schema.json" with { type: "json" };
+import blockout from "corbelo-game-export/schema/blockout.schema.json" with { type: "json" };
+import kitJob from "corbelo-game-export/schema/kit-job.schema.json" with { type: "json" };
+import lock from "corbelo-game-export/schema/lock.schema.json" with { type: "json" };
 ```
+
+The schemas refer to each other by file name, so keep the files together: the manifest's to the facts, the check report, the kit check report and the blockout, the kit check report's and the kit job's to the facts and the check report, and the blockout's to the facts and the kit check report. The lock file's stands alone. Version 0.1.6 added the last four files, and in the manifest's the kind `"kit"` with `kit` and `scenes`. A manifest of an asset or a family reads as it did.
 
 ## Game assets
 
@@ -424,6 +440,8 @@ interface KernelSolid {
   getMesh(): { numProp: number; vertProperties: ArrayLike<number>; triVerts: ArrayLike<number> };
   /** Optional. The parts of the solid that do not touch. */
   decompose?(): KernelSolid[];
+  /** Optional. What this solid and another both fill. Only the kit checks use it. */
+  intersect?(other: KernelSolid): KernelSolid;
   /** Optional. Called on every solid the package asked for, when it is done with it. */
   delete?(): void;
 }
@@ -511,7 +529,7 @@ const report = checkGameAsset(glb, { assetClass: "kit-piece", expect: { opening:
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.5",
+  "generator": "corbelo-game-export 0.1.6",
   "profile": "godot4",
   "assetClass": "small-prop",
   "budget": { "maxTriangles": 2000, "maxVertices": 4000, "maxMaterialSlots": 2 },
@@ -707,7 +725,7 @@ What stays the same from one revision to the next:
   "schema": 1,
   "kind": "family",
   "name": "SM_Crate",
-  "generator": "corbelo-game-export 0.1.5",
+  "generator": "corbelo-game-export 0.1.6",
   "revision": "r12",
   "profile": "unreal5",
   "engine": { "unit": "cm", "unitMeters": 0.01, "up": "Z" },
@@ -734,7 +752,7 @@ What stays the same from one revision to the next:
 }
 ```
 
-- `kind` is `"asset"` for one GLB and `"family"` for one per row. `row` appears only in a family.
+- `kind` is `"asset"` for one GLB and `"family"` for one per row. `row` appears only in a family. A [kit pack](#kit-packs) has `"kit"`, with a file for each piece and two parts more.
 - `bytes` and `sha256` are the size and the SHA-256 of the file as written, so a download can be checked. `sha256Hex(bytes)` is the function, with no dependencies.
 - `facts` is exactly what the GLB carries in its scene extras, and `checks` is the report of `checkGameAsset` for that file.
 - `assetClass`, `budget`, `player`, `status` and each file's `checks` are there only when checks ran. `status` is the worst of any file.
@@ -742,6 +760,414 @@ What stays the same from one revision to the next:
 - `generatedAt`, `revision` and `provenance` are there only when given.
 
 The manifest is written with two spaces a level and a short list on one line, so a person can read it and a change shows up clearly in a diff.
+
+## Kits
+
+A kit is a set of pieces that share a grid and meet at sockets: a corridor made of a straight piece, a corner, a tee, a crossing, a doorway, an end cap and stairs. The kit is plain data, so an editor can write it from what a person clicked and an agent can write it as JSON. Three functions take it:
+
+| Function | What it does |
+| --- | --- |
+| [`checkKit`](#kit-checks) | Seven checks on the kit as a whole: pass, warn, fail or not measured, with the numbers. |
+| [`exportKitPack`](#kit-packs) | A GLB for each piece, a scene for each layout, and a manifest with the grid, the sockets, the checks and what a grid of tiles needs. |
+| [`exportBlockout`](#blockouts) | One layout as one scene, where a piece placed many times is one mesh shown by many nodes. |
+
+```ts
+import { checkKit, exportBlockout, exportKitPack, packToZip } from "corbelo-game-export";
+
+const kit = {
+  name: "corridor",
+  source: { unit: 0.001, up: "Z" },
+  grid: { moduleMeters: 3, storeyMeters: 3 },
+  collision: "pieces",
+  pieces: [
+    {
+      name: "straight",
+      bodies: [{ name: "straight", positions, color: "#8a8f98", materialName: "Concrete", collisionPieces: [{ positions: floor }, { positions: leftWall }, { positions: rightWall }] }],
+      sockets: [
+        { type: "corridor", side: "+x", passage: true },
+        { type: "corridor", side: "-x", passage: true },
+      ],
+    },
+    {
+      name: "stairs",
+      bodies: [stairsBody],
+      cells: [2, 1, 2],
+      sockets: [
+        { type: "corridor", side: "-x", cell: [0, 0, 0], passage: true },
+        { type: "corridor", side: "+x", cell: [1, 0, 1], passage: true },
+      ],
+    },
+    // corner, tee, cross, doorway, endcap
+  ],
+};
+
+const report = checkKit(kit);              // seven results
+const pack = exportKitPack(kit);           // files and a manifest, as a pack
+const room = exportBlockout(kit, "room");  // { glb, facts }
+const zip = packToZip(pack);
+```
+
+### The kit as data
+
+A kit takes the options of [`exportGameAsset`](#game-assets) (`profile`, `collision`, `texcoords`, `kernel`, `creaseAngle` and the rest) and applies them to every piece. It takes no `pivot` and no `placement`: each piece has its own pivot and sits at the origin of its own file.
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Required. The kit's name: `"corridor"`. |
+| `source` | Required. The space the bodies, origins, pivots, planes and regions are given in, as for any export. |
+| `grid` | Required. `{ moduleMeters, storeyMeters, trimMeters? }`: the side of one cell on the ground, the height of one cell, and how far a body declared as trim may reach past its piece's cells (default 0.1). All in metres. |
+| `pieces` | Required. A list of pieces, or a function `(grid) => pieces` that makes them for a grid, so that [another module size](#another-module-size) is one call. |
+| `mates` | Socket types that meet a type other than their own: `{ "plug": "hole" }`. It reads both ways. Without it a type meets itself. |
+| `layouts` | Layouts of your own, `[{ name, placements }]`, checked and exported with the test layouts. |
+| `naming` | The [name pattern](#names-that-stay), with the kit as the family and the piece as the row. |
+
+A piece:
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Required. What tells the piece from the others: `"straight"`. It goes into the file name by the pattern: `corridor_straight.glb`. A piece of one body is that body, which takes the file's name as the one body of an asset does. |
+| `bodies` | The piece as bodies, as [`exportGameAsset`](#game-assets) takes them, in the kit's source space. Give this or `glb`. |
+| `glb` | The piece as a `Uint8Array` this package already wrote with `exportGameAsset`. Its own origin is the piece's pivot, and its `origin`, planes and regions are then read in glTF space: metres, +Y up. |
+| `cells` | How many cells the piece takes: along X, along Y, and storeys. Default `[1, 1, 1]`. |
+| `origin` | The corner of the piece's cells that is lowest along every axis of the kit, in the piece's units and axes. Default `[0, 0, 0]`. |
+| `pivot` | The piece's own origin in the engine, in the piece's units and axes. Default: `origin`. Not for a `glb` piece. |
+| `sockets` | The faces where the piece meets another piece. See below. |
+| `trim` | Names of bodies that are trim: declared to reach past the piece's cells and to overlap what is next to it, like a skirting board or a threshold. |
+| `provenance` | Any plain JSON about this piece. Stored in its GLB and in the manifest. |
+
+A socket is one face of one cell of the piece. Give it by side, or by plane the way a face a person clicked comes:
+
+| Field | Meaning |
+| --- | --- |
+| `type` | Required. What meets what: sockets of one type meet each other, or the type `mates` names. |
+| `side` | `"+x"`, `"-x"`, `"+y"`, `"-y"`, `"+z"` or `"-z"`. Give this or `plane`, not both. |
+| `cell` | Which cell of the piece the socket is a face of, counted from 0 along X, along Y and by storey. Default `[0, 0, 0]`. |
+| `plane` | `{ point: [x, y, z], normal: [x, y, z] }` in the piece's units and axes, with the normal pointing out of the piece. The side is the axis the normal is nearest, and the cell is the one the point lies on, unless `cell` is given. A plane turned more than 1 degree from every axis is refused. How far the plane is from the face of its cell is kept as `offsetMeters` and judged by [On the grid](#kit-checks). |
+| `region` | The outline of the part of the face that meets, as points on the plane in the piece's units and axes. Default: the whole face of the cell. |
+| `passage` | `true` when the player walks through this socket. Default `false`. |
+| `name` | Default: the side, with the cell when the piece has more than one cell: `"+x"`, `"+x@1,0,1"`. Unique in its piece. |
+
+Sides are named in the kit's own frame: X to the right, Y away, Z up, right-handed. For a source that is Z up and right-handed these are the source's own axes. In the files, which are glTF, the kit's X is X, its Y is -Z and its Z is Y.
+
+`resolveKit(kit, grid?)` reads a kit without checking it and returns it with every piece written and every socket placed: `{ name, profile, grid, naming, mates, pieces, layouts }`, where each piece has `asset`, `cells`, `pivotMeters`, `sockets`, `trim`, `glb` and `facts`. `checkKit`, `exportBlockout`, `kitLayouts` and `layoutJoints` take a resolved kit as well as one as given, so a kit that is checked and laid out many times is written once. `exportKitPack` takes the kit as given, and a resolved kit cannot be checked for another grid, since its pieces are already written. A kit that cannot be read is refused with `BAD_KIT`, and a layout with `BAD_LAYOUT`.
+
+### Layouts
+
+A layout is pieces in their places:
+
+```json
+{ "name": "dead end", "placements": [
+  { "piece": "endcap", "cell": [0, 0, 0] },
+  { "piece": "straight", "cell": [1, 0, 0] },
+  { "piece": "corner", "cell": [2, 0, 0], "turn": 1 }
+] }
+```
+
+`cell` is the cell the piece's first cell, `[0, 0, 0]`, lands on. `turn` is a whole number of quarter turns about the up axis, anticlockwise seen from above, about the middle of the piece's first cell. Default 0. Cells may be negative.
+
+Six test layouts are built from the sockets alone, so a kit is tested as it will be used without anyone laying it out: `run` (a straight run closed at both ends), `corner`, `tee`, `cross`, `rise` (from one storey to the next) and `room` (a closed ring). A piece is read by its sockets on the four sides: one is an end, two on opposite sides of one storey a through piece, two at a right angle a bend, two on different storeys a rise, three a tee and four a crossing. A layout the kit has no pieces for is left out, and the reason is given: `kitLayouts(kit)` returns `{ layouts, skipped: [{ name, reason }] }`.
+
+`layoutJoints(kit, layout)` says what meets what in a layout from the cells and the sockets alone: `joints` (two sockets face to face whose types meet), `open` (a socket facing an empty cell), `blocked` (a socket facing a side of a piece with no socket there), `mismatched` (face to face, with types that do not meet), `doubled` (cells more than one piece is in) and `cells`. `turnSide(side, turn)`, `turnCell(cell, turn)`, `oppositeSide(side)`, `cellSize(grid)` and `placePoint(point, placement, grid)` are the same arithmetic the package uses, for a caller that draws a layout itself.
+
+### Kit checks
+
+`checkKit(kit, options?)` returns one result for every check. It always returns all seven, in this order, and it throws only for a kit that cannot be read. Everything is measured from the files the pieces are written as.
+
+| Id | Name | Passes when |
+| --- | --- | --- |
+| `on-grid` | On the grid | Every piece is a whole number of modules and storeys, its pivot is on a corner of the grid, and its sockets lie on the faces of its cells. |
+| `seams` | Seams match | Any two sockets that can meet show the same outline: what the two pieces cut of the plane between them differs by no more than the tolerance allows. |
+| `in-cells` | Stays in its cells | Nothing of a piece reaches past its cells, and what is declared as trim reaches no further than `trimMeters`. |
+| `layouts` | Layouts close | In every layout no cell holds two pieces, no socket faces a side without one, the types at every joint meet, the two pieces of every joint touch with no gap and no overlap, and no trim runs into the bodies of the piece next to it. |
+| `corners` | Corners line up | Where two outlines meet, every point of one is a point of the other. A point that lies along an edge of the other outline, where it has no point, is a warning: the outlines agree, and a renderer can still show a crack there. |
+| `walkable` | Walkable | The player fits through every socket marked as a passage, the floors on the two sides of a joint are level, no rise is higher than the player steps up and no slope is steeper than the player walks. |
+| `collision-tiles` | Collision tiles | The collision shapes of two pieces that meet show the same outline at the joint, so that a moving body does not catch on a lip. |
+
+```json
+{
+  "schema": 1,
+  "generator": "corbelo-game-export 0.1.6",
+  "kit": "corridor",
+  "profile": "godot4",
+  "grid": { "moduleMeters": 3, "storeyMeters": 3, "trimMeters": 0.1 },
+  "toleranceMeters": 0.0001,
+  "player": { "id": "godot4-character-body", "...": "..." },
+  "kernel": false,
+  "pieces": 7,
+  "status": "pass",
+  "counts": { "pass": 7, "warn": 0, "fail": 0, "notMeasured": 0 },
+  "results": [
+    { "id": "on-grid", "status": "pass", "message": "7 pieces of whole modules of 3 m and storeys of 3 m, each with its pivot on a corner of the grid.", "values": { "...": "..." } },
+    { "id": "seams", "status": "pass", "message": "136 pairs of sockets that can meet, each with one outline to within 0.0003 m2.", "values": { "...": "..." } }
+  ],
+  "layouts": [{ "name": "run", "origin": "generated", "placements": [{ "piece": "straight", "cell": [3, 0, 0], "turn": 0 }] }]
+}
+```
+
+- Each result is `{ id, status, message, values }`, with `reason` added when the status is `"not-measured"`. `message` is one sentence for a person. `values` holds the numbers the check was judged by, and its shape is fixed for each check: `schema/kit-check-report.schema.json` has all seven.
+- `status` at the top is the worst of the results. What was not measured does not count.
+- `layouts` lists every layout that was checked: the test layouts, then your own. `origin` is `"generated"` or `"given"`.
+- Walkable measures the collision shapes a piece brings, and the visible mesh of a piece that brings none. `values.pieces[].geometry` says which.
+
+The options:
+
+| Option | Meaning |
+| --- | --- |
+| `grid` | Runs the checks for another grid. See below. |
+| `player` | A [player profile](#player-profiles) of your own, or the id of an engine profile. Default: the player of the engine the kit is written for. |
+| `toleranceMeters` | How near is near enough. Default 0.0001, a tenth of a millimetre. For outlines the allowance is an area: the tolerance times the side of the face. |
+| `kernel` | The same [kernel](#a-kernel-for-convex-decomposition) collision takes. Only one thing needs it. |
+
+No check needs a kernel but one part of Layouts close: whether trim that reaches into the piece next to it runs into that piece's bodies. Where the box around the trim is clear of the other piece's triangles that is proven without one. Where it is not, a kernel measures the volume the two share, and without a kernel the check says `"not-measured"` with the reason. It says the same when a body in question is not closed, since such a body has no inside to measure. Every other part of every check is measured either way. The kernel's solids need `intersect(other)` for this, which a `Manifold` has.
+
+#### Another module size
+
+Give `pieces` as a function of the grid and the same kit is checked for another module in one call. The pieces are built again for that grid:
+
+```ts
+const kit = { name: "corridor", source, grid: { moduleMeters: 3, storeyMeters: 3 }, pieces: (grid) => piecesFor(grid) };
+checkKit(kit);                                               // the kit's own grid
+checkKit(kit, { grid: { moduleMeters: 4, storeyMeters: 3.5 } });
+```
+
+With `pieces` as a list, the same call measures the pieces as they are against the other grid, which is how to find out that a kit made for 3 m does not fit 2.5 m.
+
+### Kit packs
+
+`exportKitPack(kit)` returns a [pack](#packs), `{ name, manifest, files }`, so `packToZip`, the manifest's checksums and [install](#installing-into-a-game-project) work as for any pack. The files are a GLB for each piece in the order of the pieces, a scene for each layout, and `<name>.pack.json`.
+
+The input is the kit, with these fields added:
+
+| Field | Meaning |
+| --- | --- |
+| `checks` | The options of `checkKit` without `grid`, or `false` to run none. Default: the checks with their own defaults, and with the kit's own `kernel` when it has one. |
+| `pieceChecks` | The options of [`checkGameAsset`](#game-checks), run on every piece, or `false`. Default: each piece is checked as a `"kit-piece"`, with its pivot against the kit's module and with the player of the kit checks. |
+| `scenes` | `false` leaves the scenes of the layouts out. Default: one scene for each layout, named by the pattern with the row `layout <name>`: `corridor_layout_room.glb`. |
+| `generatedAt`, `revision`, `provenance` | As for a [pack](#packs). |
+
+What stays the same from one revision to the next is what stays for any pack, and for a kit also this: a piece's file is named from the kit and the piece, material slots are in the order of the material names, and in a kit a material name means one colour (`MATERIAL_CONFLICT` otherwise), so every piece that uses `Concrete` shares one slot name and an engine can give them one material.
+
+The manifest is the manifest of a pack, with `"kind": "kit"`, and two parts more:
+
+```json
+{
+  "schema": 1,
+  "kind": "kit",
+  "name": "corridor",
+  "status": "pass",
+  "files": [{ "name": "corridor_straight.glb", "role": "model", "asset": "corridor_straight", "row": "straight", "...": "..." }],
+  "scenes": [
+    { "name": "corridor_layout_room.glb", "role": "blockout", "mediaType": "model/gltf-binary", "bytes": 30484, "sha256": "...", "layout": "room", "facts": { "...": "the facts of the blockout" } }
+  ],
+  "kit": {
+    "frame": { "up": "Z", "toFile": "x, y, z in the kit is x, z, -y in the files" },
+    "grid": { "moduleMeters": 3, "storeyMeters": 3, "trimMeters": 0.1 },
+    "cellSize": [3, 3, 3],
+    "mates": {},
+    "pieces": [
+      {
+        "name": "stairs",
+        "asset": "corridor_stairs",
+        "file": "corridor_stairs.glb",
+        "cells": [2, 1, 2],
+        "pivotMeters": [0, 0, 0],
+        "sockets": [
+          { "type": "corridor", "side": "-x", "cell": [0, 0, 0], "passage": true, "offsetMeters": 0, "region": null, "name": "-x@0,0,0" },
+          { "type": "corridor", "side": "+x", "cell": [1, 0, 1], "passage": true, "offsetMeters": 0, "region": null, "name": "+x@1,0,1" }
+        ],
+        "trim": []
+      }
+    ],
+    "layouts": [{ "name": "room", "origin": "generated", "placements": [{ "piece": "corner", "cell": [0, 0, 0], "turn": 0 }], "scene": "corridor_layout_room.glb" }],
+    "skippedLayouts": [],
+    "checks": { "...": "the report of checkKit" },
+    "meshLibrary": {
+      "cellSize": [3, 3, 3],
+      "items": [{ "id": 0, "name": "corridor_straight", "piece": "straight", "file": "corridor_straight.glb", "offset": [-1.5, -1.5, 1.5] }]
+    }
+  }
+}
+```
+
+- `files` lists the pieces. `row` is the piece's name, and `checks` is the report of `checkGameAsset` for that piece.
+- `scenes` lists the layouts, each with its size, its SHA-256 and the [facts of the blockout](#blockouts). It is there only when scenes were written.
+- `kit.pieces` has every piece with its cells, its pivot from the lowest corner of its cells (in metres, in the kit's frame) and its sockets as placed. A socket's `region` is its outline in metres from the middle of the face, or `null` for the whole face.
+- `kit.cellSize` and everything under `meshLibrary` are in the files' axes: along X, up, along Z.
+- `kit.checks` is there only when the kit checks ran. `kit.skippedLayouts` names the test layouts the kit has no pieces for.
+- `status` is the worst of the kit checks and of each piece's game checks. The three player checks of a piece are stored but do not count towards it: they judge a piece standing alone on a floor, and Walkable judges it in its place.
+
+### Blockouts
+
+`exportBlockout(kit, layout, options?)` writes a layout as one scene. `layout` is the name of a test layout or of one of the kit's own, or a layout as data. It returns `{ glb, facts }`.
+
+- There is one node for each placement, named from the piece's asset name and its cell (`corridor_straight_1_0_0`, with `n1` for -1), with the piece's own nodes under it as its own file has them: collision shapes, detail levels and attach points. Their names carry the cell too, around what the engine reads a collision shape or a detail level from, so every name in the scene is its own and the scene collides exactly as the pieces do one at a time.
+- Every mesh is stored once. A piece placed twenty times is one mesh shown by twenty nodes, and the same goes for each of its collision meshes.
+- Cell `[0, 0, 0]` has its lowest corner at the scene's origin. The kit's X is the scene's X, its Y is -Z and its Z is Y.
+- The same input gives the same bytes.
+
+The facts are in the scene extras under `corbeloGameExport.blockout`, in the manifest of a kit pack, and returned:
+
+```json
+{
+  "schema": 1,
+  "generator": "corbelo-game-export 0.1.6",
+  "kind": "blockout",
+  "kit": "corridor",
+  "layout": "room",
+  "origin": "generated",
+  "profile": "godot4",
+  "grid": { "moduleMeters": 3, "storeyMeters": 3, "trimMeters": 0.1 },
+  "cellSize": [3, 3, 3],
+  "placements": [
+    { "piece": "straight", "asset": "corridor_straight", "cell": [0, 1, 0], "turn": 3, "name": "corridor_straight_0_1_0", "node": 6, "translation": [0, 0, -6], "degrees": 270 }
+  ],
+  "pieces": 3,
+  "meshes": { "total": 17, "visible": 3, "collision": 14 },
+  "nodes": { "total": 46, "placements": 8, "visible": 8, "collision": 38 },
+  "materials": 1,
+  "triangles": { "stored": 168, "drawn": 456 },
+  "bounds": { "min": [0, 0, -9], "max": [9, 3, 0], "size": [9, 3, 9] }
+}
+```
+
+- `meshes` says how many meshes the file stores and `nodes` how many nodes show them: here eight pieces of three kinds are three visible meshes on eight nodes.
+- `triangles.stored` is what the file holds and `triangles.drawn` what is drawn when every node shows its mesh.
+- `placements[].name` is the name of the node that holds the piece and `node` its place in the file's `nodes`. `translation` is where the piece's own origin is in the scene, and `degrees` its turn about +Y.
+- `lods` is there only when a piece has detail levels: for each body with levels, in each place, `{ placement, body, levels: [{ level, name, node, visible, deviationMeters }] }`, so an engine can wire the levels of every copy.
+
+The collision in a blockout is each piece's own, written by the engine's name rule. In Godot the room above imports as one scene with 38 static bodies, and its own player walks it: see [Checked against a real engine](#checked-against-a-real-engine).
+
+### A mesh library for a grid of tiles
+
+`kit.meshLibrary` in the manifest is what an engine's grid of tiles needs to paint with the kit: the cell size and one item for each piece.
+
+- `cellSize` is one cell in the files' axes, in metres: `[module, storey, module]`.
+- An item has an `id` (the piece's place in the kit), a `name` (the piece's asset name), the `piece`, its `file`, and an `offset`: where the piece's own origin is from the middle of its first cell, in the files' axes. A tile grid places an item at the middle of a cell, so the mesh is moved by `offset`.
+- The kit's cell `[i, j, k]` is the grid's cell `(i, k, -j - 1)`, and a `turn` of the kit is that many quarter turns about +Y. A piece of several cells is painted in its first cell and reaches into the others.
+
+For Godot the [add-on](#godot-add-on) builds the `MeshLibrary` and a `GridMap` from this. For Unity and Unreal the numbers are there and nothing is built or claimed.
+
+## Godot add-on
+
+`addons/corbelo_game_export` is a small editor add-on for Godot 4, in GDScript. It reads the manifest of a pack and makes, next to the pack's files, what a game works with. It does nothing besides import: it adds no node types, no dock and no code that runs in a game.
+
+Install it:
+
+1. Copy the folder `addons/corbelo_game_export` into the `addons` folder of the Godot project. It is in this repository and in the installed package, at `node_modules/corbelo-game-export/addons/corbelo_game_export`.
+2. Turn it on under Project > Project Settings > Plugins.
+
+Use it by putting a pack's folder anywhere in the project, with [`install`](#install-status-and-pin) or by hand. A pack is a folder with a `<name>.pack.json` and the GLB files it lists. The add-on acts when the editor has imported the files, and again whenever a manifest changes. With no window, `godot --headless --path <project> --import` does the same.
+
+Godot imports each GLB itself: it becomes a scene, and every mesh the file names as collision becomes a `StaticBody3D` with a `CollisionShape3D`. The add-on adds this:
+
+| What | Where | When it is written |
+| --- | --- | --- |
+| Detail levels on visibility ranges | In the imported scene of each GLB | On every import of the file. |
+| A material file for each material of the pack | `materials/<name>.tres` in the pack's folder | Once. |
+| A scene for each asset and each blockout | `<asset>.tscn` next to `<asset>.glb` | Once. |
+| For a kit: a `MeshLibrary` | `<kit>.meshlib` | For each new revision of the pack. |
+| For a kit: a `GridMap` that uses it | `<kit>_gridmap.tscn` | Once. |
+
+**Detail levels.** The files hold the lower levels as hidden nodes. On import each level is shown and given the range of distances it is drawn at, so one level is drawn at a time. Level n starts at its deviation from full detail times a distance, and at least 1 m after the level before it. It ends where the next level starts, and the last level has no end. The distance is the project setting `corbelo_game_export/detail_levels/distance_per_deviation`, in metres of distance for each metre of deviation. It starts at 700, which is where the deviation is about one pixel on a screen 1080 pixels tall with a camera of 75 degrees. The ranges are worked out when Godot imports a file, so after changing the setting, import the pack's files again from the FileSystem dock. In a blockout the levels of every copy of a piece are wired.
+
+**Materials.** For each material of the pack a `StandardMaterial3D` is saved once, from what the file holds, and each GLB's import settings are pointed at it (`use_external`). From then on the meshes use the project's material: change its colour or swap its shader and every piece that uses it follows, and a new revision of the pack keeps using it. A material the project has already pointed somewhere else is left alone.
+
+**Scenes.** `<asset>.tscn` is a scene that inherits the imported one. It is made once and never written again. A new revision of the GLB shows through it, so the meshes update in place, and whatever the game put in the scene stays: a material override, an added child node, a script, a changed property. Node paths stay as they are as long as the bodies keep their names, which [a pack keeps](#names-that-stay). Use this scene in the game, not the GLB.
+
+**The mesh library.** For a kit, an item is made for each piece with its name, its mesh at full detail placed by the item's `offset`, and its collision shapes. The library is written again for each new revision of the pack, and every item keeps its number, by name, so what is painted in a `GridMap` stays painted with the new meshes. The `GridMap` scene has the kit's cell size and the library set, and is made once. If it is later given another cell size than the kit's, the add-on says so and changes nothing.
+
+What it leaves alone: every file it did not make, the per-asset scenes and the `GridMap` scene after it made them, the material files after it made them, and the import settings of a material the project chose itself. The tool menu has one item, Project > Tools > Import Corbelo Packs Again, which checks every pack and writes the mesh libraries again. Only packs written for the `godot4` profile are imported. A pack for another profile is named in a warning and left as Godot imported it.
+
+A new revision comes in the same way as the first: install it over the old one and let Godot import. The files are replaced under the same names, Godot imports the changed ones again, and the add-on brings the rest up to date.
+
+## Installing into a game project
+
+`install` puts a pack into a game project and records it in a lock file at the project's root, so that an agent, a build script or a person can say what is in the project, where it came from and whether anything was changed since. It is not specific to an engine: a project is a folder.
+
+From the command line it is [`install`, `status` and `pin`](#install-status-and-pin). From code in Node:
+
+```ts
+import { installPack, pinProject, projectStatus } from "corbelo-game-export/node";
+
+const result = installPack("out/corridor.zip", "/games/demo", { into: "assets" });
+const status = projectStatus("/games/demo");  // { ok, packs: [...] }
+pinProject("/games/demo", "corridor");
+```
+
+The pack is a ZIP archive, as `packToZip` writes it or as another tool packed it, or a folder. It goes into its own folder, `<project>/<into>/<pack name>/`, with `into` being `"assets"` unless given or already recorded for the pack.
+
+- **Checked first.** The pack is held against its own manifest before anything is written: every listed file must be there with the size and the SHA-256 the manifest states. A pack that does not match is refused with `PACK_MISMATCH` and nothing is written. Files in the folder or the archive that the manifest does not list are left out and named in `ignored`.
+- **Never outside the project.** Every path is held against the project's folder, as written and through links. A path with `..`, an absolute path, a folder that is a link to somewhere else, a file of the pack's that is a link, and a lock file that points outside are refused with `OUTSIDE_PROJECT`.
+- **In place.** Installing a newer pack replaces the files under the same names, adds new ones, and takes away files only the older revision had. A file of the older revision that was changed in the project since is kept where it is and no longer tracked.
+- **Nothing overwritten by surprise.** A file in the way that no install put there, or one of the pack that was changed in the project since, is refused with `FILE_IN_THE_WAY`. `force` replaces it.
+- **Whole files.** Each file is written next to its place and then moved onto it, and the lock file is written last.
+- Paths with spaces are fine. Only the pack's own files are touched: what an engine or a game adds to the pack's folder stays.
+
+`installPack(pack, project, options?)` takes `into`, `pin`, `force` and `dryRun`, and returns what it did:
+
+| Field | Meaning |
+| --- | --- |
+| `project`, `lockFile` | Absolute paths, with links resolved. |
+| `pack`, `kind`, `into` | The pack's name, `"asset"`, `"family"` or `"kit"`, and its folder from the project's root. |
+| `from`, `to` | The revision in the project before, when there was one, and the one after: `{ revision?, digest }`. `digest` is the SHA-256 of the manifest. |
+| `inTheBuild`, `pinned` | The revision pinned as in the build, and whether it is the one installed. |
+| `changes` | Every file of the pack and of the revision before: `{ path, change, from?, to?, forced? }` with `change` one of `added`, `changed`, `unchanged`, `removed`, `kept`. Paths are from the project's root. |
+| `counts` | How many of each. |
+| `ignored` | Files given that the manifest does not list. |
+| `dryRun` | `true` when nothing was written. |
+
+### In the build
+
+The lock file holds two revisions for each pack: the one whose files are in the project, and the one that is in the build. A first install sets both. Installing a newer pack moves only the first, so a game can try a new revision while the lock file still says which one shipped. `pin`, or `install` with `pin`, moves "in the build" to what is installed. `status` says for each pack whether the two are the same, and `pin` is refused with `PACK_MISMATCH` when the files in the project are not the ones the lock file says.
+
+### The lock file
+
+`corbelo-game-export.lock.json`, at the root of the project:
+
+```json
+{
+  "schema": 1,
+  "packs": [
+    {
+      "name": "corridor",
+      "kind": "kit",
+      "into": "assets/corridor",
+      "manifest": "corridor.pack.json",
+      "generator": "corbelo-game-export 0.1.6",
+      "profile": "godot4",
+      "revision": "r7",
+      "digest": "bc4267ac5434a0c8c3e147d72584bffff5f4b9f32c9eebd7fb332fa09f59e9e7",
+      "inTheBuild": { "revision": "r7", "digest": "bc4267ac5434a0c8c3e147d72584bffff5f4b9f32c9eebd7fb332fa09f59e9e7" },
+      "provenance": { "document": "corridor", "version": 7 },
+      "files": [
+        { "path": "corridor.pack.json", "role": "manifest", "bytes": 156085, "sha256": "bc4267ac5434a0c8c3e147d72584bffff5f4b9f32c9eebd7fb332fa09f59e9e7" },
+        { "path": "corridor_layout_room.glb", "role": "blockout", "bytes": 30484, "sha256": "562cd6412c612df8f5dca968f3c44aea4b9caf188aa1ddf7a3acd23b8493d91f", "layout": "room" },
+        { "path": "corridor_straight.glb", "role": "model", "bytes": 9660, "sha256": "ce8ce96caf778f9c6ab559bbd27f90846b39b85827f542308267beffa611c0ff", "asset": "corridor_straight", "row": "straight" }
+      ]
+    }
+  ]
+}
+```
+
+- Shown with three of the kit's fourteen files. Packs are in the order of their names and files in the order of their paths, and each file is one line. A new revision changes the lines of the files that changed and three or four lines above them, so a diff is small and reads well.
+- `into` is the pack's own folder from the project's root, with `/` between folders. A file's `path` is from that folder.
+- `digest` is the SHA-256 of the manifest of the pack whose files are in the project. Two packs with one digest are the same pack. `revision` is your own name for it, there when the pack has one, and so is `generatedAt`.
+- `role` is `"model"`, `"blockout"` or `"manifest"`. A model has `asset`, and `row` in a family or a kit. A blockout has `layout`.
+- `provenance` is the pack's own, as given when it was made. A file that has provenance of its own in the manifest carries it on its line.
+- `schema/lock.schema.json` describes it.
+
+The lock file and the plan are also plain functions in the main entry, with no file system, for a caller that keeps a project somewhere else: a browser, a store of its own, a test.
+
+| Function | What it does |
+| --- | --- |
+| `readZip(archive, { inflate? })` | The files of a ZIP archive as `[{ name, bytes }]`, each checked against its CRC-32. Stored files need nothing. Deflated ones need `inflate`, a function `(data, bytes)` from the raw deflate stream and the size the archive states to the file, since the package brings no decompressor: in Node, `inflateRawSync` of `node:zlib`. Refused with `BAD_ZIP`: what is not a ZIP, an archive in parts or with the 64-bit extension, an encrypted file, another way of packing, a name that would leave the folder, and two files of one name. |
+| `verifyPack(files)` | Checks `[{ name, bytes }]` against the manifest among them and returns `{ name, manifest, manifestName, digest, files, ignored }`. The files may all sit in one folder of the archive. |
+| `planInstall(pack, lock, present, options?)` | Plans an install and writes nothing. `lock` is the lock file now, or `undefined`. `present(path)` returns the SHA-256 of what is in the project at a path from its root, or `undefined`. Returns the fields of `installPack` above and `write` (`[{ path, bytes }]`), `remove` (paths) and `lock`, the lock file after. |
+| `lockJson(lock)`, `parseLock(text)` | The lock file as text, in the layout above, and back. `parseLock` refuses with `BAD_LOCK` what is not a lock file, and with `OUTSIDE_PROJECT` one whose paths leave the project. |
+| `lockStatus(lock, present)` | `{ ok, packs: [{ name, kind, into, installed, inTheBuild, pinned, matches, counts, changed, missing }] }`. `ok` is true when every pack matches the lock file and is the revision in the build. |
+| `pinLock(lock, name?)` | A lock file with "in the build" moved to what is installed, for one pack or for all. |
+
+`LOCK_FILE_NAME` and `DEFAULT_INSTALL_FOLDER` are the two names.
 
 ## Engine profiles
 
@@ -841,6 +1267,15 @@ On success the command prints one line of JSON and exits with 0:
 
 On failure it prints `corbelo-game-export: error [CODE]: message` to standard error and exits with 1. A wrong command line exits with 2.
 
+The same holds for every command below. All the exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Done. For `pack` and `check` also when checks fail: read `status`. |
+| 1 | Refused. One line `corbelo-game-export: error [CODE]: message` is on standard error, with a code from [Refusals](#refusals), and nothing was written. |
+| 2 | A wrong command line: an unknown option, a missing value or a missing path. |
+| 3 | Only with `--strict`: `check` found a failing check, or `status` found a project that is not what its lock file says or not the revision in the build. |
+
 The same thing is available from code in Node:
 
 ```ts
@@ -929,6 +1364,51 @@ const { name, status, dir, zip, files, pack } = await runPackJob(job, { base: "/
 
 `job` is the job as an object. The options are `base` (the folder the job's paths are relative to, default the working directory), `dir` and `zip` (in place of the job's `output`), and `kernel` (a kernel object, in place of the one the job names). With nowhere to write, nothing is written and the pack is only returned.
 
+#### A kit job
+
+A job with `pieces` in place of `bodies` or `rows` makes a [kit pack](#kit-packs):
+
+```json
+{
+  "name": "corridor",
+  "source": { "unit": 0.001, "up": "Z" },
+  "grid": { "moduleMeters": 3, "storeyMeters": 3 },
+  "collision": "pieces",
+  "pieces": [
+    {
+      "name": "straight",
+      "bodies": [{ "name": "straight", "stl": "straight.stl", "color": "#8a8f98", "materialName": "Concrete", "collisionPieces": [{ "stl": "straight-floor.stl" }, { "stl": "straight-left.stl" }, { "stl": "straight-right.stl" }] }],
+      "sockets": [
+        { "type": "corridor", "side": "+x", "passage": true },
+        { "type": "corridor", "side": "-x", "passage": true }
+      ]
+    },
+    {
+      "name": "endcap",
+      "glb": "endcap.glb",
+      "sockets": [{ "type": "corridor", "plane": { "point": [3, 1.5, -1.5], "normal": [1, 0, 0] }, "passage": true }]
+    }
+  ],
+  "layouts": [{ "name": "hall", "placements": [{ "piece": "endcap", "cell": [0, 0, 0] }, { "piece": "straight", "cell": [1, 0, 0] }, { "piece": "endcap", "cell": [2, 0, 0], "turn": 2 }] }],
+  "revision": "r7",
+  "output": { "dir": "out", "zip": "out/corridor.zip" }
+}
+```
+
+It takes the keys of a pack job but `bodies`, `rows`, `pivot` and `placement`, and these:
+
+| Key | Meaning |
+| --- | --- |
+| `grid` | Required. `{ "moduleMeters": 3, "storeyMeters": 3, "trimMeters": 0.1 }`. |
+| `pieces` | Required. A list of pieces, each with `name` and with `bodies` (as in a pack job) or `glb` (the path of a GLB this package wrote), and optionally `cells`, `origin`, `pivot`, `sockets`, `trim` and `provenance`, as [in code](#the-kit-as-data). |
+| `mates`, `layouts` | As in code. |
+| `checks` | The options of the kit checks, `{ "player", "toleranceMeters" }`, or `false` for none. |
+| `pieceChecks` | The [options of the game checks](#check-options) run on each piece, or `false` for none. |
+| `scenes` | `false` leaves the scenes of the layouts out. |
+| `kernel` | `"manifold-3d"`, as in a pack job. The kit checks then also measure where a piece's trim runs into the piece next to it. |
+
+Sockets, cells, origins and layouts are written in the job itself. `schema/kit-job.schema.json` describes the whole job. The line printed lists the scenes with the pieces, each with its SHA-256, and `status` is the pack's.
+
 ### check
 
 ```sh
@@ -938,6 +1418,64 @@ corbelo-game-export check <file.glb> [--class <class>] [--options <file.json>] [
 Runs the [game checks](#game-checks) on a GLB this package wrote and prints the report as one line of JSON. `--class` is `small-prop`, `large-prop` or `kit-piece`. `--options` names a JSON file with the options of `checkGameAsset`, and `--class` wins over the class in it. The command exits with 0 whatever the checks say, unless `--strict` is given: then a report whose `status` is `"fail"` exits with 3.
 
 From code in Node: `checkFile(path, options)` in `corbelo-game-export/node`.
+
+### install, status and pin
+
+```sh
+corbelo-game-export install <pack.zip | folder> --project <dir> [--into <folder>] [--pin] [--force] [--dry-run] [--text]
+corbelo-game-export status [--project <dir>] [--strict] [--text]
+corbelo-game-export pin [<pack name>] --project <dir> [--text]
+```
+
+`install` puts a pack into a game project and writes the [lock file](#the-lock-file) at the project's root, as [Installing into a game project](#installing-into-a-game-project) describes. The pack's files go into `<project>/<into>/<pack name>/`.
+
+| Option | Meaning |
+| --- | --- |
+| `--project` | Required for `install` and `pin`. The game project's folder, which must exist. For `status` it is the working directory unless given. |
+| `--into` | The folder of the project the pack's own folder goes into, from the project's root. Default: where the lock file says the pack is, else `assets`. |
+| `--pin` | Also moves "in the build" to the revision being installed. A first install always sets it. |
+| `--force` | Replaces a file in the way that no install put there, or that was changed in the project since. |
+| `--dry-run` | Checks everything and prints what would be done. Writes nothing. |
+| `--text` | Prints for a person in place of the line of JSON. |
+| `--strict` | For `status`: exits with 3 unless every pack matches the lock file and is the revision in the build. |
+
+Each prints one line of JSON and exits with 0. For `install` it is the result of `installPack`:
+
+```json
+{"project":"/games/demo","lockFile":"/games/demo/corbelo-game-export.lock.json","pack":"crate","kind":"asset","into":"assets/crate","to":{"revision":"r1","digest":"ea3af086ad4f2fab2ae6ccb049af4ad0e8559ae954fc8f2de0ac2a4f6cd74d57"},"inTheBuild":{"revision":"r1","digest":"ea3af086ad4f2fab2ae6ccb049af4ad0e8559ae954fc8f2de0ac2a4f6cd74d57"},"pinned":true,"changes":[{"path":"assets/crate/crate.glb","change":"added","to":"2435cc0a1667779a491f01f252552e032cadda512846183167dc282785876654"},{"path":"assets/crate/crate.pack.json","change":"added","to":"ea3af086ad4f2fab2ae6ccb049af4ad0e8559ae954fc8f2de0ac2a4f6cd74d57"}],"counts":{"added":2,"changed":0,"unchanged":0,"removed":0,"kept":0},"ignored":[]}
+```
+
+With `--text`, here for a newer revision of the same pack:
+
+```
+Installed crate (asset) into assets/crate: r1 (ea3af086ad4f) -> r2 (4f61d4f4977b)
+  changed   assets/crate/crate.glb
+  changed   assets/crate/crate.pack.json
+In the build: r1 (ea3af086ad4f). Installed is r2 (4f61d4f4977b): run pin to put it in the build.
+```
+
+`status` compares the project with its lock file and writes nothing. It prints `{ project, lockFile, ok, packs }`, with for each pack what `lockStatus` returns:
+
+```json
+{"project":"/games/demo","lockFile":"/games/demo/corbelo-game-export.lock.json","ok":false,"packs":[{"name":"crate","kind":"asset","into":"assets/crate","installed":{"revision":"r2","digest":"4f61d4f4977b8d583f6e9adad62e281981838c574b283562498f6a5646538b42"},"inTheBuild":{"revision":"r1","digest":"ea3af086ad4f2fab2ae6ccb049af4ad0e8559ae954fc8f2de0ac2a4f6cd74d57"},"pinned":false,"matches":true,"counts":{"same":2,"changed":0,"missing":0},"changed":[],"missing":[]}]}
+```
+
+```
+crate (asset) in assets/crate: r2 (4f61d4f4977b), 2 files as installed
+  in the build: r1 (ea3af086ad4f), not the revision installed
+```
+
+`ok` is true when every file of every pack is in the project with the bytes the lock file says, and every pack is the revision in the build. The command exits with 0 whatever it finds, unless `--strict` is given: then it exits with 3 when `ok` is false, which is how a build script stops on a changed or unpinned pack.
+
+`pin` moves "in the build" to the installed revision, for the pack named or for every pack, writes the lock file and prints the status after. It is refused when a file of a pack to pin is not the one the lock file says.
+
+A refusal prints the error line and exits with 1, with nothing written:
+
+```
+corbelo-game-export: error [FILE_IN_THE_WAY]: Nothing was installed: assets/crate/crate.glb was changed in the project since it was installed. Move what is in the way, or install with force to replace it.
+```
+
+From code in Node: `installPack`, `projectStatus` and `pinProject` in `corbelo-game-export/node`, and `runCommand(argv, io)` for the whole command line, which returns the exit code and never throws.
 
 ## Refusals
 
@@ -958,7 +1496,7 @@ Bad input is refused with a `GameExportError`. Its `code` is stable and its `mes
 | `TOO_MANY_TRIANGLES` | The bodies together hold more than `maxTriangles` triangles (2,000,000 unless changed), or the meshes they refine do. |
 | `BAD_NAME` | A body has no name or an empty material name, or `faceMaterialNames` is not an object of names. Also a name pattern with an unknown part or without the family, and a family or row name with no letter or digit. |
 | `BAD_COLOR` | A colour cannot be read. Transparency is not supported. For a face colour the message names the triangle. |
-| `MATERIAL_CONFLICT` | One material name is used with two colours, or one colour of a body is given two names. In a family, also one name with two colours in two rows. |
+| `MATERIAL_CONFLICT` | One material name is used with two colours, or one colour of a body is given two names. In a family, also one name with two colours in two rows, and in a kit in two pieces. |
 | `BAD_SOURCE_SPACE` | `source` is missing or has a bad unit, up axis or handedness. |
 | `BAD_OPTION` | An option is outside its range, or the profile is unknown. This covers the collision settings, `texcoords`, `kernel` and the options of the checks. |
 | `BAD_PROVENANCE` | `provenance` is not plain JSON. |
@@ -968,7 +1506,14 @@ Bad input is refused with a `GameExportError`. Its `code` is stable and its `mes
 | `BAD_LOD` | `lods` is not a list of meshes. A level's own positions, indices, face ids and face colours are refused under the codes above, and the message names the level. |
 | `BAD_COLLISION` | `collisionPieces` is not a list of at least four finite points each, a collision shape asked for by name cannot be built, or the kernel failed. |
 | `BAD_ATTACH_POINT` | An attach point has no name, no position of three finite numbers, or a direction of no length. |
-| `BAD_PACK` | A pack has both `bodies` and `rows` or neither, an empty or badly formed row, two rows that come out with one name, or `checks`, `generatedAt` or `revision` of the wrong kind. |
+| `BAD_PACK` | A pack has both `bodies` and `rows` or neither, an empty or badly formed row, two rows that come out with one name, or `checks`, `generatedAt` or `revision` of the wrong kind. Also a pack to install that has no manifest, more than one, or one that is not a manifest of this package or lists a file name that would leave the pack's folder. |
+| `BAD_KIT` | A kit cannot be read: no name, grid or pieces, a grid that is not positive numbers, two pieces of one name, a piece with both `bodies` and `glb` or neither, cells that are not whole numbers, a socket with no type, with both `side` and `plane` or neither, on a cell the piece does not have, on a face between two cells of its own piece, with a plane turned more than 1 degree from every axis, or two sockets of one name in a piece. Also `mates` that give one type two types to meet, two pieces that come out with one file name, `pivot` or `placement` given for the whole kit, and a layout's scene that comes out with the name of another file. |
+| `BAD_LAYOUT` | A layout has no name or no placements, shares its name with another, names a piece the kit does not have, has a cell that is not whole numbers or a turn that is not a whole number, or a layout asked for by name is not one of the kit's. |
+| `BAD_ZIP` | An archive is not a ZIP, is in parts, uses the 64-bit extension, holds an encrypted file, a file packed another way than stored or deflate, a deflated file with no `inflate` given, a name that would leave its folder, two files of one name, or a file whose bytes do not match its checksum. |
+| `BAD_LOCK` | The lock file is not one, is not a plain file, or has no pack of the name given. Also `status` and `pin` in a project with no lock file. |
+| `PACK_MISMATCH` | A file the manifest of a pack lists is missing, has another size or has another SHA-256. Also `pin` when the files in the project are not the ones the lock file says. |
+| `OUTSIDE_PROJECT` | A path would leave the project's folder, as written or through a link: `into`, a folder on the way that is a link to somewhere else, a path in the lock file, or a file that is a link. |
+| `FILE_IN_THE_WAY` | A file is where the pack's goes and no install put it there, or it was changed in the project since. Also a folder where the pack has a file, and a file where it needs a folder. `force` replaces the first two. |
 
 Every body is checked before any is exported.
 
@@ -986,6 +1531,15 @@ Two game assets from [`exportGameAsset`](#game-assets) go through the same impor
 - **A wall with a doorway**, 3 m wide and 2.8 m tall, cut into convex parts by the `manifold-3d` kernel. Godot builds three convex shapes, the doorway stays open, and the game checks find that Godot's own character fits through it.
 
 Each convex piece is a static body of its own in Godot, since that is what the name rule makes. A game that wants one body with several shapes moves the shapes under one body after import.
+
+A second proof takes a kit, the add-on and `install` through the same engine. It runs when `godot` is there and is skipped the same way.
+
+- **A closed room of a corridor kit**, eight pieces of three kinds on a 3 m grid, written by [`exportBlockout`](#blockouts) as one file. Godot imports it as one scene with a node for each placement under the names the facts give, every piece in its cell. A piece placed many times is one mesh in Godot too: eight nodes show three meshes. The collision is the file's own: 38 static bodies, each with one convex shape. A `CharacterBody3D` with Godot's default capsule, 1 m across and 2 m tall, is put on the floor and walked with `move_and_slide`: through the doorway, on until the wall at the far end stops it, then along the next side of the room until that wall stops it, on the floor all the way. On the line of a doorpost, the post stops it.
+- **The add-on on packs that `install` put there.** A post with two materials and two lower detail levels, and the corridor kit with a lamp in its end cap, are installed into a project with the add-on's folder copied into `addons` and turned on. After one import with no window, the post has a scene that inherits the imported file and states nothing of its own, with its collision body, its three levels all shown and each drawn from where the one before it stops, and its two materials as files of the project under the pack's names and colours. In the scene of a layout, the levels of the lamp are wired in every place the end cap is.
+- **The mesh library.** The kit's `MeshLibrary` has an item for each of the seven pieces, with the number and the name the manifest gives it, its mesh around the middle of its first cell, a collision shape for each of its collision pieces and the project's materials. The `GridMap` scene has the kit's cell size. The room painted cell by cell, by the mapping in [A mesh library for a grid of tiles](#a-mesh-library-for-a-grid-of-tiles), is the room of the layout's scene piece for piece, a piece of two cells and two storeys lands on its cells when turned, and the same player walks the painted room the same way.
+- **Importing again changes nothing.** A second import leaves every file of the project as it was and the add-on says nothing, and `status` finds the pack's own files as `install` put them.
+- **A new revision, in place.** A game's changes are made first: a material override on one surface of the post's scene, a node added under its mesh, another colour for one of the project's materials, and a piece painted on a grid. Then a thicker post and the kit with its pieces in another order are installed over the old ones. The game's scene was not written again, and shows the new mesh and the new collision. Every node is where it was by the same path, the added node and the override are still there, the project's materials are still the project's with the colour the game gave one, the detail levels are wired again, and every item of the library kept its number, so what was painted stays.
+- **Turned on later, and the setting.** A pack imported while the add-on was off, into another folder than `assets` and from a folder instead of an archive, is wired when the add-on is turned on, with the project's own distance for detail levels: at half the default the lower level starts half as far away. A material file that comes back under another identifier is pointed at again, once.
 
 Without Godot the proof is skipped and a line on standard error says so. Set `GODOT_PROOF_LOG=1` to print what Godot reported.
 
@@ -1007,16 +1561,22 @@ The package is marked `"sideEffects": false` and does no work when it is importe
 
 | Import | Minified | Gzipped |
 | --- | --- | --- |
-| `exportGameGlb` | 31,557 bytes | 12,434 |
-| `readPack` | 4,634 | 2,043 |
-| `exportGameAsset` | 52,169 | 20,262 |
-| `checkGameAsset` | 27,643 | 10,460 |
-| `exportGamePack` | 85,127 | 32,193 |
-| everything | 90,673 | 34,432 |
+| `exportGameGlb` | 31,557 bytes | 12,428 |
+| `readPack` | 4,634 | 2,041 |
+| `exportGameAsset` | 52,169 | 20,267 |
+| `checkGameAsset` | 27,619 | 10,453 |
+| `exportGamePack` | 85,106 | 32,163 |
+| `readZip` | 3,362 | 1,507 |
+| `verifyPack` | 5,087 | 2,368 |
+| `planInstall` | 3,379 | 1,525 |
+| `checkKit` | 105,576 | 39,193 |
+| `exportBlockout` | 77,854 | 29,274 |
+| `exportKitPack` | 132,729 | 48,624 |
+| everything | 156,359 | 56,445 |
 
-Version 0.1.4, measured the same way, was 29,100 bytes (11,576 gzipped) for `exportGameGlb` and 35,046 (13,757) for everything. The plain export grew by 2,457 bytes (858 gzipped) in 0.1.5. All of that is in the scene writer it shares with `exportGameAsset`, which can now also write detail levels, texture coordinates and slots in name order. The bytes a plain export writes did not change.
+Version 0.1.5, measured the same way, was 31,557 bytes (12,434 gzipped) for `exportGameGlb` and 90,673 (34,432) for everything. The plain export did not grow in 0.1.6: kits, blockouts, the archive reader and the lock file are modules of their own, and an import that does not name them carries none of them. `exportGamePack` did not grow either. A page that checks a kit carries the scene writer, the collision code and the game checks with it, since a kit is measured from the files its pieces are written as. A page that only installs a pack somewhere of its own carries `readZip`, `verifyPack` and `planInstall`: about 8 kB together, 3.5 kB gzipped.
 
-The test suite bundles each of these and fails when a module that should have been left out is in a bundle, when the plain export passes 32,000 bytes, or when the whole entry passes 100,000 or pulls in a Node built-in. `corbelo-game-export/node`, the command line, is for Node only and is not part of this.
+The test suite bundles each of these and fails when a module that should have been left out is in a bundle, when the plain export passes 32,000 bytes, or when the whole entry passes 165,000 or pulls in a Node built-in. Each new import has a limit of its own there too. `corbelo-game-export/node`, the command line, and the Godot add-on are not part of this: the first is for Node only and the second is GDScript that no bundle reads.
 
 ## Limits
 
@@ -1028,11 +1588,18 @@ These are chosen, not waiting to be done.
 - Collision is convex pieces only: no spheres, capsules or triangle meshes. The volume of several pieces is their volumes added up, so overlapping pieces count twice.
 - A general convex decomposition needs a kernel you pass in, and cuts along the three axes only. Round and slanted hollows take many parts that way: give them `collisionPieces`.
 - Lower detail levels are yours to make. This package measures them and does not simplify meshes.
-- In Godot each convex piece is a static body of its own, and the lower detail levels arrive hidden for the game to show.
+- In Godot each convex piece is a static body of its own, and the lower detail levels arrive hidden for the game to show, unless the [add-on](#godot-add-on) is on: it puts them on visibility ranges.
 - Viewers that do not know `KHR_node_visibility` draw hidden detail levels, and viewers draw collision meshes unless told not to. The facts name every such node.
 - The player checks read the visible mesh and look along the X and Z axes. An opening that runs at a slant, or one that is open to the sky, is not found, and sizes are good to about two cells of a 384 cell grid.
 - The budgets are this package's own places to start from. No engine sets them.
-- Unity and Unreal get the names their documentation gives. Neither engine was run, so nothing is claimed about what their importers do with a file.
+- Unity and Unreal get the names their documentation gives. Neither engine was run, so nothing is claimed about what their importers do with a file. The add-on is for Godot only, and a kit's mesh library is built for Godot only: for the other two the manifest holds the numbers.
+- A kit is on one square grid with one storey height, and its pieces turn by quarter turns about the up axis only. Sockets lie on the faces of cells: a plane turned more than 1 degree from every axis is refused.
+- The test layouts are built from sockets on the four sides. A kit that joins only upwards, or only through `mates` of two types, gets fewer of them or none: give `layouts` of your own for those.
+- Seams and collision are compared as outlines on the plane between two pieces, sampled along 512 lines, and corners are compared point for point. Trim that reaches into the next piece is measured only with a kernel.
+- A blockout repeats each piece's nodes for every place, so its collision is each piece's own shapes again and again. Nothing is merged across pieces.
+- Tabletop terrain is not a kit here: nothing is made for printing, bases or tiles of a board.
+- The add-on imports packs written for `godot4` only, makes a kit's mesh library from full detail only, and writes a scene, a material file and a `GridMap` scene once and never again. A new detail level distance applies to a file the next time Godot imports it.
+- `install` reads archives of one part, without the 64-bit extension and without encryption, and tracks only the files a manifest lists. What an engine writes next to them, like Godot's `.import` files, is the project's own.
 - All bodies in one export, their detail levels included, must fit under the triangle limit together.
 - The whole file is built in memory. A ZIP archive holds at most 65,535 files and 4 GB, stored without compression.
 
