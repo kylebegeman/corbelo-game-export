@@ -839,7 +839,7 @@ An asset is named from a pattern, its family and its row:
 | `unity6` | `{Family}_{Row}` | `Crate_Small` | `Crate` |
 | `unreal5` | `SM_{Family}_{Row}` | `SM_Crate_Small` | `SM_Crate` |
 
-`{family}` and `{row}` are written in small letters with `_` between words, `{Family}` and `{Row}` with a capital at the start of each word and nothing between, and `{FAMILY}` and `{ROW}` in capitals with `_` between. Words are runs of letters and digits, with a new word where a capital follows a small letter: `storage crate`, `storage-crate` and `storageCrate` all give `SM_StorageCrate`. Everything else in the pattern is kept. Without a row, the row and the separator in front of it are left out. `assetName(pattern, family, row?)` does this by itself, and `DEFAULT_NAME_PATTERNS` holds the three patterns. A profile of your own uses Godot's unless `naming` is given.
+`{family}` and `{row}` are written in small letters with `_` between words, `{Family}` and `{Row}` with a capital at the start of each word and nothing between, and `{FAMILY}` and `{ROW}` in capitals with `_` between. Words are runs of letters and digits, with a new word where a capital follows a small letter: `storage crate`, `storage-crate` and `storageCrate` all give `SM_StorageCrate`. Everything else in the pattern is kept. Without a row, the row and the separator in front of it are left out. A pattern may write the family out itself and keep only the row, as in `SM_Crate_{Row}`; it needs `{family}` or `{row}`, so that two rows cannot come out with one name. `assetName(pattern, family, row?)` does this by itself, and `DEFAULT_NAME_PATTERNS` holds the three patterns. A profile of your own uses Godot's unless `naming` is given.
 
 What stays the same from one revision to the next:
 
@@ -1629,7 +1629,7 @@ Bad input is refused with a `GameExportError`. Its `code` is stable and its `mes
 | `BAD_FACE_COLORS` | `faceColors` is not a list with exactly one entry per triangle. |
 | `BAD_REFINEMENT` | `refines` is not surfaces and one whole number per triangle, a number points past the surfaces or their triangles, or a triangle does not lie where it says it does. |
 | `TOO_MANY_TRIANGLES` | The bodies together hold more than `maxTriangles` triangles (2,000,000 unless changed), or the meshes they refine do. |
-| `BAD_NAME` | A body has no name or an empty material name, or `faceMaterialNames` is not an object of names. Also a name pattern with an unknown part or without the family, and a family or row name with no letter or digit. |
+| `BAD_NAME` | A body has no name or an empty material name, or `faceMaterialNames` is not an object of names. Also a name pattern with an unknown part, with neither the family nor the row, or that leaves an asset with no row nothing to be called, and a family or row name with no letter or digit. |
 | `BAD_COLOR` | A colour cannot be read. Transparency is not supported. For a face colour the message names the triangle. |
 | `MATERIAL_CONFLICT` | One material name is used with two colours, or one colour of a body is given two names. In a family, also one name with two colours in two rows, and in a kit in two pieces. |
 | `BAD_SOURCE_SPACE` | `source` is missing or has a bad unit, up axis or handedness. |
@@ -1700,14 +1700,14 @@ The package is marked `"sideEffects": false` and does no work when it is importe
 | `readPack` | 4,634 | 2,044 |
 | `exportGameAsset` | 55,795 | 22,080 |
 | `checkGameAsset` | 29,617 | 11,889 |
-| `exportGamePack` | 91,526 | 35,687 |
+| `exportGamePack` | 91,707 | 35,767 |
 | `readZip` | 3,362 | 1,507 |
 | `verifyPack` | 5,087 | 2,368 |
 | `planInstall` | 3,379 | 1,525 |
-| `checkKit` | 109,805 | 42,122 |
-| `exportBlockout` | 81,373 | 31,192 |
-| `exportKitPack` | 139,040 | 52,925 |
-| everything | 163,091 | 60,976 |
+| `checkKit` | 109,986 | 42,207 |
+| `exportBlockout` | 81,554 | 31,265 |
+| `exportKitPack` | 139,221 | 53,007 |
+| everything | 163,272 | 61,051 |
 
 The [message catalog](#message-keys) is an entry of its own, `corbelo-game-export/messages`, and none of the imports above carries it:
 

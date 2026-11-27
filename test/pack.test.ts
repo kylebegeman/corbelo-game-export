@@ -350,7 +350,7 @@ describe("what a pack refuses", () => {
     ["an asset without bodies", { name: "crate", source: MM_Z_UP, bodies: [] }, "NO_BODIES", "The asset needs at least one body."],
     ["two rows with one name", { ...family, rows: [{ name: "Small", bodies: [crate(400)] }, { name: "small!", bodies: [crate(500)] }] }, "BAD_PACK", 'Rows "Small" and "small!" both come out named "crate_small"'],
     ["a name with nothing to name by", { ...family, name: "--" }, "BAD_NAME", "A family needs a name"],
-    ["a pattern without the family", { ...family, naming: "{row}" }, "BAD_NAME", "needs {family}"],
+    ["a pattern that names nothing", { ...family, naming: "prop" }, "BAD_NAME", "needs {family} or {row}"],
     ["a time that is not text", { ...family, generatedAt: 1700000000 }, "BAD_PACK", "generatedAt must be text."],
     ["checks that are not options", { ...family, checks: true }, "BAD_PACK", "checks must be false or the options of checkGameAsset."],
     ["check options that make no sense", { ...family, checks: { assetClass: "vehicle" } }, "BAD_OPTION", "assetClass"],

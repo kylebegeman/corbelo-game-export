@@ -15,6 +15,9 @@ export declare const DEFAULT_NAME_PATTERNS: Readonly<Record<EngineProfileId, str
  *   assetName("{family}_{row}", "Crate", "Small")      "crate_small"
  *
  * Without a row, the row and the separator in front of it are left out: "SM_Crate".
+ * A pattern may write the family out itself and keep only the row: "SM_Crate_{Row}". It needs
+ * one of the two, so that two rows cannot come out with one name, and it must leave an asset
+ * with no row something to be called.
  * The same pattern, family and row always give the same name.
  */
 export declare function assetName(pattern: string, family: string, row?: string): string;

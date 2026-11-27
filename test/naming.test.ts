@@ -54,9 +54,17 @@ describe("names for a family of assets", () => {
     expect(assetName("env_{family}_{row}_a", "crate", "small")).toBe(assetName("env_{family}_{row}_a", "crate", "small"));
   });
 
+  it("lets a pattern write the family out itself and keep only the row", () => {
+    expect(assetName("SM_Crate_{Row}", "crate", "small")).toBe("SM_Crate_Small");
+    expect(assetName("SM_Crate_{Row}", "crate", "extra large")).toBe("SM_Crate_ExtraLarge");
+    expect(assetName("SM_Crate_{Row}", "crate")).toBe("SM_Crate");
+    expect(assetName("{row}", "crate", "small")).toBe("small");
+  });
+
   it("refuses a pattern, a family or a row it cannot name anything by", () => {
     expect(refusal(() => assetName("", "crate"))).toContain("name pattern");
-    expect(refusal(() => assetName("{row}", "crate", "small"))).toContain("needs {family}");
+    expect(refusal(() => assetName("prop", "crate", "small"))).toContain("needs {family} or {row}");
+    expect(refusal(() => assetName("{row}", "crate"))).toContain("nothing to be called");
     expect(refusal(() => assetName("{family}_{size}", "crate", "small"))).toContain("unknown part {size}");
     expect(refusal(() => assetName("{family}", "  "))).toContain("family");
     expect(refusal(() => assetName("{family}", "!!"))).toContain("family");

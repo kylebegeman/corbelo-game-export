@@ -44,22 +44,26 @@ function inCase(text: string, token: string): string {
  *   assetName("{family}_{row}", "Crate", "Small")      "crate_small"
  *
  * Without a row, the row and the separator in front of it are left out: "SM_Crate".
+ * A pattern may write the family out itself and keep only the row: "SM_Crate_{Row}". It needs
+ * one of the two, so that two rows cannot come out with one name, and it must leave an asset
+ * with no row something to be called.
  * The same pattern, family and row always give the same name.
  */
 export function assetName(pattern: string, family: string, row?: string): string {
   if (typeof pattern !== "string" || pattern.trim() === "") refuse("BAD_NAME", "A name pattern must be a string like \"{family}_{row}\".");
   if (typeof family !== "string" || words(family).length === 0) refuse("BAD_NAME", `A family needs a name with at least one letter or digit. Got ${JSON.stringify(family)}.`);
   if (row !== undefined && (typeof row !== "string" || words(row).length === 0)) refuse("BAD_NAME", `A row needs a name with at least one letter or digit. Got ${JSON.stringify(row)}.`);
-  let hasFamily = false;
+  let named = false;
   for (const match of pattern.matchAll(TOKEN)) {
     const token = match[1]!;
     if (!TOKENS.includes(token)) refuse("BAD_NAME", `The name pattern "${pattern}" has an unknown part {${token}}. Known parts: ${TOKENS.map((name) => `{${name}}`).join(", ")}.`);
-    if (token.toLowerCase() === "family") hasFamily = true;
+    named = true;
   }
-  if (!hasFamily) refuse("BAD_NAME", `The name pattern "${pattern}" needs {family}, {Family} or {FAMILY}.`);
+  if (!named) refuse("BAD_NAME", `The name pattern "${pattern}" needs {family} or {row}, in any of their three spellings, or every asset would get one name.`);
   const filled = pattern
     // Without a row, the separator in front of it goes too.
     .replace(/[_-]*\{(row|Row|ROW)\}/g, (whole, token: string) => (row === undefined ? "" : whole.replace(`{${token}}`, inCase(row, token))))
     .replace(/\{(family|Family|FAMILY)\}/g, (_, token: string) => inCase(family, token));
+  if (words(filled).length === 0) refuse("BAD_NAME", `The name pattern "${pattern}" leaves an asset with no row nothing to be called. Add {family}, or write a name into the pattern.`);
   return safeName(filled, "asset");
 }
