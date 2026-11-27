@@ -175,3 +175,25 @@ export type {
 export { DEFAULT_TILE_METERS } from "./uv.js";
 export { GENERATOR, VERSION } from "./version.js";
 export { crc32, writeZip, ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipEntry } from "./zip.js";
+export {
+  DEFAULT_INSTALL_FOLDER,
+  LOCK_FILE_NAME,
+  lockJson,
+  lockStatus,
+  parseLock,
+  pinLock,
+  planInstall,
+  verifyPack,
+  type InstallChange,
+  type InstallOptions,
+  type InstallPlan,
+  type LockedFile,
+  type LockedPack,
+  type LockedRevision,
+  type LockFile,
+  type LockStatus,
+  type LockStatusPack,
+  type VerifiedPack,
+  type VerifiedPackFile,
+} from "./lock.js";
+export { readZip, type ReadZipOptions } from "./unzip.js";

@@ -4,6 +4,10 @@ import { ASSET_BUDGETS, checkGameAsset, type AssetClass, type CheckOptions, type
 import { manifoldKernel, type CollisionKernel } from "./collision.js";
 import { GameExportError, refuse } from "./errors.js";
 import { exportGameGlb } from "./export.js";
+import { installPack, pinProject, projectStatus, type InstallResult, type ProjectStatus } from "./install.js";
+import { LOCK_FILE_NAME } from "./lock.js";
+import { exportKitPack, type KitPackInput } from "./kit-pack.js";
+import type { KitPieceInput } from "./kit.js";
 import { exportGamePack, packToZip, type GamePack, type PackInput } from "./pack.js";
 import { readStl } from "./stl.js";
 import type {
@@ -21,6 +25,8 @@ import type {
   SurfaceMesh,
 } from "./types.js";
 import { VERSION } from "./version.js";
+
+export { installPack, pinProject, projectStatus, readPackFiles, readPackFrom, type InstallResult, type ProjectStatus } from "./install.js";
 
 /** One body of a job: an STL file plus what the file cannot say about itself. */
 export interface JobBody {
@@ -269,6 +275,26 @@ export interface PackJob extends Omit<AssetOptions, "kernel"> {
   output?: { dir?: string; zip?: string };
 }
 
+/** One piece of a kit job: its bodies as a pack job gives them, or a GLB this package wrote, as a file. */
+export interface KitJobPiece extends Omit<KitPieceInput, "bodies" | "glb"> {
+  bodies?: PackJobBody[];
+  /** Path to a GLB this package wrote, relative to the job's folder. */
+  glb?: string;
+}
+
+/**
+ * The JSON job the `pack` command reads for a kit: what `exportKitPack` takes, with files in
+ * place of numbers and the name of a kernel in place of the kernel. A job with `pieces` is a kit.
+ */
+export interface KitJob extends Omit<KitPackInput, "kernel" | "pieces" | "checks"> {
+  pieces: KitJobPiece[];
+  /** Options for the kit checks, without a kernel: the one the job names is used. */
+  checks?: false | Omit<NonNullable<Exclude<KitPackInput["checks"], false>>, "kernel">;
+  /** `"manifold-3d"` loads that package, which must be installed: for general convex decomposition, and to measure what two pieces both fill. */
+  kernel?: "manifold-3d";
+  output?: { dir?: string; zip?: string };
+}
+
 export interface PackJobOptions {
   /** The folder paths in the job are relative to. Default: the working directory. */
   base?: string;
@@ -316,6 +342,8 @@ const PACK_JOB_KEYS = [
   "revision",
   "output",
 ];
+const KIT_JOB_KEYS = [...PACK_JOB_KEYS.filter((key) => key !== "bodies" && key !== "rows" && key !== "pivot" && key !== "placement"), "grid", "pieces", "mates", "layouts", "pieceChecks", "scenes"];
+const KIT_PIECE_KEYS = ["name", "bodies", "glb", "cells", "origin", "pivot", "sockets", "trim", "provenance"];
 const PACK_BODY_KEYS = [...BODY_KEYS, "lods", "collisionPieces", "attachPoints"];
 const LOD_KEYS = ["stl", "faceIds", "faceColors"];
 const PIECE_KEYS = ["stl"];
@@ -384,10 +412,11 @@ async function loadKernel(): Promise<CollisionKernel> {
 export async function runPackJob(job: unknown, options: PackJobOptions = {}): Promise<PackJobResult> {
   const base = resolve(options.base ?? ".");
   if (!isRecord(job)) refuse("BAD_JOB", "A pack job must be a JSON object.");
-  refuseUnknownKeys(job, PACK_JOB_KEYS, "The job");
-  if (typeof job["name"] !== "string" || job["name"].trim() === "") refuse("BAD_JOB", "The job needs a \"name\": the asset's name, or the family's.");
+  const isKit = job["pieces"] !== undefined;
+  refuseUnknownKeys(job, isKit ? KIT_JOB_KEYS : PACK_JOB_KEYS, "The job");
+  if (typeof job["name"] !== "string" || job["name"].trim() === "") refuse("BAD_JOB", "The job needs a \"name\": the asset's name, the family's, or the kit's.");
   if (!isRecord(job["source"])) refuse("BAD_JOB", "The job needs a \"source\" object, for example { \"unit\": 0.001, \"up\": \"Z\" }.");
-  if ((job["bodies"] !== undefined) === (job["rows"] !== undefined)) refuse("BAD_JOB", "The job needs \"bodies\" for one asset or \"rows\" for a family, and not both.");
+  if (!isKit && (job["bodies"] !== undefined) === (job["rows"] !== undefined)) refuse("BAD_JOB", "The job needs \"bodies\" for one asset, \"rows\" for a family or \"pieces\" for a kit, and only one of them.");
   const output = job["output"] ?? {};
   if (!isRecord(output)) refuse("BAD_JOB", "\"output\" must be an object with \"dir\", \"zip\" or both.");
   refuseUnknownKeys(output, PACK_OUTPUT_KEYS, "\"output\"");
@@ -396,7 +425,33 @@ export async function runPackJob(job: unknown, options: PackJobOptions = {}): Pr
   }
   if (job["kernel"] !== undefined && job["kernel"] !== KERNEL_PACKAGE) refuse("BAD_JOB", `"kernel" must be "${KERNEL_PACKAGE}", the one kernel a job can name. Got ${JSON.stringify(job["kernel"])}.`);
 
-  const { bodies: _bodies, rows: _rows, output: _output, kernel: _kernel, ...rest } = job;
+  const { bodies: _bodies, rows: _rows, pieces: _pieces, output: _output, kernel: _kernel, ...rest } = job;
+  const kernel = options.kernel ?? (job["kernel"] === KERNEL_PACKAGE ? await loadKernel() : undefined);
+  let pack: GamePack;
+  if (isKit) {
+    if (!Array.isArray(job["pieces"]) || job["pieces"].length === 0) refuse("BAD_JOB", "\"pieces\" must be a list with at least one piece.");
+    const pieces = job["pieces"].map((piece: unknown, at: number): KitPieceInput => {
+      if (!isRecord(piece)) refuse("BAD_JOB", `Piece ${at} must be an object with "name" and "bodies" or "glb".`);
+      refuseUnknownKeys(piece, KIT_PIECE_KEYS, `Piece ${at}`);
+      if (typeof piece["name"] !== "string" || piece["name"].trim() === "") refuse("BAD_JOB", `Piece ${at} needs a "name".`);
+      const where = `Piece "${piece["name"]}"`;
+      if ((piece["bodies"] !== undefined) === (piece["glb"] !== undefined)) refuse("BAD_JOB", `${where} needs "bodies" or "glb", and not both.`);
+      const { bodies: _pieceBodies, glb: _glb, ...given } = piece;
+      if (piece["glb"] !== undefined) {
+        if (typeof piece["glb"] !== "string" || piece["glb"] === "") refuse("BAD_JOB", `${where}: "glb" must be the path of a GLB this package wrote.`);
+        return { ...(given as unknown as KitPieceInput), glb: readFile(resolve(base, piece["glb"]), "GLB file") };
+      }
+      return { ...(given as unknown as KitPieceInput), bodies: readPackBodies(piece["bodies"], where, base) };
+    });
+    const kitInput = { ...rest, pieces } as unknown as KitPackInput;
+    if (kernel !== undefined) {
+      kitInput.kernel = kernel;
+      // The kit checks measure what two pieces both fill with the same kernel.
+      if (kitInput.checks !== false) kitInput.checks = { ...kitInput.checks, kernel };
+    }
+    pack = exportKitPack(kitInput);
+    return writePack(pack, output, options, base);
+  }
   const input = { ...rest } as unknown as PackInput;
   if (job["bodies"] !== undefined) {
     input.bodies = readPackBodies(job["bodies"], "The job", base);
@@ -410,13 +465,16 @@ export async function runPackJob(job: unknown, options: PackJobOptions = {}): Pr
       return { name: row["name"], bodies, ...(row["provenance"] !== undefined ? { provenance: row["provenance"] as JsonValue } : {}) };
     });
   }
-  const kernel = options.kernel ?? (job["kernel"] === KERNEL_PACKAGE ? await loadKernel() : undefined);
   if (kernel !== undefined) input.kernel = kernel;
+  pack = exportGamePack(input);
+  return writePack(pack, output, options, base);
+}
 
-  const pack = exportGamePack(input);
+/** Writes a pack where the job and the options say, and says what was written. */
+function writePack(pack: GamePack, output: Record<string, unknown>, options: PackJobOptions, base: string): PackJobResult {
   const dir = options.dir !== undefined ? resolve(options.dir) : typeof output["dir"] === "string" ? resolve(base, output["dir"]) : undefined;
   const zip = options.zip !== undefined ? resolve(options.zip) : typeof output["zip"] === "string" ? resolve(base, output["zip"]) : undefined;
-  const hashes = new Map(pack.manifest.files.map((file) => [file.name, file.sha256]));
+  const hashes = new Map([...pack.manifest.files, ...(pack.manifest.scenes ?? [])].map((file) => [file.name, file.sha256]));
   const files = pack.files.map((file) => {
     const sha256 = hashes.get(file.name);
     return { name: file.name, mediaType: file.mediaType, bytes: file.bytes.length, ...(sha256 !== undefined ? { sha256 } : {}), ...(dir !== undefined ? { path: join(dir, file.name) } : {}) };
@@ -452,6 +510,9 @@ Usage:
   corbelo-game-export <job.json> [--out <file.glb>] [--facts <file.json>]
   corbelo-game-export pack <job.json | -> [--dir <folder>] [--zip <file.zip>] [--base <folder>]
   corbelo-game-export check <file.glb> [--class <class>] [--options <file.json>] [--strict]
+  corbelo-game-export install <pack.zip | folder> --project <dir> [--into <folder>] [--pin] [--force] [--dry-run] [--text]
+  corbelo-game-export status [--project <dir>] [--strict] [--text]
+  corbelo-game-export pin [<pack name>] --project <dir> [--text]
 
 The job file is JSON:
   {
@@ -507,9 +568,50 @@ convex decomposition. Paths in the job are relative to the job file, or with "-"
 directory and win over the job. One line of JSON is printed: the pack's name, the
 status of the checks, where it was written and each file's size and SHA-256.
 
+A kit has "grid" and "pieces" in place of "bodies": pieces that share a grid and meet at
+sockets. The pack holds a GLB for each piece, a scene for each layout, and a manifest
+with the grid, the sockets, the seven kit checks and the items of a mesh library:
+  {
+    "name": "corridor",
+    "source": { "unit": 0.001, "up": "Z" },
+    "grid": { "moduleMeters": 3, "storeyMeters": 3 },
+    "collision": "pieces",
+    "pieces": [{
+      "name": "straight",
+      "bodies": [{ "name": "straight", "stl": "straight.stl", "collisionPieces": [{ "stl": "floor.stl" }] }],
+      "sockets": [{ "type": "corridor", "side": "+x", "passage": true }, { "type": "corridor", "side": "-x", "passage": true }]
+    }],
+    "layouts": [{ "name": "hall", "placements": [{ "piece": "straight", "cell": [0, 0, 0] }, { "piece": "straight", "cell": [1, 0, 0] }] }],
+    "output": { "zip": "corridor.zip" }
+  }
+A piece may name a "glb" this package wrote in place of "bodies". "checks" are options
+for the kit checks and "pieceChecks" for the game checks of each piece; false runs none.
+"scenes": false leaves the scenes out. With "kernel": "manifold-3d" the kit checks also
+measure what a piece's trim and the piece next to it both fill.
+
 check runs the game checks on a GLB this package wrote and prints the report as one
 line of JSON. --class is small-prop, large-prop or kit-piece. --options names a JSON
 file with the options of checkGameAsset. With --strict a failing check exits with 3.
+
+install puts a pack, a ZIP archive or a folder, into a game project. Its files go into
+<project>/<into>/<pack name>/, with --into "assets" unless given or already recorded,
+and ${LOCK_FILE_NAME} at the project's root records each file's SHA-256, the
+provenance the pack carries, the revision installed and the revision in the build.
+Installing a newer pack replaces the files in place under the same names, takes away
+files only the older one had, and leaves the revision in the build alone unless --pin
+is given. A first install sets it. One line of JSON says what was added, changed,
+unchanged, removed and kept; --text prints that for a person and --dry-run writes
+nothing. Refused, with nothing written: a pack whose files are not the ones its manifest
+lists (PACK_MISMATCH), a path that leaves the project as written or through a link
+(OUTSIDE_PROJECT), and a file in the way that no install put there or that was changed
+since (FILE_IN_THE_WAY, or replaced with --force).
+
+status compares a project with its lock file and prints, for each pack, the files that
+have other bytes or are missing and whether the installed revision is the one in the
+build. --project is the working directory unless given. With --strict anything that
+does not match exits with 3.
+
+pin moves "in the build" to the installed revision, for one pack by name or for all.
 `;
 
 export interface CliIo {
@@ -659,15 +761,121 @@ function checkCommand(argv: readonly string[], io: CliIo): number {
   return strict && report.status === "fail" ? 3 : 0;
 }
 
+/** The name of a revision for a person: the caller's own name for it, and the start of its digest. */
+function revisionText(revision: { revision?: string; digest: string }): string {
+  return revision.revision !== undefined ? `${revision.revision} (${revision.digest.slice(0, 12)})` : revision.digest.slice(0, 12);
+}
+
+function installText(result: InstallResult): string {
+  const lines = [`${result.dryRun === true ? "Would install" : "Installed"} ${result.pack} (${result.kind}) into ${result.into}: ${result.from !== undefined && result.from.digest !== result.to.digest ? `${revisionText(result.from)} -> ` : ""}${revisionText(result.to)}`];
+  for (const change of result.changes) {
+    if (change.change !== "unchanged") lines.push(`  ${change.change.padEnd(9)} ${change.path}${change.forced === true ? " (forced)" : ""}`);
+  }
+  if (result.counts.unchanged > 0) lines.push(`  unchanged ${result.counts.unchanged} file${result.counts.unchanged === 1 ? "" : "s"}`);
+  for (const name of result.ignored) lines.push(`  ignored   ${name} (not in the manifest)`);
+  lines.push(result.pinned ? `In the build: ${revisionText(result.inTheBuild)}, the revision installed.` : `In the build: ${revisionText(result.inTheBuild)}. Installed is ${revisionText(result.to)}: run pin to put it in the build.`);
+  return `${lines.join("\n")}\n`;
+}
+
+function statusText(status: ProjectStatus): string {
+  const lines: string[] = [];
+  for (const pack of status.packs) {
+    lines.push(`${pack.name} (${pack.kind}) in ${pack.into}: ${revisionText(pack.installed)}, ${pack.matches ? `${pack.counts.same} file${pack.counts.same === 1 ? "" : "s"} as installed` : `${pack.counts.changed} changed, ${pack.counts.missing} missing`}`);
+    for (const path of pack.changed) lines.push(`  changed   ${path}`);
+    for (const path of pack.missing) lines.push(`  missing   ${path}`);
+    lines.push(pack.pinned ? "  in the build: the revision installed" : `  in the build: ${revisionText(pack.inTheBuild)}, not the revision installed`);
+  }
+  if (status.packs.length === 0) lines.push("No packs are installed.");
+  return `${lines.join("\n")}\n`;
+}
+
+/** Reads the flags the commands about a project share. Returns the exit code 2, after saying why, for a wrong command line. */
+function projectArgs(command: string, argv: readonly string[], io: CliIo, flags: readonly string[], positional: string | undefined): { project?: string; into?: string; given?: string; set: Set<string> } | 2 {
+  const read: { project?: string; into?: string; given?: string; set: Set<string> } = { set: new Set() };
+  for (let at = 0; at < argv.length; at += 1) {
+    const arg = argv[at]!;
+    if (arg === "--project" || (arg === "--into" && flags.includes("--into"))) {
+      const value = valueOf(argv, at, io, "a folder");
+      if (value === undefined) return 2;
+      read[arg === "--project" ? "project" : "into"] = value;
+      at += 1;
+    } else if (flags.includes(arg)) {
+      read.set.add(arg);
+    } else if (arg.startsWith("-")) {
+      io.err(`corbelo-game-export: unknown option ${arg} for ${command}. Try --help.\n`);
+      return 2;
+    } else if (positional !== undefined && read.given === undefined) {
+      read.given = arg;
+    } else {
+      io.err(`corbelo-game-export: ${command} takes ${positional === undefined ? "no name or path" : `one ${positional}`}. Try --help.\n`);
+      return 2;
+    }
+  }
+  return read;
+}
+
+function installCommand(argv: readonly string[], io: CliIo): number {
+  const args = projectArgs("install", argv, io, ["--into", "--pin", "--force", "--dry-run", "--text"], "pack, a ZIP archive or a folder");
+  if (args === 2) return 2;
+  if (args.given === undefined) {
+    io.err("corbelo-game-export: install needs a pack, a ZIP archive or a folder. Try --help.\n");
+    return 2;
+  }
+  if (args.project === undefined) {
+    io.err("corbelo-game-export: install needs --project, the game project's folder. Try --help.\n");
+    return 2;
+  }
+  const result = installPack(args.given, args.project, {
+    ...(args.into !== undefined ? { into: args.into } : {}),
+    pin: args.set.has("--pin"),
+    force: args.set.has("--force"),
+    dryRun: args.set.has("--dry-run"),
+  });
+  io.out(args.set.has("--text") ? installText(result) : `${JSON.stringify(result)}\n`);
+  return 0;
+}
+
+function statusCommand(argv: readonly string[], io: CliIo): number {
+  const args = projectArgs("status", argv, io, ["--strict", "--text"], undefined);
+  if (args === 2) return 2;
+  const status = projectStatus(args.project ?? ".");
+  io.out(args.set.has("--text") ? statusText(status) : `${JSON.stringify(status)}\n`);
+  return args.set.has("--strict") && !status.ok ? 3 : 0;
+}
+
+function pinCommand(argv: readonly string[], io: CliIo): number {
+  const args = projectArgs("pin", argv, io, ["--text"], "pack name");
+  if (args === 2) return 2;
+  if (args.project === undefined) {
+    io.err("corbelo-game-export: pin needs --project, the game project's folder. Try --help.\n");
+    return 2;
+  }
+  const status = pinProject(args.project, args.given);
+  io.out(args.set.has("--text") ? statusText(status) : `${JSON.stringify(status)}\n`);
+  return 0;
+}
+
 /**
- * The whole command line: `pack`, `check`, and everything `runCli` does. Returns the exit code
- * and never throws.
+ * The whole command line: `pack`, `check`, `install`, `status`, `pin`, and everything `runCli`
+ * does. Returns the exit code and never throws.
  */
 export async function runCommand(argv: readonly string[], io: CliIo = { out: (text) => process.stdout.write(text), err: (text) => process.stderr.write(text) }): Promise<number> {
   const [command, ...rest] = argv;
-  if (command !== "pack" && command !== "check") return runCli(argv, io);
   try {
-    return command === "pack" ? await packCommand(rest, io) : checkCommand(rest, io);
+    switch (command) {
+      case "pack":
+        return await packCommand(rest, io);
+      case "check":
+        return checkCommand(rest, io);
+      case "install":
+        return installCommand(rest, io);
+      case "status":
+        return statusCommand(rest, io);
+      case "pin":
+        return pinCommand(rest, io);
+      default:
+        return runCli(argv, io);
+    }
   } catch (error) {
     const code = error instanceof GameExportError ? error.code : "UNEXPECTED";
     io.err(`corbelo-game-export: error [${code}]: ${(error as Error).message}\n`);
