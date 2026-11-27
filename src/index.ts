@@ -1,5 +1,5 @@
 export { exportGameAsset } from "./asset.js";
-export { exportBlockout, type BlockoutExtras, type BlockoutFacts, type BlockoutOptions, type BlockoutPlacementFacts, type BlockoutResult } from "./blockout.js";
+export { exportBlockout, type BlockoutExtras, type BlockoutFacts, type BlockoutLodFacts, type BlockoutOptions, type BlockoutPlacementFacts, type BlockoutResult } from "./blockout.js";
 export {
   ASSET_BUDGETS,
   ASSET_SIZE_RANGES,

@@ -2,7 +2,7 @@
 // grid and one socket type. Every open end shows the same outline, a floor slab with a wall on
 // each side, with the same corners, so any two ends meet.
 import type { AssetBodyInput, KitGrid, KitPackInput, KitPieceInput, KitSide, KitSocketInput } from "../src/index.js";
-import { box, joined, MM_Z_UP, type Point, type Shape } from "./fixtures.js";
+import { box, cylinder, joined, MM_Z_UP, moved, type Point, type Shape } from "./fixtures.js";
 
 /** Thickness of the floor slab, in millimetres. */
 export const SLAB = 200;
@@ -166,4 +166,11 @@ export function swap(wrong: (grid: KitGrid) => KitPieceInput): (pieces: KitPiece
     const made = wrong(grid);
     return pieces.map((one) => (one.name === made.name ? made : one));
   };
+}
+
+/** The pieces with a round lamp in the end cap: a second body, of another material, with two lower detail levels. */
+export function withLamp(pieces: KitPieceInput[]): KitPieceInput[] {
+  const lamp = (sides: number): Shape => moved(cylinder(150, 300, sides), [1500, 1500, 2000]);
+  const body: AssetBodyInput = { name: "lamp", positions: lamp(24).positions, color: "#f2d16b", materialName: "Glass", lods: [{ positions: lamp(12).positions }, { positions: lamp(6).positions }], collisionPieces: [{ positions: box([1350, 1350, 2000], [1650, 1650, 2300]).positions }] };
+  return pieces.map((piece) => (piece.name === "endcap" ? { ...piece, bodies: [...piece.bodies!, body] } : piece));
 }

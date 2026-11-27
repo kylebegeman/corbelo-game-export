@@ -14,11 +14,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeGlb } from "../src/glb-write.js";
 import { checkGameAsset, exportGameAsset, exportGameGlb, readGlb, type ExportResult, type PackFacts } from "../src/index.js";
 import { box, chamferedBlock, cutCylinder, cylinder, doorFrame, halfPaintedSide, MM_Z_UP, paintedPatch, paintedTop, tube } from "./fixtures.js";
+import { BEGIN, END, GODOT, godotUsable } from "./godot-tools.js";
 import { loadKernel } from "./kernel.js";
 
-const GODOT = process.env["GODOT"] ?? "godot";
-const BEGIN = "CORBELO_GAME_EXPORT_JSON_BEGIN";
-const END = "CORBELO_GAME_EXPORT_JSON_END";
 const SEGMENTS = 48;
 /** The post that is cut finer has few sides, so a normal along a flat side is far from one straight out. */
 const CUT_SEGMENTS = 12;
@@ -58,20 +56,7 @@ interface GodotFile {
   nodes: GodotNode[];
 }
 
-function godotVersion(): string | null {
-  const result = spawnSync(GODOT, ["--version"], { encoding: "utf8" });
-  return result.status === 0 ? result.stdout.trim() : null;
-}
-
-const version = godotVersion();
-const usable = version !== null && version.startsWith("4.");
-if (!usable) {
-  console.warn(
-    version === null
-      ? `Skipping the Godot import proof: no "${GODOT}" program was found. Install Godot 4 or set GODOT to its path.`
-      : `Skipping the Godot import proof: it needs Godot 4, but "${GODOT}" is version ${version}.`,
-  );
-}
+const usable = godotUsable("the Godot import proof");
 
 function near(actual: readonly number[] | undefined, expected: readonly number[], digits = 5): void {
   expect(actual).toHaveLength(expected.length);

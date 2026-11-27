@@ -16,7 +16,7 @@ import {
   type GlbDocument,
   type KitPieceInput,
 } from "../src/index.js";
-import { bodyOf, corridorKit, flatBoxes, PIECE_NAMES } from "./kit-fixtures.js";
+import { bodyOf, corridorKit, flatBoxes, PIECE_NAMES, withLamp } from "./kit-fixtures.js";
 
 /** The box around every mesh of a node and of the nodes under it, in the scene. Turns are quarter turns about +Y. */
 function boxOf(document: GlbDocument, node: number, parent: { t: number[]; turn: number } = { t: [0, 0, 0], turn: 0 }, into = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }, only?: (name: string) => boolean) {
@@ -236,6 +236,31 @@ describe("a blockout", () => {
     expect(holder.children!.map((child) => document.json.nodes![child]!.name)).toEqual(["endcap_1_0_0", "lamp_1_0_0"]);
     expect(scene.facts.nodes).toMatchObject({ placements: 2, visible: 4 });
     expect(scene.facts.meshes.visible).toBe(2);
+  });
+
+  it("says which nodes hold the detail levels of a piece, in each of its places", () => {
+    const lit = resolveKit(corridorKit(withLamp));
+    const scene = exportBlockout(lit, { name: "pair", placements: [{ piece: "endcap", cell: [0, 0, 0] }, { piece: "endcap", cell: [2, 0, 0], turn: 2 }, { piece: "straight", cell: [1, 0, 0] }] });
+    const document = readGlb(scene.glb);
+    expect(scene.facts.lods!.map((group) => [group.placement, group.body, group.levels.map((level) => level.name)])).toEqual([
+      [0, "lamp_0_0_0", ["lamp_0_0_0", "lamp_0_0_0_LOD1", "lamp_0_0_0_LOD2"]],
+      [1, "lamp_2_0_0", ["lamp_2_0_0", "lamp_2_0_0_LOD1", "lamp_2_0_0_LOD2"]],
+    ]);
+    for (const group of scene.facts.lods!) {
+      expect(group.levels.map((level) => level.level)).toEqual([0, 1, 2]);
+      for (const level of group.levels) expect(document.json.nodes![level.node]!.name).toBe(level.name);
+      // The lower levels are further from full detail, each more than the one before, and as far as the piece's own facts say.
+      const piece = lit.pieces.find((one) => one.name === "endcap")!.facts.bodies.find((body) => body.name === "lamp")!;
+      expect(group.levels.map((level) => level.deviationMeters)).toEqual(piece.lods!.map((level) => level.deviation.meters));
+      expect(group.levels[0]!.deviationMeters).toBe(0);
+      expect(group.levels[2]!.deviationMeters).toBeGreaterThan(group.levels[1]!.deviationMeters);
+      expect(group.levels[1]!.deviationMeters).toBeGreaterThan(0);
+    }
+    // Both places show the same three meshes.
+    const meshes = scene.facts.lods!.map((group) => group.levels.map((level) => document.json.nodes![level.node]!.mesh));
+    expect(meshes[0]).toEqual(meshes[1]);
+    // A layout of pieces without detail levels says nothing about them.
+    expect(room.facts.lods).toBeUndefined();
   });
 
   it("writes the same bytes for the same layout, whatever order the placements come in", () => {

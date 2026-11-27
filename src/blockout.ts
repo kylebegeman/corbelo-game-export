@@ -67,6 +67,18 @@ export interface BlockoutFacts {
   triangles: { stored: number; drawn: number };
   /** The box around every piece in its place, in metres. */
   bounds: Box;
+  /** Only when a piece has detail levels: for each body with levels, in each place, the nodes that hold them. */
+  lods?: BlockoutLodFacts[];
+}
+
+/** The detail levels of one body of a piece in one place of a blockout. */
+export interface BlockoutLodFacts {
+  /** Which placement, counted from 0. */
+  placement: number;
+  /** The body's node name in the scene. */
+  body: string;
+  /** Level 0 first. `node` is the node that holds the level and `deviationMeters` how far its outline is from level 0. */
+  levels: { level: number; name: string; node: number; visible: boolean; deviationMeters: number }[];
 }
 
 export interface BlockoutResult {
@@ -213,6 +225,7 @@ export function exportBlockout(input: KitInput | Kit, layout: string | KitLayout
   }
 
   const used = new Set<string>();
+  const lods: BlockoutLodFacts[] = [];
   const placements: BlockoutPlacementFacts[] = [];
   const counts = { visible: 0, collision: 0, drawn: 0 };
   const min: Vec3 = [Infinity, Infinity, Infinity];
@@ -242,6 +255,7 @@ export function exportBlockout(input: KitInput | Kit, layout: string | KitLayout
       }
       return uniqueName(used, `${name}_${tag}`);
     };
+    const copied = new Map<number, number>();
     const copy = (node: number): number => {
       const source = from.json.nodes![node]!;
       const body = from.bodyOf[node]!;
@@ -265,6 +279,7 @@ export function exportBlockout(input: KitInput | Kit, layout: string | KitLayout
       }
       nodes.push(made);
       const index = nodes.length - 1;
+      copied.set(node, index);
       const children = (source.children ?? []).map(copy);
       if (children.length > 0) made.children = children;
       return index;
@@ -286,6 +301,14 @@ export function exportBlockout(input: KitInput | Kit, layout: string | KitLayout
     if (placement.turn !== 0) nodes[holder]!.rotation = [...rotation];
     json.scenes![0]!.nodes!.push(holder);
     placements.push({ piece: piece.name, asset: piece.asset, cell: placement.cell, turn: placement.turn, name: nodes[holder]!.name!, node: holder, translation, degrees: (placement.turn * 90) as 0 | 90 | 180 | 270 });
+    for (const body of piece.facts.bodies) {
+      if (body.lods === undefined || body.lods.length < 2) continue;
+      lods.push({
+        placement: placements.length - 1,
+        body: nodes[copied.get(body.node)!]!.name!,
+        levels: body.lods.map((level) => ({ level: level.level, name: nodes[copied.get(level.node)!]!.name!, node: copied.get(level.node)!, visible: level.visible, deviationMeters: level.deviation.meters })),
+      });
+    }
 
     const box = piece.facts.total.bounds.meters;
     for (const corner of [box.min, box.max]) {
@@ -318,6 +341,7 @@ export function exportBlockout(input: KitInput | Kit, layout: string | KitLayout
     materials: json.materials!.length,
     triangles: { stored: storedTriangles, drawn: counts.drawn },
     bounds: { min: [round(min[0]), round(min[1]), round(min[2])], max: [round(max[0]), round(max[1]), round(max[2])], size: [round(max[0] - min[0]), round(max[1] - min[1]), round(max[2] - min[2])] },
+    ...(lods.length > 0 ? { lods } : {}),
   };
   const extras: BlockoutExtras = { schema: 1, blockout: facts, ...(options.provenance !== undefined ? { provenance: options.provenance } : {}) };
   json.scenes![0]!.extras = { [EXTRAS_KEY]: extras };
