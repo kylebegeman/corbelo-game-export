@@ -73,7 +73,7 @@ function readStlFile(path, where) {
         throw error;
     }
 }
-/** Reads `refines` of a body: the STL of each surface and the lists that say where each triangle lies. */
+/** Reads `refines` of a body or of a lower detail level: the STL of each surface and the lists that say where each triangle lies. */
 function readRefines(value, where, base) {
     if (!isRecord(value))
         refuse("BAD_JOB", `${where}: "refines" must be an object with "surfaces" and "triangleOf".`);
@@ -187,6 +187,7 @@ const PACK_JOB_KEYS = [
     "rows",
     "profile",
     "pivot",
+    "pivots",
     "placement",
     "creaseAngle",
     "normals",
@@ -195,6 +196,7 @@ const PACK_JOB_KEYS = [
     "colorSpace",
     "provenance",
     "collision",
+    "collisions",
     "texcoords",
     "kernel",
     "naming",
@@ -203,10 +205,10 @@ const PACK_JOB_KEYS = [
     "revision",
     "output",
 ];
-const KIT_JOB_KEYS = [...PACK_JOB_KEYS.filter((key) => key !== "bodies" && key !== "rows" && key !== "pivot" && key !== "placement"), "grid", "pieces", "mates", "layouts", "pieceChecks", "scenes"];
+const KIT_JOB_KEYS = [...PACK_JOB_KEYS.filter((key) => key !== "bodies" && key !== "rows" && key !== "pivot" && key !== "pivots" && key !== "placement" && key !== "collisions"), "grid", "pieces", "mates", "layouts", "pieceChecks", "scenes"];
 const KIT_PIECE_KEYS = ["name", "bodies", "glb", "cells", "origin", "pivot", "sockets", "trim", "provenance"];
-const PACK_BODY_KEYS = [...BODY_KEYS, "lods", "collisionPieces", "attachPoints"];
-const LOD_KEYS = ["stl", "faceIds", "faceColors"];
+const PACK_BODY_KEYS = [...BODY_KEYS, "lods", "collisionPieces", "collisionRemainder", "attachPoints"];
+const LOD_KEYS = ["stl", "faceIds", "faceColors", "refines"];
 const PIECE_KEYS = ["stl"];
 const ROW_KEYS = ["name", "bodies", "provenance"];
 const PACK_OUTPUT_KEYS = ["dir", "zip"];
@@ -232,6 +234,8 @@ function readPackBody(value, label, base) {
             const faceColors = readList(level["faceColors"], "faceColors", levelWhere, base, FACE_COLORS);
             if (faceColors !== undefined)
                 lod.faceColors = faceColors;
+            if (level["refines"] !== undefined)
+                lod.refines = readRefines(level["refines"], levelWhere, base);
             return lod;
         });
     }
@@ -247,6 +251,16 @@ function readPackBody(value, label, base) {
                 refuse("BAD_JOB", `${pieceWhere} needs an "stl" file path.`);
             return { positions: readStlFile(resolve(base, piece["stl"]), pieceWhere) };
         });
+    }
+    const rest = entry["collisionRemainder"];
+    if (rest !== undefined) {
+        const restWhere = `${where}, collision remainder`;
+        if (!isRecord(rest))
+            refuse("BAD_JOB", `${restWhere} must be an object with "stl".`);
+        refuseUnknownKeys(rest, PIECE_KEYS, restWhere);
+        if (typeof rest["stl"] !== "string" || rest["stl"] === "")
+            refuse("BAD_JOB", `${restWhere} needs an "stl" file path.`);
+        asset.collisionRemainder = { positions: readStlFile(resolve(base, rest["stl"]), restWhere) };
     }
     // Written into the job itself. The exporter checks them.
     if (entry["attachPoints"] !== undefined)
@@ -414,6 +428,7 @@ each triangle, or null for the body's own colour.
 "triangleOf" is a JSON file with one whole number per triangle of the body's STL: a
 triangle of the surface it lies in. With more than one surface, "surfaceOf" is a file
 of the same kind that says which surface. A surface may name a "faceIds" file too.
+A lower detail level of a pack job takes "refines" the same way, for its own STL.
 
 Paths in the job are relative to the job file. --out and --facts are relative to the
 working directory and win over the job. Without a facts path, the facts go next to the

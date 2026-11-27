@@ -1,6 +1,6 @@
 import { exportGameAsset } from "./asset.js";
 import { checkGameAsset } from "./checks.js";
-import { refuse } from "./errors.js";
+import { notObject, refuse } from "./errors.js";
 import { assertJson } from "./export.js";
 import { assetName, DEFAULT_NAME_PATTERNS } from "./naming.js";
 import { resolveProfile } from "./profiles.js";
@@ -13,7 +13,7 @@ import { writeZip } from "./zip.js";
  */
 export function manifestJson(value, indent = "") {
     if (Array.isArray(value)) {
-        if (value.every((item) => typeof item !== "object" || item === null))
+        if (value.every((item) => notObject(item)))
             return `[${value.map((item) => JSON.stringify(item)).join(", ")}]`;
         return `[\n${value.map((item) => `${indent}  ${manifestJson(item, `${indent}  `)}`).join(",\n")}\n${indent}]`;
     }
@@ -39,7 +39,7 @@ const PACK_ONLY_KEYS = ["name", "bodies", "rows", "naming", "checks", "generated
  * The same input always gives the same bytes: nothing is read from the clock or the machine.
  */
 export function exportGamePack(input) {
-    if (typeof input !== "object" || input === null)
+    if (notObject(input))
         refuse("BAD_PACK", "exportGamePack needs { name, source, bodies } or { name, source, rows }.");
     const hasBodies = input.bodies !== undefined;
     const hasRows = input.rows !== undefined;
@@ -51,7 +51,7 @@ export function exportGamePack(input) {
         if (input[key] !== undefined && (typeof input[key] !== "string" || input[key] === ""))
             refuse("BAD_PACK", `${key} must be text.`);
     }
-    if (input.checks !== undefined && input.checks !== false && (typeof input.checks !== "object" || input.checks === null)) {
+    if (input.checks !== undefined && input.checks !== false && (notObject(input.checks))) {
         refuse("BAD_PACK", "checks must be false or the options of checkGameAsset.");
     }
     if (input.provenance !== undefined)
@@ -66,7 +66,7 @@ export function exportGamePack(input) {
     }
     const rows = hasRows
         ? input.rows.map((row, at) => {
-            if (typeof row !== "object" || row === null)
+            if (notObject(row))
                 refuse("BAD_PACK", `Row ${at} must be { name, bodies }.`);
             if (typeof row.name !== "string")
                 refuse("BAD_PACK", `Row ${at} needs a name.`);
@@ -93,9 +93,19 @@ export function exportGamePack(input) {
         if (!Array.isArray(bodies) || bodies.length === 0)
             refuse("NO_BODIES", `${where} needs at least one body.`);
         // One body is the asset: it takes the asset's name. Several keep their own.
-        const named = bodies.length === 1 && typeof bodies[0] === "object" && bodies[0] !== null ? [{ ...bodies[0], name: asset }] : bodies;
+        const one = bodies.length === 1 && !notObject(bodies[0]) ? bodies[0] : undefined;
+        const named = one !== undefined ? [{ ...one, name: asset }] : bodies;
+        // What was given for that one body by the name it had goes with it to the name it takes.
+        const own = {};
+        for (const key of ["pivots", "collisions"]) {
+            const given = options[key];
+            if (one === undefined || typeof given !== "object" || given === null || Array.isArray(given) || !Object.hasOwn(given, one.name))
+                continue;
+            const { [one.name]: entry, ...others } = given;
+            own[key] = { ...others, [asset]: entry };
+        }
         const stored = provenance ?? input.provenance;
-        const result = exportGameAsset({ ...options, source: input.source, bodies: named, ...(stored !== undefined ? { provenance: stored } : {}) });
+        const result = exportGameAsset({ ...options, ...own, source: input.source, bodies: named, ...(stored !== undefined ? { provenance: stored } : {}) });
         facts = result.facts;
         const fileName = `${asset}.glb`;
         for (const material of result.facts.materials) {
@@ -142,7 +152,7 @@ export function exportGamePack(input) {
 }
 /** A pack as one ZIP archive: every file of it, stored. The same pack always gives the same bytes. */
 export function packToZip(pack) {
-    if (typeof pack !== "object" || pack === null || !Array.isArray(pack.files))
+    if (notObject(pack) || !Array.isArray(pack.files))
         refuse("BAD_PACK", "packToZip needs what exportGamePack returned.");
     return writeZip(pack.files.map((file) => ({ name: file.name, bytes: file.bytes })));
 }

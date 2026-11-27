@@ -73,6 +73,8 @@ export interface PackJobLod {
     faceIds?: string;
     /** Path to a JSON file with one colour, or null, per triangle of the STL. */
     faceColors?: string;
+    /** What the level was cut from, as `refines` of a body. */
+    refines?: JobRefinement;
 }
 /** One body of a pack job: a body of a job, and what a game asset has around it. */
 export interface PackJobBody extends JobBody {
@@ -82,6 +84,10 @@ export interface PackJobBody extends JobBody {
     collisionPieces?: {
         stl: string;
     }[];
+    /** The rest of the body beside its pieces, as one closed STL: what a decomposition cuts up in place of the whole body. */
+    collisionRemainder?: {
+        stl: string;
+    };
     attachPoints?: AttachPointInput[];
 }
 /**

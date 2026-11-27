@@ -1,4 +1,4 @@
-import { forBody, refuse } from "./errors.js";
+import { badOption, badRefinement, forBody, notObject, refuse } from "./errors.js";
 import { BinaryBuilder, encodeGlb } from "./glb-write.js";
 import { EXTRAS_KEY, COMPONENT_FLOAT, COMPONENT_UNSIGNED_INT, COMPONENT_UNSIGNED_SHORT, MODE_TRIANGLES, TARGET_ARRAY_BUFFER, TARGET_ELEMENT_ARRAY_BUFFER, } from "./gltf.js";
 import { MATERIAL_METALLIC, MATERIAL_ROUGHNESS, planColors } from "./materials.js";
@@ -14,7 +14,7 @@ export const DEFAULT_WELD_TOLERANCE = 1e-6;
 export const DEFAULT_MAX_TRIANGLES = 2_000_000;
 const PIVOT_MODES = ["base-center", "center", "min-corner", "origin"];
 const MAX_JSON_DEPTH = 64;
-function isArrayLike(value) {
+export function isArrayLike(value) {
     return (Array.isArray(value) || ArrayBuffer.isView(value)) && typeof value.length === "number";
 }
 export function assertJson(value, path, depth) {
@@ -38,45 +38,46 @@ export function assertJson(value, path, depth) {
     }
     refuse("BAD_PROVENANCE", `${path} is not plain JSON (null, boolean, number, string, array or object).`);
 }
+/** Checks a pivot and says its mode. `what` starts the refusal of one that is not a pivot. */
+export function readPivot(pivot, what = "pivot") {
+    if (typeof pivot === "string") {
+        if (!PIVOT_MODES.includes(pivot)) {
+            badOption(`${what} must be one of ${PIVOT_MODES.map((mode) => `"${mode}"`).join(", ")} or a point [x, y, z]. Got ${JSON.stringify(pivot)}.`);
+        }
+        return pivot;
+    }
+    if (!Array.isArray(pivot) || pivot.length !== 3 || !pivot.every((value) => Number.isFinite(value))) {
+        badOption("A pivot point must be three finite numbers [x, y, z] in source units.");
+    }
+    return "point";
+}
 function readSettings(input) {
     const creaseAngle = input.creaseAngle ?? DEFAULT_CREASE_ANGLE;
     if (!(Number.isFinite(creaseAngle) && creaseAngle >= 0 && creaseAngle <= 180)) {
-        refuse("BAD_OPTION", `creaseAngle must be from 0 to 180 degrees. Got ${String(creaseAngle)}.`);
+        badOption(`creaseAngle must be from 0 to 180 degrees. Got ${String(creaseAngle)}.`);
     }
     const weldTolerance = input.weldTolerance ?? DEFAULT_WELD_TOLERANCE;
     if (!(Number.isFinite(weldTolerance) && weldTolerance >= 0)) {
-        refuse("BAD_OPTION", `weldTolerance must be zero or a positive number of metres. Got ${String(weldTolerance)}.`);
+        badOption(`weldTolerance must be zero or a positive number of metres. Got ${String(weldTolerance)}.`);
     }
     const maxTriangles = input.maxTriangles ?? DEFAULT_MAX_TRIANGLES;
     if (!(Number.isInteger(maxTriangles) && maxTriangles > 0)) {
-        refuse("BAD_OPTION", `maxTriangles must be a positive whole number. Got ${String(maxTriangles)}.`);
+        badOption(`maxTriangles must be a positive whole number. Got ${String(maxTriangles)}.`);
     }
     const normals = input.normals ?? "angle-area";
     if (normals !== "angle-area" && normals !== "face-weighted") {
-        refuse("BAD_OPTION", `normals must be "angle-area" or "face-weighted". Got ${JSON.stringify(normals)}.`);
+        badOption(`normals must be "angle-area" or "face-weighted". Got ${JSON.stringify(normals)}.`);
     }
     const placement = input.placement ?? "origin";
     if (placement !== "origin" && placement !== "designed" && placement !== "assembly") {
-        refuse("BAD_OPTION", `placement must be "origin", "designed" or "assembly". Got ${JSON.stringify(placement)}.`);
+        badOption(`placement must be "origin", "designed" or "assembly". Got ${JSON.stringify(placement)}.`);
     }
     const colorSpace = input.colorSpace ?? "srgb";
     if (colorSpace !== "srgb" && colorSpace !== "linear") {
-        refuse("BAD_OPTION", `colorSpace must be "srgb" or "linear". Got ${JSON.stringify(colorSpace)}.`);
+        badOption(`colorSpace must be "srgb" or "linear". Got ${JSON.stringify(colorSpace)}.`);
     }
     const pivot = input.pivot ?? "base-center";
-    let pivotMode;
-    if (typeof pivot === "string") {
-        if (!PIVOT_MODES.includes(pivot)) {
-            refuse("BAD_OPTION", `pivot must be one of ${PIVOT_MODES.map((mode) => `"${mode}"`).join(", ")} or a point [x, y, z]. Got ${JSON.stringify(pivot)}.`);
-        }
-        pivotMode = pivot;
-    }
-    else {
-        if (!Array.isArray(pivot) || pivot.length !== 3 || !pivot.every((value) => Number.isFinite(value))) {
-            refuse("BAD_OPTION", "A pivot point must be three finite numbers [x, y, z] in source units.");
-        }
-        pivotMode = "point";
-    }
+    const pivotMode = readPivot(pivot);
     if (input.provenance !== undefined)
         assertJson(input.provenance, "provenance", 0);
     return {
@@ -148,11 +149,52 @@ export function checkMesh(mesh, label, what) {
     return triangles;
 }
 /**
+ * Checks `refines` of a mesh of `triangles` triangles, a body or a lower detail level of one, and
+ * returns how many triangles the meshes it names have together.
+ */
+function checkRefines(refines, label, triangles) {
+    if (notObject(refines))
+        badRefinement(`${label}: refines must be { surfaces, triangleOf }.`);
+    const { surfaces, surfaceOf, triangleOf } = refines;
+    if (!Array.isArray(surfaces) || surfaces.length === 0)
+        badRefinement(`${label}: refines.surfaces must be an array with at least one mesh.`);
+    const surfaceTriangles = surfaces.map((surface, at) => {
+        const surfaceLabel = `${label}, surface ${at} of refines`;
+        if (notObject(surface))
+            badRefinement(`${surfaceLabel} is not an object.`);
+        return checkMesh(surface, surfaceLabel, "the surface");
+    });
+    const wholeNumbers = (values, key) => {
+        if (!isArrayLike(values))
+            badRefinement(`${label}: refines.${key} must be a typed array or an array of numbers.`);
+        if (values.length !== triangles) {
+            badRefinement(`${label}: refines.${key} holds ${values.length} numbers for ${triangles} triangles. It needs exactly one per triangle.`);
+        }
+        return values;
+    };
+    if (surfaceOf === undefined && surfaces.length > 1) {
+        badRefinement(`${label}: refines has ${surfaces.length} surfaces, so it needs surfaceOf to say which one each triangle lies in.`);
+    }
+    const ofSurface = surfaceOf === undefined ? undefined : wholeNumbers(surfaceOf, "surfaceOf");
+    const ofTriangle = wholeNumbers(triangleOf, "triangleOf");
+    for (let at = 0; at < triangles; at += 1) {
+        const surface = ofSurface === undefined ? 0 : ofSurface[at];
+        if (!Number.isInteger(surface) || surface < 0 || surface >= surfaces.length) {
+            badRefinement(`${label}: refines.surfaceOf says triangle ${at} lies in surface ${String(surface)}, but there are ${surfaces.length} surfaces, numbered from 0.`);
+        }
+        const triangle = ofTriangle[at];
+        if (!Number.isInteger(triangle) || triangle < 0 || triangle >= surfaceTriangles[surface]) {
+            badRefinement(`${label}: refines.triangleOf says triangle ${at} lies in triangle ${String(triangle)}, but ${surfaces.length > 1 ? `surface ${surface}` : "the surface"} has ${surfaceTriangles[surface]} triangles, numbered from 0.`);
+        }
+    }
+    return surfaceTriangles.reduce((total, count) => total + count, 0);
+}
+/**
  * Checks one body's arrays and returns how many triangles it has, and how many the meshes it
  * refines have together. Refuses anything malformed.
  */
 function checkBody(body, index) {
-    if (typeof body !== "object" || body === null)
+    if (notObject(body))
         refuse("BAD_POSITIONS", `Body ${index} is not an object.`);
     if (typeof body.name !== "string" || body.name.trim() === "")
         refuse("BAD_NAME", `Body ${index} needs a name.`);
@@ -167,45 +209,7 @@ function checkBody(body, index) {
             refuse("BAD_FACE_COLORS", `${label}: faceColors holds ${faceColors.length} entries for ${triangles} triangles. It needs exactly one per triangle.`);
         }
     }
-    let refined = 0;
-    if (refines !== undefined) {
-        if (typeof refines !== "object" || refines === null)
-            refuse("BAD_REFINEMENT", `${label}: refines must be { surfaces, triangleOf }.`);
-        const { surfaces, surfaceOf, triangleOf } = refines;
-        if (!Array.isArray(surfaces) || surfaces.length === 0)
-            refuse("BAD_REFINEMENT", `${label}: refines.surfaces must be an array with at least one mesh.`);
-        const surfaceTriangles = surfaces.map((surface, at) => {
-            const surfaceLabel = `${label}, surface ${at} of refines`;
-            if (typeof surface !== "object" || surface === null)
-                refuse("BAD_REFINEMENT", `${surfaceLabel} is not an object.`);
-            return checkMesh(surface, surfaceLabel, "the surface");
-        });
-        refined = surfaceTriangles.reduce((total, count) => total + count, 0);
-        const wholeNumbers = (values, key) => {
-            if (!isArrayLike(values))
-                refuse("BAD_REFINEMENT", `${label}: refines.${key} must be a typed array or an array of numbers.`);
-            if (values.length !== triangles) {
-                refuse("BAD_REFINEMENT", `${label}: refines.${key} holds ${values.length} numbers for ${triangles} triangles. It needs exactly one per triangle.`);
-            }
-            return values;
-        };
-        if (surfaceOf === undefined && surfaces.length > 1) {
-            refuse("BAD_REFINEMENT", `${label}: refines has ${surfaces.length} surfaces, so it needs surfaceOf to say which one each triangle lies in.`);
-        }
-        const ofSurface = surfaceOf === undefined ? undefined : wholeNumbers(surfaceOf, "surfaceOf");
-        const ofTriangle = wholeNumbers(triangleOf, "triangleOf");
-        for (let at = 0; at < triangles; at += 1) {
-            const surface = ofSurface === undefined ? 0 : ofSurface[at];
-            if (!Number.isInteger(surface) || surface < 0 || surface >= surfaces.length) {
-                refuse("BAD_REFINEMENT", `${label}: refines.surfaceOf says triangle ${at} lies in surface ${String(surface)}, but there are ${surfaces.length} surfaces, numbered from 0.`);
-            }
-            const triangle = ofTriangle[at];
-            if (!Number.isInteger(triangle) || triangle < 0 || triangle >= surfaceTriangles[surface]) {
-                refuse("BAD_REFINEMENT", `${label}: refines.triangleOf says triangle ${at} lies in triangle ${String(triangle)}, but ${surfaces.length > 1 ? `surface ${surface}` : "the surface"} has ${surfaceTriangles[surface]} triangles, numbered from 0.`);
-            }
-        }
-    }
-    return { triangles, refined };
+    return { triangles, refined: refines === undefined ? 0 : checkRefines(refines, label, triangles) };
 }
 export function boundsOf(positions) {
     const min = [Infinity, Infinity, Infinity];
@@ -221,11 +225,11 @@ export function boundsOf(positions) {
     }
     return { min, max };
 }
-function pivotPoint(settings, bounds, conversion) {
+function pivotPoint(pivot, bounds, conversion) {
     const { min, max } = bounds;
-    if (typeof settings.pivot !== "string")
-        return pointToGltfSpace(settings.pivot, conversion);
-    switch (settings.pivot) {
+    if (typeof pivot !== "string")
+        return pointToGltfSpace(pivot, conversion);
+    switch (pivot) {
         case "base-center":
             return [(min[0] + max[0]) / 2, min[1], (min[2] + max[2]) / 2];
         case "center":
@@ -272,7 +276,7 @@ function compareText(a, b) {
  */
 export function draftScene(input, extension = {}) {
     const caller = extension.caller ?? "exportGameGlb";
-    if (typeof input !== "object" || input === null)
+    if (notObject(input))
         refuse("NO_BODIES", `${caller} needs { bodies, source }.`);
     const settings = readSettings(input);
     const conversion = spaceConversion(input.source);
@@ -287,17 +291,20 @@ export function draftScene(input, extension = {}) {
         const counted = forBody(index, () => {
             const own = checkBody(body, index);
             let levelTriangles = 0;
+            let refined = own.refined;
             for (const [at, level] of levelsOf(index).entries()) {
                 const label = `Body "${body.name}", detail level ${at + 1}`;
-                if (typeof level !== "object" || level === null)
+                if (notObject(level))
                     refuse("BAD_LOD", `${label} is not an object with positions.`);
                 const triangles = checkMesh(level, label, "the level");
                 if (level.faceColors !== undefined && (!Array.isArray(level.faceColors) || level.faceColors.length !== triangles)) {
                     refuse("BAD_FACE_COLORS", `${label}: faceColors needs exactly one colour, or null, for each of its ${triangles} triangles.`);
                 }
                 levelTriangles += triangles;
+                if (level.refines !== undefined)
+                    refined += checkRefines(level.refines, label, triangles);
             }
-            return { triangles: own.triangles + levelTriangles, refined: own.refined };
+            return { triangles: own.triangles + levelTriangles, refined };
         });
         inputTriangles += counted.triangles;
         if (inputTriangles > settings.maxTriangles) {
@@ -340,33 +347,36 @@ export function draftScene(input, extension = {}) {
         // With `refines` the body's own face ids have no say in the shading: the surfaces' have.
         return buildMesh(points, source.indices, coarse === undefined ? source.faceIds : undefined, meshOptions, coarse);
     };
+    // A mesh that refines others is shaded from them. They are built first, each by itself and by
+    // the same rules as a body, and are not written.
+    const shade = (source, where) => {
+        const { refines } = source;
+        if (refines === undefined)
+            return { mesh: construct(source) };
+        const meshes = refines.surfaces.map((surface) => construct(surface));
+        const keptOf = meshes.map((surfaceMesh) => {
+            const kept = new Int32Array(surfaceMesh.triangles + surfaceMesh.degenerateTrianglesDropped).fill(-1);
+            for (let t = 0; t < surfaceMesh.triangles; t += 1)
+                kept[surfaceMesh.sourceTriangle[t]] = t;
+            return kept;
+        });
+        return {
+            mesh: construct(source, { meshes, keptOf, surfaceOf: refines.surfaceOf, triangleOf: refines.triangleOf, where }),
+            shadedFrom: { surfaces: meshes.length, triangles: meshes.reduce((total, surface) => total + surface.triangles, 0) },
+        };
+    };
     const shaped = bodies.map((body, index) => forBody(index, () => {
-        // The meshes a body refines are built first, each by itself and by the same rules as a body.
-        let coarse;
-        if (body.refines !== undefined) {
-            const meshes = [];
-            const keptOf = [];
-            for (const surface of body.refines.surfaces) {
-                const surfaceMesh = construct(surface);
-                const kept = new Int32Array(surfaceMesh.triangles + surfaceMesh.degenerateTrianglesDropped).fill(-1);
-                for (let t = 0; t < surfaceMesh.triangles; t += 1)
-                    kept[surfaceMesh.sourceTriangle[t]] = t;
-                meshes.push(surfaceMesh);
-                keptOf.push(kept);
-            }
-            coarse = { meshes, keptOf, surfaceOf: body.refines.surfaceOf, triangleOf: body.refines.triangleOf, where: `Body "${body.name}"` };
-        }
-        const mesh = construct(body, coarse);
+        const where = `Body "${body.name}"`;
+        const { mesh, shadedFrom } = shade(body, where);
         if (mesh.triangles === 0) {
-            refuse("ALL_DEGENERATE", `Body "${body.name}": all ${mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
+            refuse("ALL_DEGENERATE", `${where}: all ${mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
         }
-        const shadedFrom = coarse === undefined ? undefined : { surfaces: coarse.meshes.length, triangles: coarse.meshes.reduce((total, surface) => total + surface.triangles, 0) };
         const levels = levelsOf(index).map((level, at) => {
-            const levelMesh = construct(level);
-            if (levelMesh.triangles === 0) {
-                refuse("ALL_DEGENERATE", `Body "${body.name}", detail level ${at + 1}: all ${levelMesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
+            const shaded = shade(level, `${where}, detail level ${at + 1}`);
+            if (shaded.mesh.triangles === 0) {
+                refuse("ALL_DEGENERATE", `${where}, detail level ${at + 1}: all ${shaded.mesh.degenerateTrianglesDropped} triangles have no area, so nothing is left to export.`);
             }
-            return levelMesh;
+            return shaded;
         });
         return { mesh, shadedFrom, levels };
     }));
@@ -383,7 +393,7 @@ export function draftScene(input, extension = {}) {
                 max[axis] = Math.max(max[axis], bounds.max[axis]);
             }
         }
-        assemblyPivot = pivotPoint(settings, { min, max }, conversion);
+        assemblyPivot = pivotPoint(settings.pivot, { min, max }, conversion);
     }
     const byName = extension.slotOrder === "name";
     // Vertex data is stored relative to the pivot, as 32-bit floats. Everything reported is
@@ -407,7 +417,7 @@ export function draftScene(input, extension = {}) {
         return { mesh, uvs, stored, local: boundsOf(stored), parts };
     };
     const prepared = shaped.map(({ mesh, levels }, index) => {
-        const pivot = pivotPoint(settings, boundsOf(mesh.positions), conversion);
+        const pivot = pivotPoint(extension.pivots?.[index] ?? settings.pivot, boundsOf(mesh.positions), conversion);
         const translation = assemblyPivot !== undefined
             ? [pivot[0] - assemblyPivot[0] + 0, pivot[1] - assemblyPivot[1] + 0, pivot[2] - assemblyPivot[2] + 0]
             : settings.placement === "designed"
@@ -417,7 +427,7 @@ export function draftScene(input, extension = {}) {
             pivot,
             translation,
             full: prepare(mesh, pivot, translation, index),
-            levels: levels.map((level, at) => prepare(level, pivot, translation, levelColorsAt[index][at])),
+            levels: levels.map((level, at) => prepare(level.mesh, pivot, translation, levelColorsAt[index][at])),
         };
     });
     // The materials written are the ones a kept triangle uses, in the order bodies and their
@@ -545,7 +555,7 @@ export function draftScene(input, extension = {}) {
             bounds: measuredBox(sceneMin, sceneMax, profile),
             localBounds: measuredBox(local.min, local.max, profile),
             pivot: {
-                mode: settings.pivotMode,
+                mode: readPivot(extension.pivots?.[index] ?? settings.pivot),
                 meters: [pivot[0] + 0, pivot[1] + 0, pivot[2] + 0],
                 engine: toEngine(pivot, profile),
                 source: pointToSourceSpace(pivot, conversion),
@@ -556,7 +566,10 @@ export function draftScene(input, extension = {}) {
     // The meshes of lower levels come after the meshes of every body, so a body's mesh keeps the
     // number of its body. Their names and nodes are for the caller to settle.
     for (const [index, { levels }] of prepared.entries()) {
-        draftBodies[index].levels = levels.map((level, at) => write(`${names[index]}_LOD${at + 1}`, level));
+        draftBodies[index].levels = levels.map((level, at) => {
+            const { shadedFrom } = shaped[index].levels[at];
+            return { ...write(`${names[index]}_LOD${at + 1}`, level), ...(shadedFrom !== undefined ? { shadedFrom } : {}) };
+        });
     }
     const sum = (pick) => bodyFacts.reduce((total, facts) => total + pick(facts), 0);
     const facts = {

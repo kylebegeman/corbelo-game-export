@@ -129,6 +129,11 @@ export interface LodInput {
     faceIds?: ArrayLike<number>;
     /** One entry per triangle, as on a body. Without it the level is all in the body's own colour. */
     faceColors?: readonly (ColorInput | null | undefined)[];
+    /**
+     * The meshes this level's triangles were cut from, to take the shading from, as on a body.
+     * The level's own `faceIds` then have no say in the shading: the surfaces' have.
+     */
+    refines?: Refinement;
 }
 /** One piece the body was made from, in the same units and axes as the body. Only its points are used: it becomes their convex hull. */
 export interface CollisionPieceInput {
@@ -150,6 +155,15 @@ export interface AssetBodyInput extends BodyInput {
     lods?: readonly LodInput[];
     /** The pieces the body was made from, for collision. */
     collisionPieces?: readonly CollisionPieceInput[];
+    /**
+     * The rest of the body, beside its `collisionPieces`: one closed solid in the same units and
+     * axes as the body, triangle soup without `indices`. A decomposition cuts this up with the
+     * kernel in place of the whole body, and writes the pieces given and its own as one shape.
+     */
+    collisionRemainder?: {
+        positions: ArrayLike<number>;
+        indices?: ArrayLike<number>;
+    };
     attachPoints?: readonly AttachPointInput[];
 }
 /** A collision shape, cheapest first. */
@@ -171,8 +185,19 @@ export interface TexcoordOptions {
     tileMeters?: number;
 }
 export interface AssetOptions extends ExportOptions {
+    /**
+     * A pivot of its own for some bodies: a list in the order of the bodies, where `null` leaves a
+     * body to `pivot`, or an object with a pivot for each body name. A body with none has `pivot`.
+     */
+    pivots?: readonly (PivotOption | null | undefined)[] | Readonly<Record<string, PivotOption>>;
     /** Default `"auto"`. */
     collision?: CollisionRequest | CollisionSettings;
+    /**
+     * Collision of its own for some bodies: a list in the order of the bodies, where `null` leaves
+     * a body to `collision`, or an object with an entry for each body name. An entry is a shape or
+     * settings, and what it leaves out is taken from `collision`.
+     */
+    collisions?: readonly (CollisionRequest | CollisionSettings | null | undefined)[] | Readonly<Record<string, CollisionRequest | CollisionSettings>>;
     /** `true` or `{ tileMeters }` writes box-projected texture coordinates. Default none. */
     texcoords?: boolean | TexcoordOptions;
     /** Needed only for a general convex decomposition. */
@@ -290,7 +315,16 @@ export interface CollisionFacts {
     shape: CollisionShape | "none";
     /** How many convex pieces, and so how many nodes. */
     pieces: number;
+    /**
+     * Only for a decomposition of a body given `collisionRemainder`: how many of the pieces are
+     * the ones the caller gave. They come first, and the rest are what the kernel cut.
+     */
+    givenPieces?: number;
     tolerance: number;
+    /** The most convex pieces a decomposition of this body makes. Not in files written before 0.1.8. */
+    maxPieces?: number;
+    /** The most corners one convex piece of this body has. Not in files written before 0.1.8. */
+    maxHullVertices?: number;
     /** Cubic metres. `visible` and `error` are null for a body that is not closed. */
     volume: {
         visible: number | null;
@@ -317,6 +351,14 @@ export interface LodFacts {
     vertices: number;
     materialSlots: number;
     materials: string[];
+    /**
+     * Only for a lower level given `refines`: how many surfaces its shading was taken from and how
+     * many triangles they hold together.
+     */
+    shadedFrom?: {
+        surfaces: number;
+        triangles: number;
+    };
     degenerateTrianglesDropped: number;
     openEdges: number;
     nonManifoldEdges: number;

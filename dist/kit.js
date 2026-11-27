@@ -1,5 +1,5 @@
 import { exportGameAsset } from "./asset.js";
-import { refuse } from "./errors.js";
+import { badOption, notObject, refuse } from "./errors.js";
 import { assertJson } from "./export.js";
 import { readPack } from "./glb-read.js";
 import { assetName, DEFAULT_NAME_PATTERNS } from "./naming.js";
@@ -66,7 +66,7 @@ function isCells(value, least) {
     return Array.isArray(value) && value.length === 3 && value.every((part) => Number.isInteger(part) && part >= least);
 }
 export function readGrid(grid) {
-    if (typeof grid !== "object" || grid === null)
+    if (notObject(grid))
         refuse("BAD_KIT", "A kit needs grid: { moduleMeters, storeyMeters }.");
     for (const key of ["moduleMeters", "storeyMeters"]) {
         if (!(Number.isFinite(grid[key]) && grid[key] > 0))
@@ -113,7 +113,7 @@ export function socketFrame(socket, grid) {
     return { center, u, v, halfU: half(u), halfV: half(v) };
 }
 function readSocket(input, where, cells, grid, toBlock, toDirection) {
-    if (typeof input !== "object" || input === null)
+    if (notObject(input))
         refuse("BAD_KIT", `${where} must be { type, side } or { type, plane }.`);
     if (typeof input.type !== "string" || input.type.trim() === "")
         refuse("BAD_KIT", `${where} needs a type, like "wall end".`);
@@ -137,7 +137,7 @@ function readSocket(input, where, cells, grid, toBlock, toDirection) {
     }
     else {
         const plane = input.plane;
-        if (typeof plane !== "object" || plane === null || !isPoint(plane.point) || !isPoint(plane.normal) || Math.hypot(...plane.normal) === 0) {
+        if (notObject(plane) || !isPoint(plane.point) || !isPoint(plane.normal) || Math.hypot(...plane.normal) === 0) {
             refuse("BAD_KIT", `${where}: plane must be { point: [x, y, z], normal: [x, y, z] } with a normal that is not all zero.`);
         }
         const normal = toDirection(plane.normal);
@@ -188,7 +188,7 @@ function readLayouts(layouts, pieces) {
         refuse("BAD_LAYOUT", "layouts must be a list of { name, placements }.");
     const names = new Set();
     return layouts.map((layout, at) => {
-        if (typeof layout !== "object" || layout === null || typeof layout.name !== "string" || layout.name.trim() === "")
+        if (notObject(layout) || typeof layout.name !== "string" || layout.name.trim() === "")
             refuse("BAD_LAYOUT", `Layout ${at} needs a name.`);
         if (names.has(layout.name.toLowerCase()))
             refuse("BAD_LAYOUT", `Two layouts are named "${layout.name}".`);
@@ -198,13 +198,13 @@ function readLayouts(layouts, pieces) {
 }
 /** Checks a layout the caller wrote against the pieces there are. */
 export function readLayout(layout, pieces) {
-    if (typeof layout !== "object" || layout === null || typeof layout.name !== "string" || layout.name.trim() === "")
+    if (notObject(layout) || typeof layout.name !== "string" || layout.name.trim() === "")
         refuse("BAD_LAYOUT", "A layout needs a name.");
     if (!Array.isArray(layout.placements) || layout.placements.length === 0)
         refuse("BAD_LAYOUT", `Layout "${layout.name}" needs placements: a list of { piece, cell, turn }.`);
     const placements = layout.placements.map((placement, at) => {
         const where = `Layout "${layout.name}", placement ${at}`;
-        if (typeof placement !== "object" || placement === null)
+        if (notObject(placement))
             refuse("BAD_LAYOUT", `${where} must be { piece, cell, turn }.`);
         if (!pieces.some((piece) => piece.name === placement.piece))
             refuse("BAD_LAYOUT", `${where}: the kit has no piece named ${JSON.stringify(placement.piece)}.`);
@@ -226,13 +226,14 @@ export function readLayout(layout, pieces) {
  * The same input always gives the same bytes.
  */
 export function resolveKit(input, grid) {
-    if (typeof input !== "object" || input === null)
+    if (notObject(input))
         refuse("BAD_KIT", "A kit is { name, source, grid, pieces }.");
     if (typeof input.name !== "string" || input.name.trim() === "")
         refuse("BAD_KIT", "A kit needs a name.");
-    for (const key of ["pivot", "placement"]) {
-        if (input[key] !== undefined)
-            refuse("BAD_KIT", `A kit takes no ${key}: each piece has its own pivot, and sits at the scene origin.`);
+    for (const key of ["pivot", "pivots", "placement", "collisions"]) {
+        if (input[key] !== undefined) {
+            refuse("BAD_KIT", `A kit takes no ${key}: ${key === "collisions" ? "its collision settings are for every piece" : "each piece has its own pivot, and sits at the scene origin"}.`);
+        }
     }
     const resolvedGrid = readGrid(grid ?? input.grid);
     const profile = resolveProfile(input.profile);
@@ -240,7 +241,7 @@ export function resolveKit(input, grid) {
     const conversion = spaceConversion(input.source);
     const mates = {};
     if (input.mates !== undefined) {
-        if (typeof input.mates !== "object" || input.mates === null || Array.isArray(input.mates))
+        if (notObject(input.mates) || Array.isArray(input.mates))
             refuse("BAD_KIT", "mates must be an object of socket types, like { \"plug\": \"hole\" }.");
         for (const [type, other] of Object.entries(input.mates)) {
             if (typeof other !== "string" || other.trim() === "" || type.trim() === "")
@@ -263,7 +264,7 @@ export function resolveKit(input, grid) {
     const taken = new Map();
     const pieceNames = new Set();
     const pieces = given.map((piece, at) => {
-        if (typeof piece !== "object" || piece === null)
+        if (notObject(piece))
             refuse("BAD_KIT", `Piece ${at} must be { name, bodies } or { name, glb }.`);
         if (typeof piece.name !== "string" || piece.name.trim() === "")
             refuse("BAD_KIT", `Piece ${at} needs a name.`);
@@ -315,7 +316,7 @@ export function resolveKit(input, grid) {
             const bodies = piece.bodies;
             const sourcePivot = piece.pivot ?? piece.origin ?? [0, 0, 0];
             // One body is the piece: it takes the piece's file name, as the one body of an asset does.
-            const named = bodies.length === 1 && typeof bodies[0] === "object" && bodies[0] !== null ? [{ ...bodies[0], name: asset }] : bodies;
+            const named = bodies.length === 1 && !notObject(bodies[0]) ? [{ ...bodies[0], name: asset }] : bodies;
             const stored = piece.provenance ?? input.provenance;
             const result = exportGameAsset({
                 ...options,
@@ -368,14 +369,14 @@ export function resolveKit(input, grid) {
 }
 /** True for a kit `resolveKit` returned, false for one as it is given. */
 export function isKit(value) {
-    return typeof value === "object" && value !== null && typeof value.profile === "string" && Array.isArray(value.pieces) && value.pieces.every((piece) => typeof piece === "object" && piece !== null && "glb" in piece && "facts" in piece);
+    return !notObject(value) && typeof value.profile === "string" && Array.isArray(value.pieces) && value.pieces.every((piece) => !notObject(piece) && "glb" in piece && "facts" in piece);
 }
 /** A kit as `resolveKit` returns it, from that or from a kit as it is given. */
 export function kitOf(input, grid) {
     if (!isKit(input))
         return resolveKit(input, grid);
     if (grid !== undefined)
-        refuse("BAD_OPTION", "A kit that is already written cannot be made for another grid: give the kit as it was given to resolveKit.");
+        badOption("A kit that is already written cannot be made for another grid: give the kit as it was given to resolveKit.");
     return input;
 }
 /** A layout by name, among the test layouts and the kit's own, or a layout as given. */
@@ -548,6 +549,9 @@ export function kitLayouts(kit) {
     const crossings = flat.filter((piece) => piece.sockets.length === 4 && level(piece));
     const layouts = [];
     const skipped = [];
+    const skip = (name, why, reason, reasonValues) => {
+        skipped.push({ name, reason, reasonKey: `layouts.skipped.${why}`, reasonValues });
+    };
     /** Puts the first of `candidates` that fits against a socket of a placed piece. Returns the piece and the socket it was joined by. */
     const grow = (state, from, socket, placement, candidates) => {
         const face = faceOf(from, socket, placement);
@@ -564,7 +568,7 @@ export function kitLayouts(kit) {
     const around = (name, seeds, what) => {
         const seed = seeds[0];
         if (seed === undefined) {
-            skipped.push({ name, reason: `No piece has ${what}.` });
+            skip(name, "no-piece", `No piece has ${what}.`, { layout: name });
             return;
         }
         const state = start(seed);
@@ -575,13 +579,13 @@ export function kitLayouts(kit) {
                 joined += 1;
         }
         if (joined === 0)
-            skipped.push({ name, reason: `No piece has a socket that meets a socket of "${seed.name}".` });
+            skip(name, "no-mate", `No piece has a socket that meets a socket of "${seed.name}".`, { piece: seed.name });
         else
             layouts.push(settled(name, kit, state.placements));
     };
     // A straight run: every through piece in turn, at least three pieces, with an end on each end.
     if (throughs.length === 0) {
-        skipped.push({ name: "run", reason: "No piece has two sockets on opposite sides of one storey." });
+        skip("run", "no-piece", "No piece has two sockets on opposite sides of one storey.", { layout: "run" });
     }
     else {
         const state = start(throughs[0]);
@@ -597,7 +601,7 @@ export function kitLayouts(kit) {
                 last = next;
         }
         if (state.placements.length < 2) {
-            skipped.push({ name: "run", reason: `The sockets of "${throughs[0].name}" do not meet each other, so no two through pieces go in a row.` });
+            skip("run", "no-row", `The sockets of "${throughs[0].name}" do not meet each other, so no two through pieces go in a row.`, { piece: throughs[0].name });
         }
         else {
             grow(state, last.piece, last.joined === 0 ? 1 : 0, last.placement, ends);
@@ -611,7 +615,7 @@ export function kitLayouts(kit) {
     around("rise", rises, "two sockets on different storeys");
     // A closed room: a ring of four bends with a through piece between each two, every socket met.
     if (bends.length === 0) {
-        skipped.push({ name: "room", reason: "No piece has two sockets at a right angle on one storey." });
+        skip("room", "no-piece", "No piece has two sockets at a right angle on one storey.", { layout: "room" });
     }
     else {
         const bend = bends[0];
@@ -647,7 +651,7 @@ export function kitLayouts(kit) {
         if (close(0, bend, 1, state.placements[0]))
             layouts.push(settled("room", kit, state.placements));
         else
-            skipped.push({ name: "room", reason: `Four of "${bend.name}"${throughs.length > 0 ? " with a through piece between each two" : ""} do not close a ring.` });
+            skip("room", "no-ring", `Four of "${bend.name}"${throughs.length > 0 ? " with a through piece between each two" : ""} do not close a ring.`, { piece: bend.name, throughs: throughs.length });
     }
     return { layouts, skipped };
 }

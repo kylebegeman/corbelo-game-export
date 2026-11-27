@@ -17,5 +17,11 @@ export declare class GameExportError extends Error {
  */
 export declare const NO_DECOMPOSITION = "No convex decomposition was made. ";
 export declare function refuse(code: GameExportErrorCode, message: string): never;
+/** Refuses an option that is not one the package can read. */
+export declare function badOption(message: string): never;
+/** Refuses a `refines` that does not say how a body's triangles lie in its coarse surfaces. */
+export declare function badRefinement(message: string): never;
+/** Whether a value is anything other than an object: a list counts as an object, and null does not. */
+export declare function notObject(value: unknown): boolean;
 /** Runs `work` on one body of the input, and marks a refusal that comes out of it with that body. */
 export declare function forBody<T>(body: number, work: () => T): T;

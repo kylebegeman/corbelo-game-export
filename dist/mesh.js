@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { badRefinement } from "./errors.js";
 /**
  * A triangle is degenerate, and dropped, when two of its corners weld to one vertex or when its
  * three corners lie on one line: twice its area is under this fraction of its longest edge squared.
@@ -507,7 +507,7 @@ export function buildMesh(points, indices, faceIds, options, coarse) {
             const within = `${coarse.where}: triangle ${input} is said to lie in triangle ${named}${coarse.meshes.length > 1 ? ` of surface ${surface}` : ""} of the mesh it refines`;
             const kept = coarse.keptOf[surface][named];
             if (kept < 0)
-                refuse("BAD_REFINEMENT", `${within}, but that triangle has no area.`);
+                badRefinement(`${within}, but that triangle has no area.`);
             const mesh = coarse.meshes[surface];
             const fan = (fans[surface] ??= fansOf(mesh));
             coarseSurface[t] = surface;
@@ -522,7 +522,7 @@ export function buildMesh(points, indices, faceIds, options, coarse) {
                 const reach = Math.max(2 * options.weldTolerance, REFINEMENT_REACH * Math.sqrt(longest));
                 const away = Math.sqrt(found[0]);
                 if (!(away <= reach)) {
-                    refuse("BAD_REFINEMENT", `${within}, but one of its corners is ${away.toPrecision(3)} m away from the mesh there. A corner may be ${reach.toPrecision(3)} m away at most.`);
+                    badRefinement(`${within}, but one of its corners is ${away.toPrecision(3)} m away from the mesh there. A corner may be ${reach.toPrecision(3)} m away at most.`);
                 }
                 cornerTriangle[corner] = here;
                 onVertices(mesh.positions, a, b, c, weights, options.weldTolerance, cornerOn, corner * 3);

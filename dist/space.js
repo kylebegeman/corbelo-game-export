@@ -1,6 +1,6 @@
-import { refuse } from "./errors.js";
+import { notObject, refuse } from "./errors.js";
 export function spaceConversion(source) {
-    if (typeof source !== "object" || source === null)
+    if (notObject(source))
         refuse("BAD_SOURCE_SPACE", "source must be { unit, up }.");
     if (!(Number.isFinite(source.unit) && source.unit > 0)) {
         refuse("BAD_SOURCE_SPACE", `source.unit must be a positive number of metres per source unit (0.001 for millimetres). Got ${String(source.unit)}.`);

@@ -1,0 +1,148 @@
+import { type MessageCatalog } from "./message-fill.js";
+/**
+ * What every check says, in English, by message key. A key is the id of a check, then what the
+ * check found: `size.expected`. The key of a reason is the key of its message, then `.reason`.
+ * A part of a message that has a template of its own has a key of the same kind.
+ *
+ * A template names the values it is filled with in braces. `{count, plural, one {# body} other
+ * {# bodies}}` picks by a number, `{mode, select, center {...} other {...}}` picks by a text, and
+ * `{names, join, with {, }}` writes a list with what is to stand between its items.
+ */
+export declare const ENGLISH_MESSAGES: {
+    readonly "size.expected": "The asset is {longest} {unit} on its longest side, a size a {assetClass, select, small-prop {small prop} large-prop {large prop} other {kit piece}} has.";
+    readonly "size.unexpected": "The asset is {longest} {unit} on its longest side, and a {assetClass, select, small-prop {small prop} large-prop {large prop} other {kit piece}} is expected to be from {min} to {max} m.";
+    readonly "size.units": "The asset is {longest} {unit} on its longest side, and a {assetClass, select, small-prop {small prop} large-prop {large prop} other {kit piece}} is expected to be from {min} to {max} m. This looks like {read, select, millimetres {millimetres} centimetres {centimetres} inches {inches} other {metres}} read as {as, select, millimetres {millimetres} centimetres {centimetres} inches {inches} other {metres}}: a scale of {scale} would fit.";
+    readonly "pivot.off-grid": "{count, plural, one {# body has} other {# bodies have}} a pivot off the {grid} m grid, so the kit piece will not snap into place.";
+    readonly "pivot.far": "{count, plural, one {# body has} other {# bodies have}} a pivot further from the body than the body is long.";
+    readonly "pivot.none": "There are no bodies.";
+    readonly "pivot.same": "The pivot is at {mode, select, base-center {the middle of the base} center {the middle of the body} min-corner {the lowest corner of the box around the body} origin {the origin the body was modelled around} other {a point that was given}}{offGrid, plural, =0 {, on the {grid} m grid} other {}}.";
+    readonly "pivot.own": "Each body has a pivot of its own: {bodies, join, with {, }}{offGrid, plural, =0 {. All are on the {grid} m grid} other {}}.";
+    readonly "pivot.body": "\"{name}\" at {mode, select, base-center {the middle of the base} center {the middle of the body} min-corner {the lowest corner of the box around the body} origin {the origin the body was modelled around} other {a point that was given}}";
+    readonly "triangles.budget": "{count} triangles, against a budget of {budget} for a {assetClass, select, small-prop {small prop} large-prop {large prop} other {kit piece}}.";
+    readonly "vertices.budget": "{count} vertices after hard edges split, against a budget of {budget} for a {assetClass, select, small-prop {small prop} large-prop {large prop} other {kit piece}}.";
+    readonly "shading.no-normals": "A body has no normals.";
+    readonly "shading.back-facing": "{count, plural, one {# corner has} other {# corners have}} a normal that points away from its own triangle.";
+    readonly "shading.wide": "A normal is {angle} degrees from the face it shades, over {limit}. A lower crease angle would make that edge hard. {hard, plural, one {# hard edge} other {# hard edges}} and {soft, plural, one {# soft edge} other {# soft edges}}. Normals are weighted by {normals, select, face-weighted {the whole flat face each triangle belongs to} other {the area and angle of each triangle}}.";
+    readonly "shading.edges": "{hard, plural, one {# hard edge} other {# hard edges}} and {soft, plural, one {# soft edge} other {# soft edges}}. Normals are weighted by {normals, select, face-weighted {the whole flat face each triangle belongs to} other {the area and angle of each triangle}}.{normals, select, face-weighted {} other { Weighting by the whole flat face is there to ask for.}}";
+    readonly "clean-mesh.found": "The mesh has {found, join, with {, }}.";
+    readonly "clean-mesh.clean": "Every body is closed, faces outwards and has no sliver triangles.";
+    readonly "clean-mesh.flipped": "{count, plural, one {# edge} other {# edges}} between faces that point opposite ways";
+    readonly "clean-mesh.inside-out": "{count, plural, one {# body} other {# bodies}} turned inside out";
+    readonly "clean-mesh.non-manifold": "{count, plural, one {# edge} other {# edges}} shared by more than two triangles";
+    readonly "clean-mesh.open": "{count, plural, one {# open edge} other {# open edges}}";
+    readonly "clean-mesh.slivers": "{count, plural, one {# sliver triangle} other {# sliver triangles}}";
+    readonly "clean-mesh.dropped": "{count, plural, one {# triangle} other {# triangles}} with no area left out";
+    readonly "material-slots.budget": "{count, plural, one {# material slot} other {# material slots}} on the body with the most, against a budget of {budget} for a {assetClass, select, small-prop {small prop} large-prop {large prop} other {kit piece}}.";
+    readonly "collision.none": "The file has no collision shape.";
+    readonly "collision.none.reason": "No collision was written with the file. Write it again with a collision shape to have it measured.";
+    readonly "collision.beyond": 'The collision of "{name}" ({shape}, {pieces, plural, one {# piece} other {# pieces}}) is {percent}% {direction, select, more {more} other {less}} volume than the visible part, over the {allowed}% allowed.{advice}';
+    readonly "collision.nearer.refused": " A kernel was given, but no convex decomposition was made. {why}";
+    readonly "collision.nearer.most": " \"{name}\" was cut into {pieces, plural, one {# convex piece} other {# convex pieces}}, the most allowed. {given, plural, =0 {More pieces, or the pieces the part was built from,} other {More pieces}} would bring it nearer.";
+    readonly "collision.nearer.cut": " \"{name}\" was cut into {pieces, plural, one {# convex piece} other {# convex pieces}}, and no further cut that fits brought it nearer.{given, plural, =0 { The pieces the part was built from would.} other {}}";
+    readonly "collision.nearer.pieces": " The pieces the part was built from would bring it nearer.";
+    readonly "collision.nearer.kernel": "{given, plural, =0 { The pieces the part was built from, or a solid kernel to cut it into convex pieces, would bring it nearer.} other { A solid kernel to cut it into convex pieces would bring it nearer.}}";
+    readonly "collision.missing": "{count, plural, one {# body has} other {# bodies have}} no collision shape.";
+    readonly "collision.inwards": 'A collision shape was written, but {names, join, with {, } each {"#"}} {count, plural, one {encloses} other {enclose}} no volume.';
+    readonly "collision.inwards.reason": "{why, join, with {, and }}, so {count, plural, one {it encloses} other {they enclose}} no volume to compare the collision volume with. Turn the faces to point outwards to have its collision measured.";
+    readonly "collision.open": 'A collision shape was written, but {names, join, with {, } each {"#"}} {count, plural, one {is} other {are}} not closed.';
+    readonly "collision.open.reason": "{why, join, with {, and }}, so {count, plural, one {it encloses} other {they enclose}} no volume to compare the collision volume with. Close the mesh to have its collision measured.";
+    readonly "collision.has-edges": '"{name}" has {edges, join, with { and }}';
+    readonly "collision.faces-inwards": '"{name}" is closed with its faces pointing inwards';
+    readonly "collision.within": "Collision in {pieces, plural, one {# convex piece} other {# convex pieces}}, within {percent}% of the visible volume.";
+    readonly "collision.within-each": "Collision in {pieces, plural, one {# convex piece} other {# convex pieces}}, each body within the share of its visible volume allowed for it.";
+    readonly "detail-levels.none": "The file has no lower detail levels.";
+    readonly "detail-levels.none.reason": "No body was given lower detail levels. Engines that make their own levels on import need none.";
+    readonly "detail-levels.found": "Detail levels: {found, join, with {; }}.";
+    readonly "detail-levels.more": 'level {level} of "{name}" has more triangles than level {above}';
+    readonly "detail-levels.same": 'level {level} of "{name}" has as many triangles as level {above}';
+    readonly "detail-levels.open": 'level {level} of "{name}" is not closed, and level 0 is';
+    readonly "detail-levels.moved": "level {level} of \"{name}\" moves the outline by {percent}% of the body's size";
+    readonly "detail-levels.smaller": "{count, plural, one {# lower detail level} other {# lower detail levels}}, each smaller than the one above and within {percent}% of the outline.";
+    readonly "player-openings.expected": "An opening for {player} was expected, and none was found.";
+    readonly "player-openings.none": "The asset has no opening for a player to pass.";
+    readonly "player-openings.none.reason": "No opening closed over the top was found along the X or Z axis. A gap that is open to the sky is not counted.";
+    readonly "player-openings.passes": "{player} (a capsule {width} m wide and {height} m tall) passes an opening {openingWidth} m wide and {openingHeight} m tall.";
+    readonly "player-openings.sill": "{player} fits an opening, but its sill is {sill} m up and this player steps up {step} m.";
+    readonly "player-openings.fits-none": "{player} (a capsule {width} m wide and {height} m tall) fits none of {count, plural, one {# opening} other {# openings}}. The largest is {openingWidth} m wide and {openingHeight} m tall.";
+    readonly "player-steps.expected": "Steps were expected, and none were found.";
+    readonly "player-steps.none": "The asset has no steps.";
+    readonly "player-steps.none.reason": "No two rises in a row of {limit} m or less were found between flat levels a player can stand on.";
+    readonly "player-steps.climbed": "{count, plural, one {# rise} other {# rises}} of up to {rise} m, and {player} steps up {step} m.";
+    readonly "player-steps.tall": "The tallest rise is {rise} m, and {step, plural, =0 {{player} climbs no steps} other {{player} steps up # m}}.{clears, plural, =0 {} other { A jump clears it, or collision can be a ramp.}}";
+    readonly "player-ramps.expected": "A ramp was expected, and none was found.";
+    readonly "player-ramps.none": "The asset has no ramps.";
+    readonly "player-ramps.none.reason": "No flat slope from {min} to {max} degrees was found that is large enough to stand on.";
+    readonly "player-ramps.steep": "{count, plural, one {# slope is} other {# slopes are}} steeper than the {walkable} degrees {player} walks up. The steepest is {steepest} degrees.";
+    readonly "player-ramps.walked": "{count, plural, one {# slope} other {# slopes}} of up to {steepest} degrees, and {player} walks up {walkable}.";
+    readonly "on-grid.off": "Off the grid of {module} m by {storey} m: {off, join, with {; }}.";
+    readonly "on-grid.size": '"{piece}" is {modules, join, with { by }} modules';
+    readonly "on-grid.pivot": 'the pivot of "{piece}" is {meters} m from a corner of the grid';
+    readonly "on-grid.socket": 'a socket of "{piece}" is {meters} m from the face of its cell';
+    readonly "on-grid.whole": "{count, plural, one {# piece} other {# pieces}} of whole modules of {module} m and storeys of {storey} m, each with its pivot on a corner of the grid.";
+    readonly "seams.no-sockets": "The kit has no sockets.";
+    readonly "seams.no-sockets.reason": "No piece was given a socket, so no two pieces are said to meet.";
+    readonly "seams.empty": "Nothing of the piece lies on the plane of {count, plural, one {# socket} other {# sockets}}: {sockets, join, with {, }}{more, plural, =0 {} other {, ...}}.";
+    readonly "seams.differ": 'Sockets of type "{type}" do not have one outline: {a} and {b} differ by {area} m2.';
+    readonly "seams.no-pairs": "No two sockets of the kit can meet.";
+    readonly "seams.no-pairs.reason": "Every socket type is used once, or only on sides that never face each other.";
+    readonly "seams.match": "{count, plural, one {# pair} other {# pairs}} of sockets that can meet, each with one outline to within {area} m2.";
+    readonly "in-cells.out": "Out of its cells: {out, join, with {; }}.";
+    readonly "in-cells.piece": '"{piece}" reaches {meters} m past its cells';
+    readonly "in-cells.trim": 'the trim of "{piece}" reaches {meters} m past its cells, and trim may reach {allowed} m';
+    readonly "in-cells.in": "Every piece stays in its cells.";
+    readonly "in-cells.in-with-trim": "Every piece stays in its cells, and trim reaches at most {meters} m past them.";
+    readonly "layouts.none": "No test layout could be built from the kit's sockets.";
+    readonly "layouts.none.reason": "{skipped, join, with { }}";
+    readonly "layouts.left-out": '"{name}": {reason}';
+    readonly "layouts.skipped.no-piece": "No piece has {layout, select, run {two sockets on opposite sides of one storey} tee {three sockets on one storey} cross {four sockets on one storey} rise {two sockets on different storeys} other {two sockets at a right angle on one storey}}.";
+    readonly "layouts.skipped.no-mate": 'No piece has a socket that meets a socket of "{piece}".';
+    readonly "layouts.skipped.no-row": 'The sockets of "{piece}" do not meet each other, so no two through pieces go in a row.';
+    readonly "layouts.skipped.no-ring": 'Four of "{piece}"{throughs, plural, =0 {} other { with a through piece between each two}} do not close a ring.';
+    readonly "layouts.open": "Layouts do not close: {layouts, join, with {; }}.";
+    readonly "layouts.layout": '"{name}": {found, join, with {, }}';
+    readonly "layouts.doubled": "{count, plural, one {# cell has} other {# cells have}} two pieces in it";
+    readonly "layouts.blocked": "{count, plural, one {# socket faces} other {# sockets face}} a side with no socket";
+    readonly "layouts.mismatched": "{count, plural, one {# joint has} other {# joints have}} two types that do not meet";
+    readonly "layouts.apart": "{count, plural, one {# joint does} other {# joints do}} not touch";
+    readonly "layouts.apart-by": "{count, plural, one {# joint does} other {# joints do}} not touch, {meters} m apart at most";
+    readonly "layouts.overlap": "a piece reaches {meters} m into the piece it meets";
+    readonly "layouts.trim": "trim runs into the piece next to it by {volume} m3";
+    readonly "layouts.no-joints": "no two sockets meet";
+    readonly "layouts.no-kernel": "Every joint touches, but trim reaches the box of a body next to it in {count, plural, one {# place} other {# places}}, and whether it runs into that body was not measured.";
+    readonly "layouts.no-kernel.reason": "No kernel was given, and measuring what two bodies both fill needs one.";
+    readonly "layouts.not-solid": "Every joint touches, but trim reaches the box of a body next to it in {count, plural, one {# place} other {# places}}, and whether it runs into that body was not measured.";
+    readonly "layouts.not-solid.reason": 'The kernel could not make solids of "{trim}" of "{piece}" against "{body}" of "{other}": a body that is not closed has no inside to measure.';
+    readonly "layouts.closed": "{count, plural, one {# layout} other {# layouts}} ({names, join, with {, }}) with {joints, plural, one {# joint} other {# joints}}, each touching with no overlap.";
+    readonly "corners.differ": "No seam has points to compare.";
+    readonly "corners.differ.reason": "The outlines of the sockets that can meet differ, so they have no shared seam to compare points along. Seams match says by how much.";
+    readonly "corners.no-pairs": "No seam has points to compare.";
+    readonly "corners.no-pairs.reason": "No two sockets of the kit can meet.";
+    readonly "corners.off": "{count, plural, one {# point} other {# points}} of a seam lie off the outline they meet, by up to {meters} m: {a} and {b}.";
+    readonly "corners.on-edge": "{count, plural, one {# point} other {# points}} of a seam lie along an edge of the outline they meet, where it has no point: {a} and {b}. The outlines agree, but a renderer can show a crack there.";
+    readonly "corners.match": "{points, plural, one {# point} other {# points}} along {seams, plural, one {# seam} other {# seams}}, each on a point of the outline it meets.";
+    readonly "walkable.blocked": "Not walkable for {player}: {found, join, with {; }}{more, plural, =0 {} other {; and # more}}.";
+    readonly "walkable.narrow": 'the player does not fit through {socket} of "{piece}": the opening is {width} m wide and {height} m tall';
+    readonly "walkable.shut": 'the way through {socket} of "{piece}" is shut';
+    readonly "walkable.rise": '"{piece}" has a rise of {rise} m, and {step, plural, =0 {this player climbs no steps} other {the player steps up # m}}';
+    readonly "walkable.slope": '"{piece}" has a slope of {degrees} degrees, and the player walks up {walkable}';
+    readonly "walkable.floor": "the floor at {a} is {meters} m from the floor at {b}";
+    readonly "walkable.nothing": "The kit has nothing said to be walked through.";
+    readonly "walkable.nothing.reason": "No socket on a side is marked as a passage, and no piece has a slope large enough to stand on.";
+    readonly "walkable.passes": "{player} (a capsule {width} m wide and {height} m tall) passes {count, plural, one {# passage} other {# passages}}, with rises of up to {rise} m and slopes of up to {slope} degrees.";
+    readonly "collision-tiles.no-sockets": "The kit has no sockets.";
+    readonly "collision-tiles.no-sockets.reason": "No piece was given a socket, so no two pieces are said to meet.";
+    readonly "collision-tiles.no-shapes": "The pieces bring no collision shapes.";
+    readonly "collision-tiles.no-shapes.reason": "The kit was written with collision set to none.";
+    readonly "collision-tiles.missing": "{count, plural, one {# piece has} other {# pieces have}} sockets and no collision shape, next to pieces that have one: {pieces, join, with {, }}.";
+    readonly "collision-tiles.empty": "No collision shape reaches the plane of {count, plural, one {# socket} other {# sockets}}: {sockets, join, with {, }}{more, plural, =0 {} other {, ...}}.";
+    readonly "collision-tiles.lip": 'The collision at sockets of type "{type}" does not meet flush: {a} and {b} differ by {area} m2, a lip a moving body can catch on.';
+    readonly "collision-tiles.no-pairs": "No two sockets of the kit can meet.";
+    readonly "collision-tiles.no-pairs.reason": "Every socket type is used once, or only on sides that never face each other.";
+    readonly "collision-tiles.flush": "The collision shapes at {count, plural, one {# pair} other {# pairs}} of sockets meet flush, to within {area} m2.";
+};
+/** A key of the catalog. */
+export type MessageKey = keyof typeof ENGLISH_MESSAGES;
+/** Every key of the catalog, in the order the checks come in. */
+export declare const MESSAGE_KEYS: readonly MessageKey[];
+/** The keys of the English catalog that a catalog has no template for. Empty for a whole catalog. */
+export declare function missingMessageKeys(catalog: MessageCatalog): MessageKey[];

@@ -1,3 +1,4 @@
+import type { MessageValues } from "./messages.js";
 import type { AssetBodyInput, AssetOptions, JsonValue, PackFacts, SourceSpace, Vec3 } from "./types.js";
 /**
  * A side of a cell, in the kit's own frame: X to the right, Y away and Z up, right-handed. For
@@ -91,7 +92,7 @@ export interface KitLayout {
     origin: "generated" | "given";
     placements: KitPlacement[];
 }
-export interface KitInput extends Omit<AssetOptions, "pivot" | "placement"> {
+export interface KitInput extends Omit<AssetOptions, "pivot" | "pivots" | "placement" | "collisions"> {
     /** The kit's name: "corridor". */
     name: string;
     source: SourceSpace;
@@ -231,6 +232,14 @@ export interface LayoutJoints {
 export declare function layoutJoints(kit: Pick<Kit, "pieces" | "mates">, layout: Pick<KitLayout, "name" | "placements">): LayoutJoints;
 /** The names of the test layouts, in the order they come. */
 export declare const KIT_LAYOUT_NAMES: readonly ["run", "corner", "tee", "cross", "rise", "room"];
+/** A test layout the kit has no pieces for, and why: in English, and as a key of the message catalog with the values that fill it. */
+export interface SkippedLayout {
+    name: string;
+    reason: string;
+    /** Not on a report written before version 0.1.8. */
+    reasonKey?: string;
+    reasonValues?: MessageValues;
+}
 /**
  * Builds the test layouts from the sockets alone: a straight run, a corner, a tee, a crossing,
  * a rise from one storey to the next and a closed room. A layout the kit has no pieces for is
@@ -242,8 +251,5 @@ export declare const KIT_LAYOUT_NAMES: readonly ["run", "corner", "tee", "cross"
  */
 export declare function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): {
     layouts: KitLayout[];
-    skipped: {
-        name: string;
-        reason: string;
-    }[];
+    skipped: SkippedLayout[];
 };

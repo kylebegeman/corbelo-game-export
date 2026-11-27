@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { notObject, refuse } from "./errors.js";
 import { safeName } from "./names.js";
 /** Used when a body has no colour. */
 export const DEFAULT_COLOR = "#cccccc";
@@ -42,7 +42,7 @@ function namedColors(body, colorSpace, where) {
     const names = body.faceMaterialNames;
     if (names === undefined)
         return named;
-    if (typeof names !== "object" || names === null || Array.isArray(names)) {
+    if (notObject(names) || Array.isArray(names)) {
         refuse("BAD_NAME", `${where}: faceMaterialNames must be an object of colours and the material name of each, like { "#3a7bd5": "Blue" }.`);
     }
     for (const [key, name] of Object.entries(names)) {

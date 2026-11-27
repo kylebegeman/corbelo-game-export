@@ -1,7 +1,7 @@
 export { exportGameAsset } from "./asset.js";
 export { exportBlockout } from "./blockout.js";
 export { ASSET_BUDGETS, ASSET_SIZE_RANGES, CHECK_IDS, checkGameAsset, DEFAULT_ASSET_CLASS, DEFAULT_GRID_METERS, DEFAULT_LOD_DEVIATION_SHARE, NORMAL_ANGLE_WARNING_DEGREES, OPENING_GRID_CELLS, PLAYER_PROFILES, RAMP_MAX_DEGREES, RAMP_MIN_DEGREES, SLIVER_AREA_RATIO, STEP_MAX_RISE_METERS, } from "./checks.js";
-export { DECOMPOSITION_CUTS_PER_AXIS, DEFAULT_COLLISION_TOLERANCE, DEFAULT_MAX_COLLISION_PIECES, DEFAULT_MAX_HULL_VERTICES, manifoldKernel, } from "./collision.js";
+export { DECOMPOSITION_CUTS_PER_AXIS, DEFAULT_COLLISION_TOLERANCE, DEFAULT_MAX_COLLISION_PIECES, DEFAULT_MAX_HULL_VERTICES, decomposeSolid, manifoldKernel, } from "./collision.js";
 export { GameExportError } from "./errors.js";
 export { DEFAULT_CREASE_ANGLE, DEFAULT_MAX_TRIANGLES, DEFAULT_WELD_TOLERANCE, exportGameGlb } from "./export.js";
 export { readAccessor, readGlb, readPack } from "./glb-read.js";

@@ -1,6 +1,6 @@
-import { type CheckStatus, type PlayerProfile } from "./checks.js";
+import { type PlayerProfile, type ResultBase } from "./checks.js";
 import { type CollisionKernel } from "./collision.js";
-import { type Kit, type KitCell, type KitGrid, type KitGridInput, type KitInput, type KitLayout } from "./kit.js";
+import { type Kit, type KitCell, type KitGrid, type KitGridInput, type KitInput, type KitLayout, type SkippedLayout } from "./kit.js";
 import type { EngineProfileId } from "./profiles.js";
 import type { Vec3 } from "./types.js";
 /** How near is near enough, in metres, when the caller does not say: a tenth of a millimetre. */
@@ -102,10 +102,7 @@ export interface LayoutValues {
         trimPairs: number;
     }[];
     /** Test layouts the kit has no pieces for, and why. */
-    skipped: {
-        name: string;
-        reason: string;
-    }[];
+    skipped: SkippedLayout[];
     kernel: boolean;
 }
 export interface CornerValues {
@@ -170,13 +167,6 @@ export interface CollisionTileValues {
     empty: string[];
     maxMismatchSquareMeters: number;
 }
-interface ResultBase {
-    status: CheckStatus;
-    /** One sentence for a person. */
-    message: string;
-    /** Only with `"not-measured"`: why there is nothing to judge. */
-    reason?: string;
-}
 export type KitCheckResult = (ResultBase & {
     id: "on-grid";
     values: OnGridValues;
@@ -238,4 +228,3 @@ export interface KitCheckReport {
  * Another module size is one call: pass `{ grid }` in the options.
  */
 export declare function checkKit(input: KitInput | Kit, options?: KitCheckOptions): KitCheckReport;
-export {};

@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { badOption, notObject } from "./errors.js";
 import { assertJson } from "./export.js";
 import { readGlb } from "./glb-read.js";
 import { encodeGlb } from "./glb-write.js";
@@ -34,8 +34,8 @@ const TURNS = [[0, 0, 0, 1], [0, HALF, 0, HALF], [0, 1, 0, 0], [0, -HALF, 0, HAL
  * cell and quarter turn. The same input always gives the same bytes.
  */
 export function exportBlockout(input, layout, options = {}) {
-    if (typeof options !== "object" || options === null)
-        refuse("BAD_OPTION", "Blockout options must be an object.");
+    if (notObject(options))
+        badOption("Blockout options must be an object.");
     if (options.provenance !== undefined)
         assertJson(options.provenance, "provenance", 0);
     const kit = kitOf(input);

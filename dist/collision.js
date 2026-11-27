@@ -1,4 +1,4 @@
-import { NO_DECOMPOSITION, refuse } from "./errors.js";
+import { badOption, NO_DECOMPOSITION, notObject, refuse } from "./errors.js";
 import { convexHull, meshVolume } from "./hull.js";
 /** The collision volume may differ from the visible part's by this share before `auto` moves on. */
 export const DEFAULT_COLLISION_TOLERANCE = 0.05;
@@ -22,22 +22,23 @@ export function manifoldKernel(module) {
     return { solid: (positions, indices) => new module.Manifold(new module.Mesh({ numProp: 3, vertProperties: positions, triVerts: indices })) };
 }
 /** Reads the `collision` option: a shape by name, or settings. Refuses anything else. */
-export function readCollisionSettings(option) {
+/** Reads collision settings. What they leave out is taken from `base`: the settings of the asset, for those of one body. */
+export function readCollisionSettings(option, base) {
     const given = option === undefined ? {} : typeof option === "string" ? { shape: option } : option;
-    if (typeof given !== "object" || given === null)
-        refuse("BAD_OPTION", `collision must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")} or { shape, tolerance, maxPieces, maxHullVertices }.`);
-    const shape = given.shape ?? "auto";
+    if (notObject(given))
+        badOption(`collision must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")} or { shape, tolerance, maxPieces, maxHullVertices }.`);
+    const shape = given.shape ?? base?.shape ?? "auto";
     if (!REQUESTS.includes(shape))
-        refuse("BAD_OPTION", `collision shape must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(shape)}.`);
-    const tolerance = given.tolerance ?? DEFAULT_COLLISION_TOLERANCE;
+        badOption(`collision shape must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(shape)}.`);
+    const tolerance = given.tolerance ?? base?.tolerance ?? DEFAULT_COLLISION_TOLERANCE;
     if (!(Number.isFinite(tolerance) && tolerance >= 0))
-        refuse("BAD_OPTION", `collision tolerance must be zero or a positive share of the visible volume, like 0.05. Got ${String(tolerance)}.`);
-    const maxPieces = given.maxPieces ?? DEFAULT_MAX_COLLISION_PIECES;
+        badOption(`collision tolerance must be zero or a positive share of the visible volume, like 0.05. Got ${String(tolerance)}.`);
+    const maxPieces = given.maxPieces ?? base?.maxPieces ?? DEFAULT_MAX_COLLISION_PIECES;
     if (!(Number.isInteger(maxPieces) && maxPieces >= 1))
-        refuse("BAD_OPTION", `collision maxPieces must be a whole number of at least 1. Got ${String(maxPieces)}.`);
-    const maxHullVertices = given.maxHullVertices ?? DEFAULT_MAX_HULL_VERTICES;
+        badOption(`collision maxPieces must be a whole number of at least 1. Got ${String(maxPieces)}.`);
+    const maxHullVertices = given.maxHullVertices ?? base?.maxHullVertices ?? DEFAULT_MAX_HULL_VERTICES;
     if (!(Number.isInteger(maxHullVertices) && maxHullVertices >= 4))
-        refuse("BAD_OPTION", `collision maxHullVertices must be a whole number of at least 4. Got ${String(maxHullVertices)}.`);
+        badOption(`collision maxHullVertices must be a whole number of at least 4. Got ${String(maxHullVertices)}.`);
     return { shape, tolerance, maxPieces, maxHullVertices };
 }
 /** The box around points, as a piece: 8 corners and 12 triangles. Null when the box has no volume. */
@@ -87,6 +88,7 @@ export function weldExact(positions, indices) {
         welded[at] = remap[indices[at]];
     return { positions: Float32Array.from(kept), indices: welded };
 }
+const NO_VOLUME = "It encloses no volume. Its faces may point inwards.";
 /** The parts of a decomposition may hold this share more or less volume than the body before the result is not trusted. */
 const DECOMPOSITION_VOLUME_SLACK = 0.001;
 /**
@@ -135,9 +137,10 @@ function solidFault(indices, vertices) {
  * pieces are looked at one cut further, and the one that a second cut gains the most from is
  * taken.
  *
- * Returns the pieces, or the reason there are none.
+ * `visibleVolume` is the volume of the solid itself, and `allowed` how much more the hulls
+ * together may hold. Returns the pieces, or the reason there are none.
  */
-function decompose(source, kernel, visibleVolume, settings) {
+function decompose(source, kernel, visibleVolume, allowed, settings) {
     const alive = new Set();
     const keep = (solid, into) => {
         alive.add(solid);
@@ -227,7 +230,7 @@ function decompose(source, kernel, visibleVolume, settings) {
             return "The kernel made a solid with no volume from the body.";
         for (;;) {
             const excess = parts.reduce((total, part) => total + part.excess, 0);
-            if (excess <= settings.tolerance * visibleVolume || parts.length >= settings.maxPieces)
+            if (excess <= allowed || parts.length >= settings.maxPieces)
                 break;
             let worst = -1;
             for (const [at, part] of parts.entries()) {
@@ -368,7 +371,18 @@ export function planCollision(source, settings, kernel) {
                     return "No kernel was given, and a general convex decomposition needs one.";
                 if (visibleVolume === null)
                     return "A general convex decomposition needs a closed body with a volume.";
-                return decompose(source, kernel, visibleVolume, settings);
+                const allowed = settings.tolerance * visibleVolume;
+                const { remainder } = source;
+                if (remainder === undefined)
+                    return decompose(source, kernel, visibleVolume, allowed, settings);
+                // The pieces given stay as they are, and only the rest of the body is cut up. Together
+                // they are one shape, with no more pieces than a decomposition of the whole body may have.
+                const given = source.pieces?.length ? build("pieces") : [];
+                if (typeof given === "string")
+                    return given;
+                const volume = meshVolume(remainder.positions, remainder.indices);
+                const rest = volume > 0 ? decompose(remainder, kernel, volume, allowed, { ...settings, maxPieces: Math.max(1, settings.maxPieces - given.length) }) : NO_VOLUME;
+                return typeof rest === "string" ? `What was given as the rest of the body was not cut up. ${rest}` : [...given, ...rest];
             }
         }
     };
@@ -420,4 +434,24 @@ export function planCollision(source, settings, kernel) {
     if (chosen === null)
         notes.push("No collision shape could be built.");
     return { requested, chosen, visibleVolume, tried, notes };
+}
+/**
+ * Cuts one closed solid into convex pieces with a kernel, the way the `"decomposition"` shape of
+ * an asset is made, and measures the pieces against the solid. The solid is taken as given, in
+ * its own unit and axes, with its faces pointing outwards. Without indices it is triangle soup.
+ * Refuses a solid that cannot be cut up with `BAD_COLLISION`, and says why.
+ */
+export function decomposeSolid(solid, kernel, settings = {}) {
+    const { tolerance, maxPieces, maxHullVertices } = readCollisionSettings(settings);
+    if (typeof kernel?.solid !== "function")
+        badOption("kernel must be an object with a solid(positions, indices) function.");
+    const positions = solid?.positions ?? [];
+    const indices = solid.indices ?? Uint32Array.from({ length: positions.length / 3 }, (_, at) => at);
+    const solidVolume = meshVolume(positions, indices);
+    const pieces = solidVolume > 0 ? decompose({ positions, indices }, kernel, solidVolume, tolerance * solidVolume, { maxPieces, maxHullVertices }) : NO_VOLUME;
+    if (typeof pieces === "string")
+        refuse("BAD_COLLISION", `${NO_DECOMPOSITION}${pieces}`);
+    const volume = pieces.reduce((total, piece) => total + piece.volume, 0);
+    const error = (volume - solidVolume) / solidVolume;
+    return { pieces: pieces.map(({ kind: _, ...hull }) => hull), volume, solidVolume, error, withinTolerance: Math.abs(error) <= tolerance };
 }

@@ -3,13 +3,16 @@ import { type GltfJson } from "./gltf.js";
 import { type BuiltMesh } from "./mesh.js";
 import { type EngineProfile } from "./profiles.js";
 import { type SpaceConversion } from "./space.js";
-import type { ColorInput, ExportInput, ExportResult, JsonValue, MeasuredBox, PackFacts, SlotFacts, Vec3 } from "./types.js";
+import type { BodyFacts, ColorInput, ExportInput, ExportResult, JsonValue, MeasuredBox, PackFacts, PivotMode, PivotOption, Refinement, SlotFacts, Vec3 } from "./types.js";
 export declare const DEFAULT_CREASE_ANGLE = 30;
 /** Metres. One micron. */
 export declare const DEFAULT_WELD_TOLERANCE = 0.000001;
 /** Triangles across all bodies of one export. Raise or lower it with `maxTriangles`. */
 export declare const DEFAULT_MAX_TRIANGLES = 2000000;
+export declare function isArrayLike(value: unknown): value is ArrayLike<number>;
 export declare function assertJson(value: unknown, path: string, depth: number): void;
+/** Checks a pivot and says its mode. `what` starts the refusal of one that is not a pivot. */
+export declare function readPivot(pivot: PivotOption, what?: string): PivotMode;
 /**
  * Checks the arrays of a mesh and returns how many triangles it has. Refuses anything malformed.
  * `label` starts the message and `what` is the mesh in the middle of a sentence: "the body".
@@ -26,17 +29,22 @@ export declare function boundsOf(positions: ArrayLike<number>): {
 /** glTF metres to the engine's unit, with the up axis moved to the engine's up axis. */
 export declare function toEngine(point: Vec3, profile: EngineProfile): Vec3;
 export declare function measuredBox(min: Vec3, max: Vec3, profile: EngineProfile): MeasuredBox;
+/** What a mesh given `refines` was shaded from, as the facts say it. */
+type ShadedFrom = NonNullable<BodyFacts["shadedFrom"]>;
 /** A lower detail level as the asset exporter hands it over: a mesh that takes colours as its body does. */
 export interface LevelSource {
     positions: ArrayLike<number>;
     indices?: ArrayLike<number>;
     faceIds?: ArrayLike<number>;
     faceColors?: readonly (ColorInput | null | undefined)[];
+    refines?: Refinement;
 }
 /** What the asset exporter adds to a plain export. Nothing here changes what a plain export writes. */
 export interface SceneExtension {
     /** The function a person called, for the message of a refusal. */
     caller?: string;
+    /** For each body, a pivot of its own that was checked, or nothing for the pivot of the export. */
+    pivots?: readonly (PivotOption | undefined)[];
     /** For each body, its lower detail levels, the nearest to full detail first. */
     levels?: readonly (readonly LevelSource[] | undefined)[];
     /**
@@ -68,6 +76,8 @@ export interface DraftMesh {
     /** Index in the glTF `meshes` array. */
     meshIndex: number;
     slots: SlotFacts[];
+    /** Only for a lower level given `refines`: what its shading was taken from. */
+    shadedFrom?: ShadedFrom;
 }
 export interface DraftBody extends DraftMesh {
     /** In glTF space, before it was taken off the positions. */
@@ -99,3 +109,4 @@ export declare function finishScene(draft: SceneDraft): ExportResult;
  * from the geometry that was written. Throws `GameExportError` for input it refuses.
  */
 export declare function exportGameGlb(input: ExportInput): ExportResult;
+export {};

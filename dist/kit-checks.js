@@ -1,6 +1,6 @@
-import { openingsAlong, playerName, resolvePlayer, STEP_MAX_RISE_METERS, walkable } from "./checks.js";
+import { adder, counted, openingsAlong, part, playerName, plural, resolvePlayer, round, STEP_MAX_RISE_METERS, textOf, walkable } from "./checks.js";
 import { weldExact } from "./collision.js";
-import { GameExportError, refuse } from "./errors.js";
+import { badOption, GameExportError, notObject } from "./errors.js";
 import { readAccessor, readGlb, readPack } from "./glb-read.js";
 import { cellSize, kitLayouts, kitOf, layoutJoints, mateOf, placePoint, sideAxis, sideSign, socketFrame, } from "./kit.js";
 import { GENERATOR } from "./version.js";
@@ -10,12 +10,17 @@ export const DEFAULT_KIT_TOLERANCE_METERS = 0.0001;
 export const SEAM_LINES = 512;
 /** The seven kit checks, in the order the results come in. */
 export const KIT_CHECK_IDS = ["on-grid", "seams", "in-cells", "layouts", "corners", "walkable", "collision-tiles"];
-function round(value, digits = 6) {
-    const scale = 10 ** digits;
-    return Math.round(value * scale) / scale + 0;
+const NO_SOCKETS = ["no-sockets", "The kit has no sockets.", "No piece was given a socket, so no two pieces are said to meet."];
+const NO_PAIRS = ["no-pairs", "No two sockets of the kit can meet.", "Every socket type is used once, or only on sides that never face each other."];
+/** The first few of the sockets a check found wrong, for a message and as the values that rebuild it. */
+function few(sockets) {
+    const shown = sockets.slice(0, 4);
+    const more = sockets.length - shown.length;
+    return { text: `${plural(sockets.length, "socket")}: ${shown.join(", ")}${more > 0 ? ", ..." : ""}.`, said: { count: sockets.length, sockets: shown, more } };
 }
-function plural(count, one, many = `${one}s`) {
-    return `${count} ${count === 1 ? one : many}`;
+/** The two sockets of a type that differ the most, and by how much. */
+function differing(worst) {
+    return { type: worst.type, a: worst.worst[0], b: worst.worst[1], area: round(worst.mismatchSquareMeters, 6) };
 }
 function geometryOf(piece) {
     const document = readGlb(piece.glb);
@@ -655,20 +660,21 @@ function seamTypes(kit, entries, faceOfEntry, tolerance, pairs) {
  * Another module size is one call: pass `{ grid }` in the options.
  */
 export function checkKit(input, options = {}) {
-    if (typeof options !== "object" || options === null)
-        refuse("BAD_OPTION", "Check options must be an object.");
+    if (notObject(options))
+        badOption("Check options must be an object.");
     const kit = kitOf(input, options.grid);
     const tolerance = options.toleranceMeters ?? DEFAULT_KIT_TOLERANCE_METERS;
     if (!(Number.isFinite(tolerance) && tolerance > 0))
-        refuse("BAD_OPTION", `toleranceMeters must be a positive number of metres. Got ${String(tolerance)}.`);
-    if (options.kernel !== undefined && (typeof options.kernel !== "object" || options.kernel === null || typeof options.kernel.solid !== "function")) {
-        refuse("BAD_OPTION", "kernel must be an object with a solid(positions, indices) function.");
+        badOption(`toleranceMeters must be a positive number of metres. Got ${String(tolerance)}.`);
+    if (options.kernel !== undefined && (notObject(options.kernel) || typeof options.kernel.solid !== "function")) {
+        badOption("kernel must be an object with a solid(positions, indices) function.");
     }
     const kernel = options.kernel;
     const player = resolvePlayer(options.player, kit.profile);
     const { grid } = kit;
     const size = cellSize(grid);
     const results = [];
+    const { add, unmeasured } = adder(results, KIT_CHECK_IDS);
     const geometry = new Map(kit.pieces.map((piece) => [piece.name, geometryOf(piece)]));
     const entries = kit.pieces.flatMap((piece) => {
         const { visible, collision } = geometry.get(piece.name);
@@ -704,17 +710,22 @@ export function checkKit(input, options = {}) {
             values.pieces.push({ piece: piece.name, cells: piece.cells, sizeMeters, modules, sizeOffMeters: round(sizeOff), pivotOffMeters: round(pivotOff), socketOffMeters: round(socketOff) });
             const worst = Math.max(sizeOff, pivotOff, socketOff);
             values.worstMeters = Math.max(values.worstMeters, round(worst));
+            const say = (found, text, value) => {
+                off.push(part(text, `on-grid.${found}`, { piece: piece.name, ...value }));
+            };
+            const whole = modules.map((value) => round(value, 4));
             if (sizeOff > tolerance)
-                off.push(`"${piece.name}" is ${modules.map((value) => round(value, 4)).join(" by ")} modules`);
+                say("size", `"${piece.name}" is ${whole.join(" by ")} modules`, { modules: whole });
             if (pivotOff > tolerance)
-                off.push(`the pivot of "${piece.name}" is ${round(pivotOff, 4)} m from a corner of the grid`);
+                say("pivot", `the pivot of "${piece.name}" is ${round(pivotOff, 4)} m from a corner of the grid`, { meters: round(pivotOff, 4) });
             if (socketOff > tolerance)
-                off.push(`a socket of "${piece.name}" is ${round(socketOff, 4)} m from the face of its cell`);
+                say("socket", `a socket of "${piece.name}" is ${round(socketOff, 4)} m from the face of its cell`, { meters: round(socketOff, 4) });
         }
+        const said = { module: grid.moduleMeters, storey: grid.storeyMeters };
         if (off.length > 0)
-            results.push({ id: "on-grid", status: "fail", message: `Off the grid of ${grid.moduleMeters} m by ${grid.storeyMeters} m: ${off.join("; ")}.`, values });
+            add("fail", "off", `Off the grid of ${grid.moduleMeters} m by ${grid.storeyMeters} m: ${textOf(off, "; ")}.`, values, { ...said, off });
         else
-            results.push({ id: "on-grid", status: "pass", message: `${plural(kit.pieces.length, "piece")} of whole modules of ${grid.moduleMeters} m and storeys of ${grid.storeyMeters} m, each with its pivot on a corner of the grid.`, values });
+            add("pass", "whole", `${plural(kit.pieces.length, "piece")} of whole modules of ${grid.moduleMeters} m and storeys of ${grid.storeyMeters} m, each with its pivot on a corner of the grid.`, values, { count: kit.pieces.length, ...said });
     }
     // Seams match.
     const faceSide = Math.sqrt(Math.max(grid.moduleMeters * grid.storeyMeters, grid.moduleMeters * grid.moduleMeters));
@@ -725,21 +736,23 @@ export function checkKit(input, options = {}) {
         const values = { toleranceSquareMeters: round(seamTolerance, 9), lineMeters: round(Math.max(grid.moduleMeters, grid.storeyMeters) / SEAM_LINES), types, empty, maxMismatchSquareMeters: max };
         const pairs = types.reduce((total, type) => total + type.pairs, 0);
         const failing = types.filter((type) => type.mismatchSquareMeters > seamTolerance);
+        const area = round(seamTolerance, 6);
         if (entries.length === 0) {
-            results.push({ id: "seams", status: "not-measured", message: "The kit has no sockets.", reason: "No piece was given a socket, so no two pieces are said to meet.", values });
+            unmeasured(...NO_SOCKETS, values);
         }
         else if (empty.length > 0) {
-            results.push({ id: "seams", status: "fail", message: `Nothing of the piece lies on the plane of ${plural(empty.length, "socket")}: ${empty.slice(0, 4).join(", ")}${empty.length > 4 ? ", ..." : ""}.`, values });
+            const { text, said } = few(empty);
+            add("fail", "empty", `Nothing of the piece lies on the plane of ${text}`, values, said);
         }
         else if (failing.length > 0) {
-            const worst = failing.reduce((a, b) => (b.mismatchSquareMeters > a.mismatchSquareMeters ? b : a));
-            results.push({ id: "seams", status: "fail", message: `Sockets of type "${worst.type}" do not have one outline: ${worst.worst.join(" and ")} differ by ${round(worst.mismatchSquareMeters, 6)} m2.`, values });
+            const said = differing(failing.reduce((a, b) => (b.mismatchSquareMeters > a.mismatchSquareMeters ? b : a)));
+            add("fail", "differ", `Sockets of type "${said.type}" do not have one outline: ${said.a} and ${said.b} differ by ${said.area} m2.`, values, said);
         }
         else if (pairs === 0) {
-            results.push({ id: "seams", status: "not-measured", message: "No two sockets of the kit can meet.", reason: "Every socket type is used once, or only on sides that never face each other.", values });
+            unmeasured(...NO_PAIRS, values);
         }
         else {
-            results.push({ id: "seams", status: "pass", message: `${plural(pairs, "pair")} of sockets that can meet, each with one outline to within ${round(seamTolerance, 6)} m2.`, values });
+            add("pass", "match", `${plural(pairs, "pair")} of sockets that can meet, each with one outline to within ${area} m2.`, values, { count: pairs, area });
         }
     }
     // Stays in its cells.
@@ -763,15 +776,21 @@ export function checkKit(input, options = {}) {
             values.pieces.push({ piece: piece.name, pokeMeters, trimPokeMeters });
             values.maxPokeMeters = Math.max(values.maxPokeMeters, pokeMeters);
             values.maxTrimPokeMeters = Math.max(values.maxTrimPokeMeters, trimPokeMeters ?? 0);
+            const meters = round(pokeMeters, 4);
             if (pokeMeters > tolerance)
-                out.push(`"${piece.name}" reaches ${round(pokeMeters, 4)} m past its cells`);
-            if (trimPokeMeters !== null && trimPokeMeters > grid.trimMeters + tolerance)
-                out.push(`the trim of "${piece.name}" reaches ${round(trimPokeMeters, 4)} m past its cells, and trim may reach ${grid.trimMeters} m`);
+                out.push(part(`"${piece.name}" reaches ${meters} m past its cells`, "in-cells.piece", { piece: piece.name, meters }));
+            if (trimPokeMeters !== null && trimPokeMeters > grid.trimMeters + tolerance) {
+                const reach = round(trimPokeMeters, 4);
+                out.push(part(`the trim of "${piece.name}" reaches ${reach} m past its cells, and trim may reach ${grid.trimMeters} m`, "in-cells.trim", { piece: piece.name, meters: reach, allowed: grid.trimMeters }));
+            }
         }
+        const meters = round(values.maxTrimPokeMeters, 4);
         if (out.length > 0)
-            results.push({ id: "in-cells", status: "fail", message: `Out of its cells: ${out.join("; ")}.`, values });
+            add("fail", "out", `Out of its cells: ${textOf(out, "; ")}.`, values, { out });
+        else if (values.maxTrimPokeMeters > tolerance)
+            add("pass", "in-with-trim", `Every piece stays in its cells, and trim reaches at most ${meters} m past them.`, values, { meters });
         else
-            results.push({ id: "in-cells", status: "pass", message: `Every piece stays in its cells${values.maxTrimPokeMeters > tolerance ? `, and trim reaches at most ${round(values.maxTrimPokeMeters, 4)} m past them` : ""}.`, values });
+            add("pass", "in", "Every piece stays in its cells.", values);
     }
     // Layouts close.
     const generated = kitLayouts(kit);
@@ -779,7 +798,7 @@ export function checkKit(input, options = {}) {
     {
         const values = { layouts: [], skipped: generated.skipped, kernel: kernel !== undefined };
         const problems = [];
-        let unmeasured = 0;
+        let unknown = 0;
         let notSolid = null;
         const byName = new Map(kit.pieces.map((piece) => [piece.name, piece]));
         for (const layout of layouts) {
@@ -831,7 +850,7 @@ export function checkKit(input, options = {}) {
                                 const others = placedShells(kernel, solid, otherPlacement, grid, made);
                                 for (const first of placedShells(kernel, trim, placement, grid, made)) {
                                     if (first.intersect === undefined)
-                                        refuse("BAD_OPTION", "The kernel's solids have no intersect(other), which measuring where trim overlaps needs.");
+                                        badOption("The kernel's solids have no intersect(other), which measuring where trim overlaps needs.");
                                     for (const second of others) {
                                         const common = first.intersect(second);
                                         made.push(common);
@@ -842,7 +861,7 @@ export function checkKit(input, options = {}) {
                             catch (error) {
                                 if (error instanceof GameExportError)
                                     throw error;
-                                unsolid.push(`"${trim.name}" of "${placement.piece}" against "${solid.name}" of "${otherPlacement.piece}"`);
+                                unsolid.push({ trim: trim.name, piece: placement.piece, body: solid.name, other: otherPlacement.piece });
                             }
                             finally {
                                 for (const one of made)
@@ -854,7 +873,7 @@ export function checkKit(input, options = {}) {
             }
             const measured = trimPairs === 0 || (kernel !== undefined && unsolid.length === 0);
             if (!measured)
-                unmeasured += kernel === undefined ? trimPairs : unsolid.length;
+                unknown += kernel === undefined ? trimPairs : unsolid.length;
             if (unsolid.length > 0 && notSolid === null)
                 notSolid = unsolid[0];
             values.layouts.push({
@@ -875,41 +894,43 @@ export function checkKit(input, options = {}) {
                 trimPairs,
             });
             const said = [];
-            if (found.doubled.length > 0)
-                said.push(`${plural(found.doubled.length, "cell has", "cells have")} two pieces in it`);
-            if (found.blocked.length > 0)
-                said.push(`${plural(found.blocked.length, "socket faces", "sockets face")} a side with no socket`);
-            if (found.mismatched.length > 0)
-                said.push(`${plural(found.mismatched.length, "joint has", "joints have")} two types that do not meet`);
-            if (apart > 0)
-                said.push(`${plural(apart, "joint does", "joints do")} not touch${maxGap > 0 ? `, ${round(maxGap, 4)} m apart at most` : ""}`);
+            counted(said, found.doubled.length, "layouts.doubled", "cell has", " two pieces in it", "cells have");
+            counted(said, found.blocked.length, "layouts.blocked", "socket faces", " a side with no socket", "sockets face");
+            counted(said, found.mismatched.length, "layouts.mismatched", "joint has", " two types that do not meet", "joints have");
+            if (apart > 0) {
+                const touch = `${plural(apart, "joint does", "joints do")} not touch`;
+                const gap = round(maxGap, 4);
+                said.push(maxGap > 0 ? part(`${touch}, ${gap} m apart at most`, "layouts.apart-by", { count: apart, meters: gap }) : part(touch, "layouts.apart", { count: apart }));
+            }
             if (maxOverlap > tolerance)
-                said.push(`a piece reaches ${round(maxOverlap, 4)} m into the piece it meets`);
+                said.push(part(`a piece reaches ${round(maxOverlap, 4)} m into the piece it meets`, "layouts.overlap", { meters: round(maxOverlap, 4) }));
             if (measured && trimVolume > tolerance ** 3)
-                said.push(`trim runs into the piece next to it by ${round(trimVolume, 6)} m3`);
+                said.push(part(`trim runs into the piece next to it by ${round(trimVolume, 6)} m3`, "layouts.trim", { volume: round(trimVolume, 6) }));
             if (found.joints.length === 0 && said.length === 0 && byName.size > 0)
-                said.push("no two sockets meet");
+                said.push(part("no two sockets meet", "layouts.no-joints"));
             if (said.length > 0)
-                problems.push(`"${layout.name}": ${said.join(", ")}`);
+                problems.push(part(`"${layout.name}": ${textOf(said)}`, "layouts.layout", { name: layout.name, found: said }));
         }
         const joints = values.layouts.reduce((total, layout) => total + layout.joints, 0);
         if (layouts.length === 0) {
-            results.push({ id: "layouts", status: "not-measured", message: "No test layout could be built from the kit's sockets.", reason: generated.skipped.map((skip) => `"${skip.name}": ${skip.reason}`).join(" "), values });
+            const skipped = generated.skipped.map((skip) => part(`"${skip.name}": ${skip.reason}`, "layouts.left-out", { name: skip.name, reason: part(skip.reason, skip.reasonKey, skip.reasonValues) }));
+            unmeasured("none", "No test layout could be built from the kit's sockets.", textOf(skipped, " "), values, { skipped });
         }
         else if (problems.length > 0) {
-            results.push({ id: "layouts", status: "fail", message: `Layouts do not close: ${problems.join("; ")}.`, values });
+            add("fail", "open", `Layouts do not close: ${textOf(problems, "; ")}.`, values, { layouts: problems });
         }
-        else if (unmeasured > 0) {
-            results.push({
-                id: "layouts",
-                status: "not-measured",
-                message: `Every joint touches, but trim reaches the box of a body next to it in ${plural(unmeasured, "place")}, and whether it runs into that body was not measured.`,
-                reason: notSolid === null ? "No kernel was given, and measuring what two bodies both fill needs one." : `The kernel could not make solids of ${notSolid}: a body that is not closed has no inside to measure.`,
-                values,
-            });
+        else if (unknown > 0) {
+            const message = `Every joint touches, but trim reaches the box of a body next to it in ${plural(unknown, "place")}, and whether it runs into that body was not measured.`;
+            if (notSolid === null)
+                unmeasured("no-kernel", message, "No kernel was given, and measuring what two bodies both fill needs one.", values, {}, { count: unknown });
+            else {
+                const { trim, piece, body, other } = notSolid;
+                unmeasured("not-solid", message, `The kernel could not make solids of "${trim}" of "${piece}" against "${body}" of "${other}": a body that is not closed has no inside to measure.`, values, notSolid, { count: unknown });
+            }
         }
         else {
-            results.push({ id: "layouts", status: "pass", message: `${plural(layouts.length, "layout")} (${layouts.map((layout) => layout.name).join(", ")}) with ${plural(joints, "joint")}, each touching with no overlap.`, values });
+            const names = layouts.map((layout) => layout.name);
+            add("pass", "closed", `${plural(layouts.length, "layout")} (${names.join(", ")}) with ${plural(joints, "joint")}, each touching with no overlap.`, values, { count: layouts.length, names, joints });
         }
     }
     // Corners line up.
@@ -948,18 +969,23 @@ export function checkKit(input, options = {}) {
         values.onEdge = total.onEdge;
         values.off = total.off;
         values.maxOffMeters = round(total.maxOff);
+        const [a = "", b = ""] = values.worst ?? [];
         if (values.pairs === 0) {
-            const reason = values.pairsSkipped > 0 ? "The outlines of the sockets that can meet differ, so they have no shared seam to compare points along. Seams match says by how much." : "No two sockets of the kit can meet.";
-            results.push({ id: "corners", status: "not-measured", message: "No seam has points to compare.", reason, values });
+            const message = "No seam has points to compare.";
+            if (values.pairsSkipped > 0)
+                unmeasured("differ", message, "The outlines of the sockets that can meet differ, so they have no shared seam to compare points along. Seams match says by how much.", values);
+            else
+                unmeasured(NO_PAIRS[0], message, NO_PAIRS[1], values);
         }
         else if (values.off > 0) {
-            results.push({ id: "corners", status: "fail", message: `${plural(values.off, "point")} of a seam lie off the outline they meet, by up to ${round(values.maxOffMeters, 5)} m: ${values.worst.join(" and ")}.`, values });
+            const meters = round(values.maxOffMeters, 5);
+            add("fail", "off", `${plural(values.off, "point")} of a seam lie off the outline they meet, by up to ${meters} m: ${a} and ${b}.`, values, { count: values.off, meters, a, b });
         }
         else if (values.onEdge > 0) {
-            results.push({ id: "corners", status: "warn", message: `${plural(values.onEdge, "point")} of a seam lie along an edge of the outline they meet, where it has no point: ${values.worst.join(" and ")}. The outlines agree, but a renderer can show a crack there.`, values });
+            add("warn", "on-edge", `${plural(values.onEdge, "point")} of a seam lie along an edge of the outline they meet, where it has no point: ${a} and ${b}. The outlines agree, but a renderer can show a crack there.`, values, { count: values.onEdge, a, b });
         }
         else {
-            results.push({ id: "corners", status: "pass", message: `${plural(values.points, "point")} along ${plural(values.pairs, "seam")}, each on a point of the outline it meets.`, values });
+            add("pass", "match", `${plural(values.points, "point")} along ${plural(values.pairs, "seam")}, each on a point of the outline it meets.`, values, { points: values.points, seams: values.pairs });
         }
     }
     // Walkable.
@@ -978,6 +1004,9 @@ export function checkKit(input, options = {}) {
             maxRampDegrees: 0,
         };
         const problems = [];
+        const say = (found, text, value) => {
+            problems.push(part(text, `walkable.${found}`, value));
+        };
         const floors = new Map();
         let passages = 0;
         // Floors are read off a picture of the face: good to about two of its cells.
@@ -1016,22 +1045,26 @@ export function checkKit(input, options = {}) {
             passages += found.length;
             for (const passage of found) {
                 floors.set(`${piece.name}/${passage.socket}`, passage.floorMeters);
-                if (!passage.fits) {
-                    problems.push(passage.widthMeters > 0
-                        ? `the player does not fit through ${passage.socket} of "${piece.name}": the opening is ${passage.widthMeters} m wide and ${passage.heightMeters} m tall`
-                        : `the way through ${passage.socket} of "${piece.name}" is shut`);
+                if (passage.fits)
+                    continue;
+                const through = { socket: passage.socket, piece: piece.name };
+                if (passage.widthMeters > 0) {
+                    say("narrow", `the player does not fit through ${passage.socket} of "${piece.name}": the opening is ${passage.widthMeters} m wide and ${passage.heightMeters} m tall`, { ...through, width: passage.widthMeters, height: passage.heightMeters });
                 }
+                else
+                    say("shut", `the way through ${passage.socket} of "${piece.name}" is shut`, through);
             }
             const tallest = Math.max(0, ...rises);
             values.maxRiseMeters = Math.max(values.maxRiseMeters, tallest);
             if (tallest > player.stepHeightM + 0.001) {
-                problems.push(`"${piece.name}" has a rise of ${tallest} m, and ${player.stepHeightM === 0 ? "this player climbs no steps" : `the player steps up ${player.stepHeightM} m`}`);
+                say("rise", `"${piece.name}" has a rise of ${tallest} m, and ${player.stepHeightM === 0 ? "this player climbs no steps" : `the player steps up ${player.stepHeightM} m`}`, { piece: piece.name, rise: tallest, step: player.stepHeightM });
             }
             for (const ramp of ramps)
                 values.maxRampDegrees = Math.max(values.maxRampDegrees, ramp.angleDegrees);
             const steep = ramps.filter((ramp) => !ramp.walkable);
+            const degrees = steep[steep.length - 1]?.angleDegrees ?? 0;
             if (steep.length > 0)
-                problems.push(`"${piece.name}" has a slope of ${steep[steep.length - 1].angleDegrees} degrees, and the player walks up ${player.walkableSlopeDeg}`);
+                say("slope", `"${piece.name}" has a slope of ${degrees} degrees, and the player walks up ${player.walkableSlopeDeg}`, { piece: piece.name, degrees, walkable: player.walkableSlopeDeg });
         }
         // Floors on the two sides of a joint.
         for (const [at, a] of entries.entries()) {
@@ -1046,20 +1079,30 @@ export function checkKit(input, options = {}) {
                 if (step > values.maxFloorStepMeters) {
                     values.maxFloorStepMeters = step;
                     if (step > player.stepHeightM + slack)
-                        problems.push(`the floor at ${a.label} is ${step} m from the floor at ${b.label}`);
+                        say("floor", `the floor at ${a.label} is ${step} m from the floor at ${b.label}`, { a: a.label, meters: step, b: b.label });
                 }
             }
         }
         const ramps = values.pieces.reduce((total, piece) => total + piece.ramps.length, 0);
         if (problems.length > 0) {
-            results.push({ id: "walkable", status: "fail", message: `Not walkable for ${who}: ${problems.slice(0, 4).join("; ")}${problems.length > 4 ? `; and ${problems.length - 4} more` : ""}.`, values });
+            const found = problems.slice(0, 4);
+            const more = problems.length - found.length;
+            add("fail", "blocked", `Not walkable for ${who}: ${textOf(found, "; ")}${more > 0 ? `; and ${more} more` : ""}.`, values, { player: who, found, more });
         }
         else if (passages === 0 && ramps === 0) {
-            results.push({ id: "walkable", status: "not-measured", message: "The kit has nothing said to be walked through.", reason: "No socket on a side is marked as a passage, and no piece has a slope large enough to stand on.", values });
+            unmeasured("nothing", "The kit has nothing said to be walked through.", "No socket on a side is marked as a passage, and no piece has a slope large enough to stand on.", values);
         }
         else {
-            const size = `a capsule ${round(player.capsuleRadiusM * 2, 3)} m wide and ${round(player.capsuleHeightM, 3)} m tall`;
-            results.push({ id: "walkable", status: "pass", message: `${who} (${size}) passes ${plural(passages, "passage")}, with rises of up to ${values.maxRiseMeters} m and slopes of up to ${values.maxRampDegrees} degrees.`, values });
+            const width = round(player.capsuleRadiusM * 2, 3);
+            const height = round(player.capsuleHeightM, 3);
+            add("pass", "passes", `${who} (a capsule ${width} m wide and ${height} m tall) passes ${plural(passages, "passage")}, with rises of up to ${values.maxRiseMeters} m and slopes of up to ${values.maxRampDegrees} degrees.`, values, {
+                player: who,
+                width,
+                height,
+                count: passages,
+                rise: values.maxRiseMeters,
+                slope: values.maxRampDegrees,
+            });
         }
     }
     // Collision tiles.
@@ -1070,27 +1113,30 @@ export function checkKit(input, options = {}) {
         const { types, empty, max } = seamTypes(kit, entries, (entry) => entry.collision, seamTolerance, pairs);
         const values = { toleranceSquareMeters: round(seamTolerance, 9), types, without, empty, maxMismatchSquareMeters: max };
         const failing = types.filter((type) => type.mismatchSquareMeters > seamTolerance);
+        const count = types.reduce((total, type) => total + type.pairs, 0);
+        const area = round(seamTolerance, 6);
         if (withSockets.length === 0) {
-            results.push({ id: "collision-tiles", status: "not-measured", message: "The kit has no sockets.", reason: "No piece was given a socket, so no two pieces are said to meet.", values });
+            unmeasured(...NO_SOCKETS, values);
         }
         else if (without.length === withSockets.length) {
-            results.push({ id: "collision-tiles", status: "not-measured", message: "The pieces bring no collision shapes.", reason: "The kit was written with collision set to none.", values });
+            unmeasured("no-shapes", "The pieces bring no collision shapes.", "The kit was written with collision set to none.", values);
         }
         else if (without.length > 0) {
-            results.push({ id: "collision-tiles", status: "fail", message: `${plural(without.length, "piece has", "pieces have")} sockets and no collision shape, next to pieces that have one: ${without.join(", ")}.`, values });
+            add("fail", "missing", `${plural(without.length, "piece has", "pieces have")} sockets and no collision shape, next to pieces that have one: ${without.join(", ")}.`, values, { count: without.length, pieces: without });
         }
         else if (empty.length > 0) {
-            results.push({ id: "collision-tiles", status: "fail", message: `No collision shape reaches the plane of ${plural(empty.length, "socket")}: ${empty.slice(0, 4).join(", ")}${empty.length > 4 ? ", ..." : ""}.`, values });
+            const { text, said } = few(empty);
+            add("fail", "empty", `No collision shape reaches the plane of ${text}`, values, said);
         }
         else if (failing.length > 0) {
-            const worst = failing.reduce((a, b) => (b.mismatchSquareMeters > a.mismatchSquareMeters ? b : a));
-            results.push({ id: "collision-tiles", status: "fail", message: `The collision at sockets of type "${worst.type}" does not meet flush: ${worst.worst.join(" and ")} differ by ${round(worst.mismatchSquareMeters, 6)} m2, a lip a moving body can catch on.`, values });
+            const said = differing(failing.reduce((a, b) => (b.mismatchSquareMeters > a.mismatchSquareMeters ? b : a)));
+            add("fail", "lip", `The collision at sockets of type "${said.type}" does not meet flush: ${said.a} and ${said.b} differ by ${said.area} m2, a lip a moving body can catch on.`, values, said);
         }
-        else if (types.every((type) => type.pairs === 0)) {
-            results.push({ id: "collision-tiles", status: "not-measured", message: "No two sockets of the kit can meet.", reason: "Every socket type is used once, or only on sides that never face each other.", values });
+        else if (count === 0) {
+            unmeasured(...NO_PAIRS, values);
         }
         else {
-            results.push({ id: "collision-tiles", status: "pass", message: `The collision shapes at ${plural(types.reduce((total, type) => total + type.pairs, 0), "pair")} of sockets meet flush, to within ${round(seamTolerance, 6)} m2.`, values });
+            add("pass", "flush", `The collision shapes at ${plural(count, "pair")} of sockets meet flush, to within ${area} m2.`, values, { count, area });
         }
     }
     const counts = { pass: 0, warn: 0, fail: 0, notMeasured: 0 };

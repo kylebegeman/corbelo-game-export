@@ -1,6 +1,6 @@
 import { type CheckOptions } from "./checks.js";
 import { type KitCheckOptions, type KitCheckReport } from "./kit-checks.js";
-import { type KitCell, type KitGrid, type KitInput, type KitLayout, type KitSocket } from "./kit.js";
+import { type KitCell, type KitGrid, type KitInput, type KitLayout, type KitSocket, type SkippedLayout } from "./kit.js";
 import { type GamePack } from "./pack.js";
 import type { Vec3 } from "./types.js";
 export interface KitPackInput extends KitInput {
@@ -70,10 +70,7 @@ export interface KitManifest {
         scene?: string;
     })[];
     /** Test layouts the kit has no pieces for, and why. */
-    skippedLayouts: {
-        name: string;
-        reason: string;
-    }[];
+    skippedLayouts: SkippedLayout[];
     /** Only when the kit checks ran. */
     checks?: KitCheckReport;
     meshLibrary: KitMeshLibrary;

@@ -1,5 +1,6 @@
 import { type GlbDocument } from "./glb-read.js";
-import { type EngineProfileId } from "./profiles.js";
+import type { MessagePart, MessageValues } from "./messages.js";
+import type { EngineProfileId } from "./profiles.js";
 import type { CollisionRequest, CollisionShape, NormalMode, PivotMode, Vec3 } from "./types.js";
 /** What kind of asset it is, which decides the starting budget and the size it is expected to have. */
 export type AssetClass = "small-prop" | "large-prop" | "kit-piece";
@@ -161,6 +162,10 @@ export interface CollisionValues {
         /** `(collision - visible) / visible`. Null when the body is not closed. */
         error: number | null;
         withinTolerance: boolean | null;
+        /** The share this body was judged by: the one given to the check, or else its own. */
+        tolerance?: number;
+        /** What this body alone comes to. The worst of them is the status of the check. */
+        status?: CheckStatus;
     }[];
 }
 export interface DetailLevelValues {
@@ -226,12 +231,24 @@ export interface RampValues {
         walkable: boolean;
     }[];
 }
-interface ResultBase {
+/** What every result of a check has, whatever it measured. */
+export interface ResultBase {
     status: CheckStatus;
     /** One sentence for a person. */
     message: string;
+    /**
+     * What the message says, as a key of the message catalog: the id of the check, then what it
+     * found. Every result has one. It is optional for a report written before version 0.1.8.
+     */
+    messageKey?: string;
+    /** The values the template of that key is filled with, by name. */
+    messageValues?: MessageValues;
     /** Only with `"not-measured"`: why there is nothing to judge. */
     reason?: string;
+    /** With a reason: its key in the message catalog, the message key and then `.reason`. */
+    reasonKey?: string;
+    /** With a reason: the values the template of that key is filled with, by name. */
+    reasonValues?: MessageValues;
 }
 export type CheckResult = (ResultBase & {
     id: "size";
@@ -294,6 +311,28 @@ export interface CheckReport {
     /** One result for every check, always all twelve, in the order of `CHECK_IDS`. */
     results: CheckResult[];
 }
+export declare function round(value: number, digits?: number): number;
+export declare function plural(count: number, one: string, many?: string): string;
+/** A part of a message with its English text. */
+export type Said = MessagePart & {
+    text: string;
+};
+/** A part of a message that has a template of its own: its text, and the key and values that rebuild it. */
+export declare function part(text: string, key: string, values?: MessageValues): Said;
+/** The texts of the parts of a message, with what stands between them. */
+export declare function textOf(parts: readonly Said[], between?: string): string;
+/** Adds what was counted to the parts of a message, when there is any of it. */
+export declare function counted(parts: Said[], count: number, key: string, one: string, after?: string, many?: string): void;
+/**
+ * Gives the two functions that add a result to `results`. The checks come in the order of
+ * `ids`, so what is added is the result of the next of them. `found` is what the check found:
+ * with the id of the check it is the key of the message, `size.expected`. `unmeasured` adds a
+ * result with nothing to judge and the reason why.
+ */
+export declare function adder<Result>(results: Result[], ids: readonly string[]): {
+    add: (status: CheckStatus, found: string, message: string, values: object, messageValues?: MessageValues, reason?: string, reasonValues?: MessageValues) => void;
+    unmeasured: (found: string, message: string, reason: string, values: object, reasonValues?: MessageValues, messageValues?: MessageValues) => void;
+};
 /** Triangles where they sit in a scene, in metres, +Y up. */
 export interface SceneMesh {
     /** x, y, z per vertex. */
@@ -329,4 +368,3 @@ export declare function resolvePlayer(option: PlayerProfile | EngineProfileId | 
  * Everything is measured from the file: the triangles as written and the facts stored with them.
  */
 export declare function checkGameAsset(glb: Uint8Array | GlbDocument, options?: CheckOptions): CheckReport;
-export {};

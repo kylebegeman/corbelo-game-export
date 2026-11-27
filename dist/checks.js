@@ -1,6 +1,5 @@
-import { NO_DECOMPOSITION, refuse } from "./errors.js";
+import { badOption, NO_DECOMPOSITION, notObject, refuse } from "./errors.js";
 import { readGlb, readPack } from "./glb-read.js";
-import { ENGINE_PROFILES } from "./profiles.js";
 import { GENERATOR } from "./version.js";
 /** Starting budgets. They are places to start from, not rules of any engine: pass your own with `budget`. */
 export const ASSET_BUDGETS = {
@@ -99,33 +98,66 @@ export const CHECK_IDS = [
     "player-ramps",
 ];
 const DEGREES = 180 / Math.PI;
-function round(value, digits = 6) {
+export function round(value, digits = 6) {
     const scale = 10 ** digits;
     return Math.round(value * scale) / scale + 0;
 }
-function plural(count, one, many = `${one}s`) {
+export function plural(count, one, many = `${one}s`) {
     return `${count} ${count === 1 ? one : many}`;
+}
+/** A part of a message that has a template of its own: its text, and the key and values that rebuild it. */
+export function part(text, key, values = {}) {
+    return { key, values, text };
+}
+/** The texts of the parts of a message, with what stands between them. */
+export function textOf(parts, between = ", ") {
+    return parts.map((one) => one.text).join(between);
+}
+/** Adds what was counted to the parts of a message, when there is any of it. */
+export function counted(parts, count, key, one, after = "", many) {
+    if (count > 0)
+        parts.push(part(`${plural(count, one, many)}${after}`, key, { count }));
+}
+/**
+ * Gives the two functions that add a result to `results`. The checks come in the order of
+ * `ids`, so what is added is the result of the next of them. `found` is what the check found:
+ * with the id of the check it is the key of the message, `size.expected`. `unmeasured` adds a
+ * result with nothing to judge and the reason why.
+ */
+export function adder(results, ids) {
+    const add = (status, found, message, values, messageValues = {}, reason, reasonValues = {}) => {
+        const id = ids[results.length];
+        const messageKey = `${id}.${found}`;
+        results.push({ id, status, message, messageKey, messageValues, ...(reason === undefined ? {} : { reason, reasonKey: `${messageKey}.reason`, reasonValues }), values });
+    };
+    const unmeasured = (found, message, reason, values, reasonValues, messageValues) => add("not-measured", found, message, values, messageValues, reason, reasonValues);
+    return { add, unmeasured };
 }
 /**
  * What would bring a collision shape nearer, for a body whose shape was left to be chosen and came
  * out past the tolerance. It reads what was tried, so it never asks for what was already given.
  */
 function nearer(name, collision, settings) {
+    const maxPieces = collision.maxPieces ?? settings?.maxPieces;
+    const say = (found, text, values) => part(text, `collision.nearer.${found}`, values);
     const refused = collision.notes.find((note) => note.startsWith(NO_DECOMPOSITION));
-    if (refused !== undefined)
-        return ` A kernel was given, but no convex decomposition was made. ${refused.slice(NO_DECOMPOSITION.length)}`;
-    const gavePieces = collision.tried.some((tier) => tier.shape === "pieces");
+    if (refused !== undefined) {
+        const why = refused.slice(NO_DECOMPOSITION.length);
+        return say("refused", ` A kernel was given, but no convex decomposition was made. ${why}`, { why });
+    }
+    const given = collision.tried.some((tier) => tier.shape === "pieces") ? 1 : 0;
     const cut = collision.tried.find((tier) => tier.shape === "decomposition");
     if (cut !== undefined) {
         const into = ` "${name}" was cut into ${plural(cut.pieces, "convex piece")}`;
-        if (settings !== undefined && cut.pieces >= settings.maxPieces) {
-            return `${into}, the most allowed. ${gavePieces ? "More pieces" : "More pieces, or the pieces the part was built from,"} would bring it nearer.`;
+        const values = { name, pieces: cut.pieces, given };
+        if (maxPieces !== undefined && cut.pieces >= maxPieces) {
+            return say("most", `${into}, the most allowed. ${given ? "More pieces" : "More pieces, or the pieces the part was built from,"} would bring it nearer.`, values);
         }
-        return `${into}, and no further cut that fits brought it nearer.${gavePieces ? "" : " The pieces the part was built from would."}`;
+        return say("cut", `${into}, and no further cut that fits brought it nearer.${given ? "" : " The pieces the part was built from would."}`, values);
     }
     if (settings?.kernel === true)
-        return gavePieces ? "" : " The pieces the part was built from would bring it nearer.";
-    return gavePieces ? " A solid kernel to cut it into convex pieces would bring it nearer." : " The pieces the part was built from, or a solid kernel to cut it into convex pieces, would bring it nearer.";
+        return given ? "" : say("pieces", " The pieces the part was built from would bring it nearer.");
+    return say("kernel", given ? " A solid kernel to cut it into convex pieces would bring it nearer." : " The pieces the part was built from, or a solid kernel to cut it into convex pieces, would bring it nearer.", { given });
 }
 /** Vertices that share a place, counted as one: the number of each vertex's place. */
 function placesOf(positions) {
@@ -515,66 +547,66 @@ export function resolvePlayer(option, profile) {
     }
     else if (typeof option === "string") {
         if (!Object.hasOwn(PLAYER_PROFILES, option))
-            refuse("BAD_OPTION", `Unknown player "${option}". Built-in players go by engine profile: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
+            badOption(`Unknown player "${option}". Built-in players go by engine profile: ${Object.keys(PLAYER_PROFILES).join(", ")}.`);
         player = PLAYER_PROFILES[option];
     }
     else {
         player = option;
-        if (typeof player !== "object" || player === null || typeof player.id !== "string" || player.id === "")
-            refuse("BAD_OPTION", "A player profile needs an id.");
+        if (notObject(player) || typeof player.id !== "string" || player.id === "")
+            badOption("A player profile needs an id.");
         for (const key of ["capsuleRadiusM", "capsuleHeightM"]) {
             if (!(Number.isFinite(player[key]) && player[key] > 0))
-                refuse("BAD_OPTION", `Player "${player.id}": ${key} must be a positive number of metres.`);
+                badOption(`Player "${player.id}": ${key} must be a positive number of metres.`);
         }
         for (const key of ["stepHeightM", "jumpHeightM"]) {
             if (!(Number.isFinite(player[key]) && player[key] >= 0))
-                refuse("BAD_OPTION", `Player "${player.id}": ${key} must be zero or a positive number of metres.`);
+                badOption(`Player "${player.id}": ${key} must be zero or a positive number of metres.`);
         }
         if (!(Number.isFinite(player.walkableSlopeDeg) && player.walkableSlopeDeg >= 0 && player.walkableSlopeDeg <= 90)) {
-            refuse("BAD_OPTION", `Player "${player.id}": walkableSlopeDeg must be from 0 to 90 degrees.`);
+            badOption(`Player "${player.id}": walkableSlopeDeg must be from 0 to 90 degrees.`);
         }
     }
     return player;
 }
 function readOptions(options, facts) {
-    if (typeof options !== "object" || options === null)
-        refuse("BAD_OPTION", "Check options must be an object.");
+    if (notObject(options))
+        badOption("Check options must be an object.");
     const assetClass = options.assetClass ?? DEFAULT_ASSET_CLASS;
     if (!Object.hasOwn(ASSET_BUDGETS, assetClass))
-        refuse("BAD_OPTION", `assetClass must be one of ${Object.keys(ASSET_BUDGETS).map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(assetClass)}.`);
+        badOption(`assetClass must be one of ${Object.keys(ASSET_BUDGETS).map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(assetClass)}.`);
     const budget = { ...ASSET_BUDGETS[assetClass] };
     if (options.budget !== undefined) {
-        if (typeof options.budget !== "object" || options.budget === null)
-            refuse("BAD_OPTION", "budget must be { maxTriangles, maxVertices, maxMaterialSlots }, each optional.");
+        if (notObject(options.budget))
+            badOption("budget must be { maxTriangles, maxVertices, maxMaterialSlots }, each optional.");
         for (const key of ["maxTriangles", "maxVertices", "maxMaterialSlots"]) {
             const value = options.budget[key];
             if (value === undefined)
                 continue;
             if (!(Number.isInteger(value) && value >= 1))
-                refuse("BAD_OPTION", `budget.${key} must be a whole number of at least 1. Got ${String(value)}.`);
+                badOption(`budget.${key} must be a whole number of at least 1. Got ${String(value)}.`);
             budget[key] = value;
         }
     }
     const player = resolvePlayer(options.player, facts.profile);
     const gridMeters = options.gridMeters ?? DEFAULT_GRID_METERS;
     if (!(Number.isFinite(gridMeters) && gridMeters > 0))
-        refuse("BAD_OPTION", `gridMeters must be a positive number of metres. Got ${String(gridMeters)}.`);
+        badOption(`gridMeters must be a positive number of metres. Got ${String(gridMeters)}.`);
     const lodDeviationShare = options.lodDeviationShare ?? DEFAULT_LOD_DEVIATION_SHARE;
     if (!(Number.isFinite(lodDeviationShare) && lodDeviationShare >= 0))
-        refuse("BAD_OPTION", `lodDeviationShare must be zero or a positive share. Got ${String(lodDeviationShare)}.`);
+        badOption(`lodDeviationShare must be zero or a positive share. Got ${String(lodDeviationShare)}.`);
     if (options.collisionTolerance !== undefined && !(Number.isFinite(options.collisionTolerance) && options.collisionTolerance >= 0)) {
-        refuse("BAD_OPTION", `collisionTolerance must be zero or a positive share. Got ${String(options.collisionTolerance)}.`);
+        badOption(`collisionTolerance must be zero or a positive share. Got ${String(options.collisionTolerance)}.`);
     }
     return { assetClass, budget, player, gridMeters, lodDeviationShare };
 }
 /** Units a size can be mixed up by, and what the mix-up is. */
 const UNIT_MIXUPS = [
-    [0.001, "millimetres read as metres"],
-    [1000, "metres read as millimetres"],
-    [0.01, "centimetres read as metres"],
-    [100, "metres read as centimetres"],
-    [0.0254, "inches read as metres"],
-    [1 / 0.0254, "metres read as inches"],
+    [0.001, "millimetres", "metres"],
+    [1000, "metres", "millimetres"],
+    [0.01, "centimetres", "metres"],
+    [100, "metres", "centimetres"],
+    [0.0254, "inches", "metres"],
+    [1 / 0.0254, "metres", "inches"],
 ];
 /**
  * Checks a GLB this package wrote against what a game needs of it, and returns one result for
@@ -592,6 +624,8 @@ export function checkGameAsset(glb, options = {}) {
     const { assetClass, budget, player, gridMeters, lodDeviationShare } = readOptions(options, facts);
     const expect = options.expect ?? {};
     const results = [];
+    const { add, unmeasured } = adder(results, CHECK_IDS);
+    const kind = CLASS_WORDS[assetClass];
     const unit = facts.engine.unit;
     const scene = pack.bodies.map((body, at) => {
         const positions = new Float64Array(body.positions.length);
@@ -605,9 +639,11 @@ export function checkGameAsset(glb, options = {}) {
         const range = ASSET_SIZE_RANGES[assetClass];
         const largestMeters = Math.max(...meters.size);
         const values = { meters: meters.size, engine: engine.size, unit, largestMeters, expectedMeters: [range.minMeters, range.maxMeters], suggestedScale: null };
-        const sizeText = `${round(Math.max(...engine.size), 3)} ${unit} on its longest side`;
+        const longest = round(Math.max(...engine.size), 3);
+        const said = { longest, unit, assetClass };
+        const text = `The asset is ${longest} ${unit} on its longest side, `;
         if (largestMeters >= range.minMeters && largestMeters <= range.maxMeters) {
-            results.push({ id: "size", status: "pass", message: `The asset is ${sizeText}, a size a ${CLASS_WORDS[assetClass]} has.`, values });
+            add("pass", "expected", `${text}a size a ${kind} has.`, values, said);
         }
         else {
             // A mix-up of units is offered when it would land the size nearest the middle of the range.
@@ -620,14 +656,16 @@ export function checkGameAsset(glb, options = {}) {
                 if (best === undefined || Math.abs(Math.log(scaled / middle)) < Math.abs(Math.log((largestMeters * best[0]) / middle)))
                     best = mixup;
             }
-            values.suggestedScale = best === undefined ? null : round(best[0], 6);
-            const expected = `a ${CLASS_WORDS[assetClass]} is expected to be from ${range.minMeters} to ${range.maxMeters} m`;
-            results.push({
-                id: "size",
-                status: "warn",
-                message: `The asset is ${sizeText}, and ${expected}.${best === undefined ? "" : ` This looks like ${best[1]}: a scale of ${round(best[0], 6)} would fit.`}`,
-                values,
-            });
+            const expected = `${text}and a ${kind} is expected to be from ${range.minMeters} to ${range.maxMeters} m.`;
+            const outside = { ...said, min: range.minMeters, max: range.maxMeters };
+            if (best === undefined) {
+                add("warn", "unexpected", expected, values, outside);
+            }
+            else {
+                const scale = round(best[0], 6);
+                values.suggestedScale = scale;
+                add("warn", "units", `${expected} This looks like ${best[1]} read as ${best[2]}: a scale of ${scale} would fit.`, values, { ...outside, read: best[1], as: best[2], scale });
+            }
         }
     }
     // Pivot.
@@ -656,15 +694,23 @@ export function checkGameAsset(glb, options = {}) {
                 farOut += 1;
             values.bodies.push({ name: body.name, mode: body.pivot.mode, meters: body.translation, fromMinCorner: [round(-min[0]), round(-min[1]), round(-min[2])], inside, onGrid });
         }
+        const first = values.bodies[0];
         if (assetClass === "kit-piece" && offGrid > 0) {
-            results.push({ id: "pivot", status: "fail", message: `${plural(offGrid, "body has", "bodies have")} a pivot off the ${gridMeters} m grid, so the kit piece will not snap into place.`, values });
+            add("fail", "off-grid", `${plural(offGrid, "body has", "bodies have")} a pivot off the ${gridMeters} m grid, so the kit piece will not snap into place.`, values, { count: offGrid, grid: gridMeters });
         }
         else if (farOut > 0) {
-            results.push({ id: "pivot", status: "warn", message: `${plural(farOut, "body has", "bodies have")} a pivot further from the body than the body is long.`, values });
+            add("warn", "far", `${plural(farOut, "body has", "bodies have")} a pivot further from the body than the body is long.`, values, { count: farOut });
+        }
+        else if (first === undefined) {
+            add("pass", "none", "There are no bodies.", values);
+        }
+        else if (values.bodies.every((body) => body.mode === first.mode)) {
+            // Bodies with the same pivot are said as one. A body with a pivot of its own gets every body named.
+            add("pass", "same", `The pivot is at ${PIVOT_WORDS[first.mode]}${offGrid === 0 ? `, on the ${gridMeters} m grid` : ""}.`, values, { mode: first.mode, offGrid, grid: gridMeters });
         }
         else {
-            const first = values.bodies[0];
-            results.push({ id: "pivot", status: "pass", message: first === undefined ? "There are no bodies." : `The pivot is at ${PIVOT_WORDS[first.mode]}${offGrid === 0 ? `, on the ${gridMeters} m grid` : ""}.`, values });
+            const bodies = values.bodies.map((body) => part(`"${body.name}" at ${PIVOT_WORDS[body.mode]}`, "pivot.body", { name: body.name, mode: body.mode }));
+            add("pass", "own", `Each body has a pivot of its own: ${textOf(bodies)}${offGrid === 0 ? `. All are on the ${gridMeters} m grid` : ""}.`, values, { bodies, offGrid, grid: gridMeters });
         }
     }
     // Triangles, vertices and material slots against the budget.
@@ -673,7 +719,7 @@ export function checkGameAsset(glb, options = {}) {
             const values = { count: facts.bodies.reduce((total, body) => total + pick(body), 0), budget: limit, bodies: facts.bodies.map((body) => ({ name: body.name, count: pick(body) })) };
             const over = values.count > limit;
             const what = id === "triangles" ? "triangles" : "vertices after hard edges split";
-            results.push({ id, status: over ? "fail" : "pass", message: `${values.count} ${what}, against a budget of ${limit} for a ${CLASS_WORDS[assetClass]}.`, values });
+            add(over ? "fail" : "pass", "budget", `${values.count} ${what}, against a budget of ${limit} for a ${kind}.`, values, { count: values.count, budget: limit, assetClass });
         };
         count("triangles", budget.maxTriangles, (body) => body.triangles);
         count("vertices", budget.maxVertices, (body) => body.vertices);
@@ -692,22 +738,18 @@ export function checkGameAsset(glb, options = {}) {
         };
         const byFace = shading.normals === "face-weighted";
         const edges = `${plural(shading.hardEdges, "hard edge")} and ${plural(shading.softEdges, "soft edge")}. Normals are weighted by ${byFace ? "the whole flat face each triangle belongs to" : "the area and angle of each triangle"}.`;
+        const said = { hard: shading.hardEdges, soft: shading.softEdges, normals: shading.normals };
         if (pack.bodies.some((body) => body.normals.length !== body.positions.length)) {
-            results.push({ id: "shading", status: "fail", message: "A body has no normals.", values: shading });
+            add("fail", "no-normals", "A body has no normals.", shading);
         }
         else if (shading.backFacingNormals > 0) {
-            results.push({ id: "shading", status: "fail", message: `${plural(shading.backFacingNormals, "corner has", "corners have")} a normal that points away from its own triangle.`, values: shading });
+            add("fail", "back-facing", `${plural(shading.backFacingNormals, "corner has", "corners have")} a normal that points away from its own triangle.`, shading, { count: shading.backFacingNormals });
         }
         else if (shading.maxNormalAngle > NORMAL_ANGLE_WARNING_DEGREES) {
-            results.push({
-                id: "shading",
-                status: "warn",
-                message: `A normal is ${shading.maxNormalAngle} degrees from the face it shades, over ${NORMAL_ANGLE_WARNING_DEGREES}. A lower crease angle would make that edge hard. ${edges}`,
-                values: shading,
-            });
+            add("warn", "wide", `A normal is ${shading.maxNormalAngle} degrees from the face it shades, over ${NORMAL_ANGLE_WARNING_DEGREES}. A lower crease angle would make that edge hard. ${edges}`, shading, { angle: shading.maxNormalAngle, limit: NORMAL_ANGLE_WARNING_DEGREES, ...said });
         }
         else {
-            results.push({ id: "shading", status: "pass", message: `${edges}${byFace ? "" : " Weighting by the whole flat face is there to ask for."}`, values: shading });
+            add("pass", "edges", `${edges}${byFace ? "" : " Weighting by the whole flat face is there to ask for."}`, shading, said);
         }
         const clean = {
             degenerateTrianglesDropped: facts.total.degenerateTrianglesDropped,
@@ -718,26 +760,18 @@ export function checkGameAsset(glb, options = {}) {
             nonManifoldEdges: total((topology) => topology.nonManifoldEdges),
         };
         // Faces that point the wrong way are drawn wrong, so they fail. The rest still draws: it warns.
-        const problems = [];
-        if (clean.flippedEdges > 0)
-            problems.push(`${plural(clean.flippedEdges, "edge")} between faces that point opposite ways`);
-        if (clean.insideOutBodies > 0)
-            problems.push(`${plural(clean.insideOutBodies, "body", "bodies")} turned inside out`);
-        const notes = [];
-        if (clean.nonManifoldEdges > 0)
-            notes.push(`${plural(clean.nonManifoldEdges, "edge")} shared by more than two triangles`);
-        if (clean.openEdges > 0)
-            notes.push(`${plural(clean.openEdges, "open edge")}`);
-        if (clean.sliverTriangles > 0)
-            notes.push(`${plural(clean.sliverTriangles, "sliver triangle")}`);
-        if (clean.degenerateTrianglesDropped > 0)
-            notes.push(`${plural(clean.degenerateTrianglesDropped, "triangle")} with no area left out`);
-        if (problems.length > 0)
-            results.push({ id: "clean-mesh", status: "fail", message: `The mesh has ${[...problems, ...notes].join(", ")}.`, values: clean });
-        else if (notes.length > 0)
-            results.push({ id: "clean-mesh", status: "warn", message: `The mesh has ${notes.join(", ")}.`, values: clean });
+        const found = [];
+        counted(found, clean.flippedEdges, "clean-mesh.flipped", "edge", " between faces that point opposite ways");
+        counted(found, clean.insideOutBodies, "clean-mesh.inside-out", "body", " turned inside out", "bodies");
+        const wrong = found.length > 0;
+        counted(found, clean.nonManifoldEdges, "clean-mesh.non-manifold", "edge", " shared by more than two triangles");
+        counted(found, clean.openEdges, "clean-mesh.open", "open edge");
+        counted(found, clean.sliverTriangles, "clean-mesh.slivers", "sliver triangle");
+        counted(found, clean.degenerateTrianglesDropped, "clean-mesh.dropped", "triangle", " with no area left out");
+        if (found.length > 0)
+            add(wrong ? "fail" : "warn", "found", `The mesh has ${textOf(found)}.`, clean, { found });
         else
-            results.push({ id: "clean-mesh", status: "pass", message: "Every body is closed, faces outwards and has no sliver triangles.", values: clean });
+            add("pass", "clean", "Every body is closed, faces outwards and has no sliver triangles.", clean);
     }
     {
         const values = {
@@ -746,11 +780,10 @@ export function checkGameAsset(glb, options = {}) {
             fileMaterials: facts.total.materialSlots,
             bodies: facts.bodies.map((body) => ({ name: body.name, count: body.materialSlots })),
         };
-        results.push({
-            id: "material-slots",
-            status: values.count > values.budget ? "fail" : "pass",
-            message: `${plural(values.count, "material slot")} on the body with the most, against a budget of ${values.budget} for a ${CLASS_WORDS[assetClass]}.`,
-            values,
+        add(values.count > values.budget ? "fail" : "pass", "budget", `${plural(values.count, "material slot")} on the body with the most, against a budget of ${values.budget} for a ${kind}.`, values, {
+            count: values.count,
+            budget: values.budget,
+            assetClass,
         });
     }
     // Collision.
@@ -760,69 +793,61 @@ export function checkGameAsset(glb, options = {}) {
             tolerance,
             bodies: facts.bodies.map((body) => {
                 const error = body.collision?.volume.error ?? null;
-                return {
-                    name: body.name,
-                    requested: body.collision?.requested ?? "none",
-                    shape: body.collision?.shape ?? "none",
-                    pieces: body.collision?.pieces ?? 0,
-                    error,
-                    withinTolerance: error === null ? null : Math.abs(error) <= tolerance,
-                };
+                const requested = body.collision?.requested ?? "none";
+                const shape = body.collision?.shape ?? "none";
+                const allowed = options.collisionTolerance ?? body.collision?.tolerance ?? tolerance;
+                const within = error === null ? null : Math.abs(error) <= allowed;
+                // A shape the caller named is the caller's choice, and only worth a warning. One that
+                // was settled for because nothing nearer could be built is a failure. A body left
+                // without a shape on purpose is as it was asked for.
+                const status = shape === "none" ? (body.collision !== undefined && requested === "none" ? "pass" : "warn") : within === null ? "not-measured" : within ? "pass" : requested === "auto" ? "fail" : "warn";
+                return { name: body.name, requested, shape, pieces: body.collision?.pieces ?? 0, error, withinTolerance: within, tolerance: allowed, status };
             }),
         };
-        const without = values.bodies.filter((body) => body.shape === "none");
+        const without = values.bodies.filter((body) => body.shape === "none" && body.status !== "pass");
         const beyond = values.bodies.filter((body) => body.withinTolerance === false);
-        const unknown = values.bodies.filter((body) => body.shape !== "none" && body.withinTolerance === null);
+        const unknown = values.bodies.filter((body) => body.status === "not-measured");
         const factsOf = (body) => facts.bodies[values.bodies.indexOf(body)];
-        if (without.length === values.bodies.length) {
-            results.push({
-                id: "collision",
-                status: "not-measured",
-                message: "The file has no collision shape.",
-                reason: "No collision was written with the file. Write it again with a collision shape to have it measured.",
-                values,
-            });
+        if (values.bodies.every((body) => body.shape === "none")) {
+            unmeasured("none", "The file has no collision shape.", "No collision was written with the file. Write it again with a collision shape to have it measured.", values);
         }
         else if (beyond.length > 0) {
-            const worst = beyond.reduce((a, b) => (Math.abs(b.error) > Math.abs(a.error) ? b : a));
-            // A shape the caller named is the caller's choice, and only worth a warning. One that
-            // "auto" settled for because nothing nearer could be built is a failure.
-            const chosen = beyond.every((body) => body.requested !== "auto");
-            results.push({
-                id: "collision",
-                status: chosen ? "warn" : "fail",
-                message: `The collision of "${worst.name}" (${worst.shape}, ${plural(worst.pieces, "piece")}) is ${round(Math.abs(worst.error) * 100, 1)}% ${worst.error > 0 ? "more" : "less"} volume than the visible part, over the ${round(tolerance * 100, 1)}% allowed.${chosen ? "" : nearer(worst.name, factsOf(worst).collision, facts.settings.collision)}`,
-                values,
-            });
+            // The body that fails is said before one that only warns, and of those the furthest out.
+            const chosen = beyond.every((body) => body.status === "warn");
+            const worst = beyond.filter((body) => chosen || body.status === "fail").reduce((a, b) => (Math.abs(b.error) > Math.abs(a.error) ? b : a));
+            const advice = chosen ? "" : nearer(worst.name, factsOf(worst).collision, facts.settings.collision);
+            const percent = round(Math.abs(worst.error) * 100, 1);
+            const direction = worst.error > 0 ? "more" : "less";
+            const allowed = round(worst.tolerance * 100, 1);
+            add(chosen ? "warn" : "fail", "beyond", `The collision of "${worst.name}" (${worst.shape}, ${plural(worst.pieces, "piece")}) is ${percent}% ${direction} volume than the visible part, over the ${allowed}% allowed.${advice && advice.text}`, values, { name: worst.name, shape: worst.shape, pieces: worst.pieces, percent, direction, allowed, advice });
         }
         else if (without.length > 0) {
-            results.push({ id: "collision", status: "warn", message: `${plural(without.length, "body has", "bodies have")} no collision shape.`, values });
+            add("warn", "missing", `${plural(without.length, "body has", "bodies have")} no collision shape.`, values, { count: without.length });
         }
         else if (unknown.length > 0) {
-            const names = unknown.map((body) => `"${body.name}"`);
-            const open = unknown.filter((body) => factsOf(body).openEdges + factsOf(body).nonManifoldEdges > 0);
+            const names = unknown.map((body) => body.name);
+            const quoted = names.map((name) => `"${name}"`).join(", ");
             const why = unknown.map((body) => {
-                const { openEdges, nonManifoldEdges } = factsOf(body);
-                const edges = [
-                    ...(openEdges > 0 ? [plural(openEdges, "open edge")] : []),
-                    ...(nonManifoldEdges > 0 ? [`${plural(nonManifoldEdges, "edge")} shared by more than two triangles`] : []),
-                ];
-                return edges.length > 0 ? `"${body.name}" has ${edges.join(" and ")}` : `"${body.name}" is closed with its faces pointing inwards`;
+                const edges = [];
+                counted(edges, factsOf(body).openEdges, "clean-mesh.open", "open edge");
+                counted(edges, factsOf(body).nonManifoldEdges, "clean-mesh.non-manifold", "edge", " shared by more than two triangles");
+                return edges.length > 0
+                    ? part(`"${body.name}" has ${textOf(edges, " and ")}`, "collision.has-edges", { name: body.name, edges })
+                    : part(`"${body.name}" is closed with its faces pointing inwards`, "collision.faces-inwards", { name: body.name });
             });
-            const one = unknown.length === 1;
-            results.push({
-                id: "collision",
-                status: "not-measured",
-                message: open.length === 0
-                    ? `A collision shape was written, but ${one ? `${names[0]} encloses` : `${names.join(", ")} enclose`} no volume.`
-                    : `A collision shape was written, but ${one ? `${names[0]} is` : `${names.join(", ")} are`} not closed.`,
-                reason: `${why.join(", and ")}, so ${one ? "it encloses" : "they enclose"} no volume to compare the collision volume with. ${open.length === 0 ? "Turn the faces to point outwards" : "Close the mesh"} to have its collision measured.`,
-                values,
-            });
+            const inwards = why.every((one) => one.key === "collision.faces-inwards");
+            const count = names.length;
+            const one = count === 1;
+            unmeasured(inwards ? "inwards" : "open", `A collision shape was written, but ${quoted} ${inwards ? `${one ? "encloses" : "enclose"} no volume` : `${one ? "is" : "are"} not closed`}.`, `${textOf(why, ", and ")}, so ${one ? "it encloses" : "they enclose"} no volume to compare the collision volume with. ${inwards ? "Turn the faces to point outwards" : "Close the mesh"} to have its collision measured.`, values, { why, count }, { names, count });
         }
         else {
             const pieces = values.bodies.reduce((total, body) => total + body.pieces, 0);
-            results.push({ id: "collision", status: "pass", message: `Collision in ${plural(pieces, "convex piece")}, within ${round(tolerance * 100, 1)}% of the visible volume.`, values });
+            const shares = new Set(values.bodies.filter((body) => body.shape !== "none").map((body) => body.tolerance));
+            const percent = round([...shares][0] * 100, 1);
+            if (shares.size > 1)
+                add("pass", "within-each", `Collision in ${plural(pieces, "convex piece")}, each body within the share of its visible volume allowed for it.`, values, { pieces });
+            else
+                add("pass", "within", `Collision in ${plural(pieces, "convex piece")}, within ${percent}% of the visible volume.`, values, { pieces, percent });
         }
     }
     // Detail levels.
@@ -849,29 +874,32 @@ export function checkGameAsset(glb, options = {}) {
             for (const [at, level] of body.levels.entries()) {
                 if (at === 0)
                     continue;
-                const above = body.levels[at - 1];
-                if (level.triangles > above.triangles)
-                    problems.push(`level ${level.level} of "${body.name}" has more triangles than level ${above.level}`);
-                else if (level.triangles === above.triangles)
-                    notes.push(`level ${level.level} of "${body.name}" has as many triangles as level ${above.level}`);
+                const above = body.levels[at - 1].level;
+                const say = (parts, found, text, more) => {
+                    parts.push(part(`level ${level.level} of "${body.name}" ${text}`, `detail-levels.${found}`, { level: level.level, name: body.name, ...more }));
+                };
+                if (level.triangles > body.levels[at - 1].triangles)
+                    say(problems, "more", `has more triangles than level ${above}`, { above });
+                else if (level.triangles === body.levels[at - 1].triangles)
+                    say(notes, "same", `has as many triangles as level ${above}`, { above });
                 if (level.openEdges > 0 && body.levels[0].openEdges === 0)
-                    problems.push(`level ${level.level} of "${body.name}" is not closed, and level 0 is`);
+                    say(problems, "open", "is not closed, and level 0 is");
+                const percent = round(level.deviationShare * 100, 1);
                 if (level.deviationShare > lodDeviationShare)
-                    notes.push(`level ${level.level} of "${body.name}" moves the outline by ${round(level.deviationShare * 100, 1)}% of the body's size`);
+                    say(notes, "moved", `moves the outline by ${percent}% of the body's size`, { percent });
             }
         }
+        const found = [...problems, ...notes];
         if (values.bodies.length === 0) {
-            results.push({ id: "detail-levels", status: "not-measured", message: "The file has no lower detail levels.", reason: "No body was given lower detail levels. Engines that make their own levels on import need none.", values });
+            unmeasured("none", "The file has no lower detail levels.", "No body was given lower detail levels. Engines that make their own levels on import need none.", values);
         }
-        else if (problems.length > 0) {
-            results.push({ id: "detail-levels", status: "fail", message: `Detail levels: ${[...problems, ...notes].join("; ")}.`, values });
-        }
-        else if (notes.length > 0) {
-            results.push({ id: "detail-levels", status: "warn", message: `Detail levels: ${notes.join("; ")}.`, values });
+        else if (found.length > 0) {
+            add(problems.length > 0 ? "fail" : "warn", "found", `Detail levels: ${textOf(found, "; ")}.`, values, { found });
         }
         else {
-            const lower = values.bodies.reduce((total, body) => total + body.levels.length - 1, 0);
-            results.push({ id: "detail-levels", status: "pass", message: `${plural(lower, "lower detail level")}, each smaller than the one above and within ${round(lodDeviationShare * 100, 1)}% of the outline.`, values });
+            const count = values.bodies.reduce((total, body) => total + body.levels.length - 1, 0);
+            const percent = round(lodDeviationShare * 100, 1);
+            add("pass", "smaller", `${plural(count, "lower detail level")}, each smaller than the one above and within ${percent}% of the outline.`, values, { count, percent });
         }
     }
     // Player fit.
@@ -891,36 +919,32 @@ export function checkGameAsset(glb, options = {}) {
             openings: [...alongX.openings, ...alongZ.openings],
             ignored: alongX.ignored + alongZ.ignored,
         };
-        const size = `a capsule ${round(player.capsuleRadiusM * 2, 3)} m wide and ${round(player.capsuleHeightM, 3)} m tall`;
+        const capsule = { player: who, width: round(player.capsuleRadiusM * 2, 3), height: round(player.capsuleHeightM, 3) };
+        const size = `${who} (a capsule ${capsule.width} m wide and ${capsule.height} m tall)`;
         const fitting = values.openings.filter((opening) => opening.fits);
         const walkIn = fitting.filter((opening) => opening.walkIn);
+        const wanted = expect.opening === true;
         if (values.openings.length === 0) {
-            const reason = "No opening closed over the top was found along the X or Z axis. A gap that is open to the sky is not counted.";
-            if (expect.opening === true)
-                results.push({ id: "player-openings", status: "fail", message: `An opening for ${who} was expected, and none was found.`, values });
+            if (wanted)
+                add("fail", "expected", `An opening for ${who} was expected, and none was found.`, values, { player: who });
             else
-                results.push({ id: "player-openings", status: "not-measured", message: "The asset has no opening for a player to pass.", reason, values });
+                unmeasured("none", "The asset has no opening for a player to pass.", "No opening closed over the top was found along the X or Z axis. A gap that is open to the sky is not counted.", values);
         }
         else if (walkIn.length > 0) {
             const widest = walkIn.reduce((a, b) => (b.widthMeters > a.widthMeters ? b : a));
-            results.push({ id: "player-openings", status: "pass", message: `${who} (${size}) passes an opening ${widest.widthMeters} m wide and ${widest.heightMeters} m tall.`, values });
+            add("pass", "passes", `${size} passes an opening ${widest.widthMeters} m wide and ${widest.heightMeters} m tall.`, values, { ...capsule, openingWidth: widest.widthMeters, openingHeight: widest.heightMeters });
         }
         else if (fitting.length > 0) {
-            const lowest = fitting.reduce((a, b) => (b.sillMeters < a.sillMeters ? b : a));
-            results.push({
-                id: "player-openings",
-                status: expect.opening === true ? "fail" : "warn",
-                message: `${who} fits an opening, but its sill is ${lowest.sillMeters} m up and this player steps up ${player.stepHeightM} m.`,
-                values,
-            });
+            const sill = fitting.reduce((a, b) => (b.sillMeters < a.sillMeters ? b : a)).sillMeters;
+            add(wanted ? "fail" : "warn", "sill", `${who} fits an opening, but its sill is ${sill} m up and this player steps up ${player.stepHeightM} m.`, values, { player: who, sill, step: player.stepHeightM });
         }
         else {
             const largest = values.openings.reduce((a, b) => (b.widthMeters * b.heightMeters > a.widthMeters * a.heightMeters ? b : a));
-            results.push({
-                id: "player-openings",
-                status: expect.opening === true ? "fail" : "warn",
-                message: `${who} (${size}) fits none of ${plural(values.openings.length, "opening")}. The largest is ${largest.widthMeters} m wide and ${largest.heightMeters} m tall.`,
-                values,
+            add(wanted ? "fail" : "warn", "fits-none", `${size} fits none of ${plural(values.openings.length, "opening")}. The largest is ${largest.widthMeters} m wide and ${largest.heightMeters} m tall.`, values, {
+                ...capsule,
+                count: values.openings.length,
+                openingWidth: largest.widthMeters,
+                openingHeight: largest.heightMeters,
             });
         }
     }
@@ -952,40 +976,40 @@ export function checkGameAsset(glb, options = {}) {
             rises,
             maxRiseMeters: rises.length === 0 ? null : Math.max(...rises),
         };
+        const rise = stepValues.maxRiseMeters;
+        const step = player.stepHeightM;
         if (!found) {
-            const reason = `No two rises in a row of ${STEP_MAX_RISE_METERS} m or less were found between flat levels a player can stand on.`;
             if (expect.stairs === true)
-                results.push({ id: "player-steps", status: "fail", message: "Steps were expected, and none were found.", values: stepValues });
+                add("fail", "expected", "Steps were expected, and none were found.", stepValues);
             else
-                results.push({ id: "player-steps", status: "not-measured", message: "The asset has no steps.", reason, values: stepValues });
+                unmeasured("none", "The asset has no steps.", `No two rises in a row of ${STEP_MAX_RISE_METERS} m or less were found between flat levels a player can stand on.`, stepValues, { limit: STEP_MAX_RISE_METERS });
         }
-        else if (stepValues.maxRiseMeters <= player.stepHeightM + 0.001) {
-            results.push({ id: "player-steps", status: "pass", message: `${plural(rises.length, "rise")} of up to ${stepValues.maxRiseMeters} m, and ${who} steps up ${player.stepHeightM} m.`, values: stepValues });
+        else if (rise <= step + 0.001) {
+            add("pass", "climbed", `${plural(rises.length, "rise")} of up to ${rise} m, and ${who} steps up ${step} m.`, stepValues, { count: rises.length, rise, player: who, step });
         }
         else {
-            const how = player.stepHeightM === 0 ? `${who} climbs no steps` : `${who} steps up ${player.stepHeightM} m`;
-            const jump = stepValues.maxRiseMeters <= player.jumpHeightM ? " A jump clears it, or collision can be a ramp." : "";
-            results.push({ id: "player-steps", status: expect.stairs === true ? "fail" : "warn", message: `The tallest rise is ${stepValues.maxRiseMeters} m, and ${how}.${jump}`, values: stepValues });
+            const clears = rise <= player.jumpHeightM ? 1 : 0;
+            add(expect.stairs === true ? "fail" : "warn", "tall", `The tallest rise is ${rise} m, and ${step === 0 ? `${who} climbs no steps` : `${who} steps up ${step} m`}.${clears ? " A jump clears it, or collision can be a ramp." : ""}`, stepValues, { rise, player: who, step, clears });
         }
         const rampValues = { player: player.id, playerName: who, walkableSlopeDegrees: player.walkableSlopeDeg, ramps };
         const tooSteep = ramps.filter((slope) => !slope.walkable);
+        const steepest = ramps[ramps.length - 1]?.angleDegrees ?? 0;
+        const said = { steepest, player: who, walkable: player.walkableSlopeDeg };
         if (ramps.length === 0) {
-            const reason = `No flat slope from ${RAMP_MIN_DEGREES} to ${RAMP_MAX_DEGREES} degrees was found that is large enough to stand on.`;
             if (expect.ramp === true)
-                results.push({ id: "player-ramps", status: "fail", message: "A ramp was expected, and none was found.", values: rampValues });
-            else
-                results.push({ id: "player-ramps", status: "not-measured", message: "The asset has no ramps.", reason, values: rampValues });
+                add("fail", "expected", "A ramp was expected, and none was found.", rampValues);
+            else {
+                unmeasured("none", "The asset has no ramps.", `No flat slope from ${RAMP_MIN_DEGREES} to ${RAMP_MAX_DEGREES} degrees was found that is large enough to stand on.`, rampValues, { min: RAMP_MIN_DEGREES, max: RAMP_MAX_DEGREES });
+            }
         }
         else if (tooSteep.length > 0) {
-            results.push({
-                id: "player-ramps",
-                status: expect.ramp === true ? "fail" : "warn",
-                message: `${plural(tooSteep.length, "slope is", "slopes are")} steeper than the ${player.walkableSlopeDeg} degrees ${who} walks up. The steepest is ${ramps[ramps.length - 1].angleDegrees} degrees.`,
-                values: rampValues,
+            add(expect.ramp === true ? "fail" : "warn", "steep", `${plural(tooSteep.length, "slope is", "slopes are")} steeper than the ${player.walkableSlopeDeg} degrees ${who} walks up. The steepest is ${steepest} degrees.`, rampValues, {
+                count: tooSteep.length,
+                ...said,
             });
         }
         else {
-            results.push({ id: "player-ramps", status: "pass", message: `${plural(ramps.length, "slope")} of up to ${ramps[ramps.length - 1].angleDegrees} degrees, and ${who} walks up ${player.walkableSlopeDeg}.`, values: rampValues });
+            add("pass", "walked", `${plural(ramps.length, "slope")} of up to ${steepest} degrees, and ${who} walks up ${player.walkableSlopeDeg}.`, rampValues, { count: ramps.length, ...said });
         }
     }
     const counts = { pass: 0, warn: 0, fail: 0, notMeasured: 0 };

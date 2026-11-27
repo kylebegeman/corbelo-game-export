@@ -21,6 +21,18 @@ export const NO_DECOMPOSITION = "No convex decomposition was made. ";
 export function refuse(code, message) {
     throw new GameExportError(code, message);
 }
+/** Refuses an option that is not one the package can read. */
+export function badOption(message) {
+    return refuse("BAD_OPTION", message);
+}
+/** Refuses a `refines` that does not say how a body's triangles lie in its coarse surfaces. */
+export function badRefinement(message) {
+    return refuse("BAD_REFINEMENT", message);
+}
+/** Whether a value is anything other than an object: a list counts as an object, and null does not. */
+export function notObject(value) {
+    return typeof value !== "object" || value === null;
+}
 /** Runs `work` on one body of the input, and marks a refusal that comes out of it with that body. */
 export function forBody(body, work) {
     try {

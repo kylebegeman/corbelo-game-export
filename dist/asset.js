@@ -1,55 +1,82 @@
 import { planCollision, readCollisionSettings } from "./collision.js";
-import { forBody, refuse } from "./errors.js";
-import { boundsOf, draftScene, finishScene, measuredBox, toEngine } from "./export.js";
+import { badOption, forBody, notObject, refuse } from "./errors.js";
+import { boundsOf, checkMesh, draftScene, finishScene, isArrayLike, measuredBox, readPivot, toEngine } from "./export.js";
 import { COMPONENT_FLOAT, COMPONENT_UNSIGNED_INT, COMPONENT_UNSIGNED_SHORT, MODE_TRIANGLES, NODE_VISIBILITY_EXTENSION, TARGET_ARRAY_BUFFER, TARGET_ELEMENT_ARRAY_BUFFER } from "./gltf.js";
 import { meshDeviation } from "./lod.js";
 import { clearName, uniqueName } from "./names.js";
 import { toGltfSpace } from "./space.js";
 import { boxProject, DEFAULT_TILE_METERS } from "./uv.js";
-function isArrayLike(value) {
-    return (Array.isArray(value) || ArrayBuffer.isView(value)) && typeof value.length === "number";
-}
 function isPoint(value) {
     return Array.isArray(value) && value.length === 3 && value.every((part) => Number.isFinite(part));
 }
+function badCollision(message) {
+    return refuse("BAD_COLLISION", message);
+}
+function badPoint(message) {
+    return refuse("BAD_ATTACH_POINT", message);
+}
 /** Checks what a body has beyond a plain body. The meshes of detail levels are checked with the body's own. */
 function checkAssetBody(body) {
-    if (typeof body !== "object" || body === null)
+    if (notObject(body))
         return;
     const label = `Body "${String(body.name)}"`;
     if (body.lods !== undefined && !Array.isArray(body.lods))
         refuse("BAD_LOD", `${label}: lods must be a list of meshes, the nearest to full detail first.`);
     if (body.collisionPieces !== undefined) {
         if (!Array.isArray(body.collisionPieces))
-            refuse("BAD_COLLISION", `${label}: collisionPieces must be a list of { positions }.`);
+            badCollision(`${label}: collisionPieces must be a list of { positions }.`);
         for (const [at, piece] of body.collisionPieces.entries()) {
             const where = `${label}, collision piece ${at}`;
-            if (typeof piece !== "object" || piece === null || !isArrayLike(piece.positions))
-                refuse("BAD_COLLISION", `${where} needs positions: x, y, z for each point.`);
+            if (notObject(piece) || !isArrayLike(piece.positions))
+                badCollision(`${where} needs positions: x, y, z for each point.`);
             if (piece.positions.length < 12 || piece.positions.length % 3 !== 0)
-                refuse("BAD_COLLISION", `${where}: positions must hold x, y, z for at least four points.`);
+                badCollision(`${where}: positions must hold x, y, z for at least four points.`);
             for (let n = 0; n < piece.positions.length; n += 1) {
                 if (!Number.isFinite(piece.positions[n]))
-                    refuse("BAD_COLLISION", `${where}: point ${Math.floor(n / 3)} has a coordinate that is not a finite number.`);
+                    badCollision(`${where}: point ${Math.floor(n / 3)} has a coordinate that is not a finite number.`);
             }
         }
+    }
+    const rest = body.collisionRemainder;
+    if (rest !== undefined) {
+        if (notObject(rest))
+            badCollision(`${label}: collisionRemainder must be { positions, indices }, one closed solid.`);
+        checkMesh(rest, `${label}, the rest of it for collision`, "the rest");
     }
     if (body.attachPoints !== undefined) {
         if (!Array.isArray(body.attachPoints))
-            refuse("BAD_ATTACH_POINT", `${label}: attachPoints must be a list of { name, position }.`);
+            badPoint(`${label}: attachPoints must be a list of { name, position }.`);
         for (const [at, point] of body.attachPoints.entries()) {
             const where = `${label}, attach point ${at}`;
-            if (typeof point !== "object" || point === null)
-                refuse("BAD_ATTACH_POINT", `${where} is not an object.`);
+            if (notObject(point))
+                badPoint(`${where} is not an object.`);
             if (typeof point.name !== "string" || point.name.trim() === "")
-                refuse("BAD_ATTACH_POINT", `${where} needs a name.`);
+                badPoint(`${where} needs a name.`);
             if (!isPoint(point.position))
-                refuse("BAD_ATTACH_POINT", `${where}: position must be three finite numbers [x, y, z] in source units.`);
+                badPoint(`${where}: position must be three finite numbers [x, y, z] in source units.`);
             if (point.direction !== undefined && (!isPoint(point.direction) || Math.hypot(...point.direction) === 0)) {
-                refuse("BAD_ATTACH_POINT", `${where}: direction must be three finite numbers [x, y, z] that are not all zero.`);
+                badPoint(`${where}: direction must be three finite numbers [x, y, z] that are not all zero.`);
             }
         }
     }
+}
+/**
+ * What an option gives each body: a list in the order of the bodies, or an object by body name.
+ * Nothing for a body it leaves to the option of the whole asset.
+ */
+function perBody(key, given, bodies) {
+    if (given === undefined)
+        return [];
+    if (notObject(given))
+        badOption(`${key} must be a list in the order of the bodies, or an object with an entry for each body name.`);
+    const list = Array.isArray(given) ? given : undefined;
+    const names = list !== undefined ? [] : Object.keys(given);
+    const missing = names.find((name) => !bodies.some((body) => body?.name === name));
+    if (missing !== undefined)
+        badOption(`${key} has an entry for a body named "${missing}", and no body has that name.`);
+    if (list !== undefined && list.length > bodies.length)
+        badOption(`${key} has ${list.length} entries, and there are ${bodies.length} bodies.`);
+    return bodies.map((body, index) => (list !== undefined ? list[index] : names.includes(body?.name) ? given[body.name] : undefined) ?? undefined);
 }
 /** Fills in a profile's name pattern: `{name}`, `{n}` counted from 0, and `{nn}` the same with two digits. */
 function fromPattern(pattern, name, n) {
@@ -102,27 +129,33 @@ function turnFromZ(direction) {
  * revision of a part to the next. The same input always gives the same bytes.
  */
 export function exportGameAsset(input) {
-    if (typeof input !== "object" || input === null)
+    if (notObject(input))
         refuse("NO_BODIES", "exportGameAsset needs { bodies, source }.");
-    const collision = readCollisionSettings(input.collision);
+    const everyCollision = readCollisionSettings(input.collision);
     let tileMeters;
     if (input.texcoords !== undefined && input.texcoords !== false) {
-        if (input.texcoords !== true && (typeof input.texcoords !== "object" || input.texcoords === null))
-            refuse("BAD_OPTION", "texcoords must be true, false or { tileMeters }.");
+        if (input.texcoords !== true && (notObject(input.texcoords)))
+            badOption("texcoords must be true, false or { tileMeters }.");
         tileMeters = (input.texcoords === true ? undefined : input.texcoords.tileMeters) ?? DEFAULT_TILE_METERS;
         if (!(Number.isFinite(tileMeters) && tileMeters > 0))
-            refuse("BAD_OPTION", `texcoords.tileMeters must be a positive number of metres. Got ${String(tileMeters)}.`);
+            badOption(`texcoords.tileMeters must be a positive number of metres. Got ${String(tileMeters)}.`);
     }
-    if (input.kernel !== undefined && (typeof input.kernel !== "object" || input.kernel === null || typeof input.kernel.solid !== "function")) {
-        refuse("BAD_OPTION", "kernel must be an object with a solid(positions, indices) function.");
+    if (input.kernel !== undefined && (notObject(input.kernel) || typeof input.kernel.solid !== "function")) {
+        badOption("kernel must be an object with a solid(positions, indices) function.");
     }
     const bodies = Array.isArray(input.bodies) ? input.bodies : [];
     for (const [index, body] of bodies.entries())
         forBody(index, () => checkAssetBody(body));
+    const collisions = perBody("collisions", input.collisions, bodies).map((own, index) => (own === undefined ? undefined : forBody(index, () => readCollisionSettings(own, everyCollision))));
+    const pivots = perBody("pivots", input.pivots, bodies);
+    for (const [index, pivot] of pivots.entries())
+        if (pivot !== undefined)
+            forBody(index, () => readPivot(pivot, `The pivot of body "${bodies[index].name}"`));
     const tile = tileMeters;
     const draft = draftScene(input, {
         caller: "exportGameAsset",
-        levels: bodies.map((body) => (typeof body === "object" && body !== null ? body.lods : undefined)),
+        pivots,
+        levels: bodies.map((body) => (!notObject(body) ? body.lods : undefined)),
         slotOrder: "name",
         ...(tile !== undefined ? { texture: (mesh, offset) => boxProject(mesh, offset, tile) } : {}),
     });
@@ -136,7 +169,7 @@ export function exportGameAsset(input) {
         (nodes[parent].children ??= []).push(nodes.length - 1);
         return nodes.length - 1;
     };
-    facts.settings.collision = { ...collision, kernel: input.kernel !== undefined };
+    facts.settings.collision = { ...everyCollision, kernel: input.kernel !== undefined };
     if (tile !== undefined)
         facts.settings.texcoords = { projection: "box", tileMeters: tile };
     // An engine that reads detail levels from names wants every level as a child of one node.
@@ -165,6 +198,7 @@ export function exportGameAsset(input) {
                         vertices: written.slots.reduce((total, slot) => total + slot.vertices, 0),
                         materialSlots: written.slots.length,
                         materials: written.slots.map((slot) => slot.material),
+                        ...(written.shadedFrom !== undefined ? { shadedFrom: written.shadedFrom } : {}),
                         degenerateTrianglesDropped: written.mesh.degenerateTrianglesDropped,
                         openEdges: written.mesh.openEdges,
                         nonManifoldEdges: written.mesh.nonManifoldEdges,
@@ -195,16 +229,30 @@ export function exportGameAsset(input) {
                 }
                 bodyFacts.lods = lods;
             }
-            // Collision, planned in the body's own frame: metres from its pivot.
-            if (collision.shape !== "none") {
-                const pieces = body.collisionPieces?.map((piece) => {
-                    const points = new Float64Array(piece.positions.length);
-                    toGltfSpace(piece.positions, conversion, points);
+            // Collision, planned in the body's own frame: metres from its pivot. A body with settings
+            // of its own has facts even when they ask for no shape, so that is seen to be a choice.
+            const collision = collisions[index] ?? everyCollision;
+            if (collision.shape !== "none" || collisions[index] !== undefined) {
+                const own = (positions) => {
+                    const points = new Float64Array(positions.length);
+                    toGltfSpace(positions, conversion, points);
                     for (let at = 0; at < points.length; at += 1)
                         points[at] = points[at] - pivot[at % 3];
                     return points;
-                });
-                const plan = planCollision({ name: body.name, positions: drafted.stored, indices: drafted.mesh.indices, closed: drafted.mesh.openEdges === 0 && drafted.mesh.nonManifoldEdges === 0, pieces }, collision, input.kernel);
+                };
+                const pieces = body.collisionPieces?.map((piece) => own(piece.positions));
+                const rest = body.collisionRemainder;
+                // A mirrored source has its triangles turned over, as the body's own are, to face outwards.
+                const remainder = rest === undefined
+                    ? undefined
+                    : {
+                        positions: own(rest.positions),
+                        indices: Uint32Array.from({ length: rest.indices?.length ?? rest.positions.length / 3 }, (_, at) => {
+                            const from = conversion.mirrored && at % 3 > 0 ? at + 3 - 2 * (at % 3) : at;
+                            return rest.indices?.[from] ?? from;
+                        }),
+                    };
+                const plan = planCollision({ name: body.name, positions: drafted.stored, indices: drafted.mesh.indices, closed: drafted.mesh.openEdges === 0 && drafted.mesh.nonManifoldEdges === 0, pieces, remainder }, collision, input.kernel);
                 const written = (plan.chosen?.pieces ?? []).map((piece, n) => {
                     const { name: pieceName, role } = collisionName(profile, piece.kind, name, n, used);
                     const positions = Float32Array.from(piece.positions);
@@ -233,7 +281,10 @@ export function exportGameAsset(input) {
                     requested: plan.requested,
                     shape: plan.chosen?.shape ?? "none",
                     pieces: written.length,
+                    ...(remainder !== undefined && plan.chosen?.shape === "decomposition" ? { givenPieces: pieces?.length ?? 0 } : {}),
                     tolerance: collision.tolerance,
+                    maxPieces: collision.maxPieces,
+                    maxHullVertices: collision.maxHullVertices,
                     volume: { visible: plan.visibleVolume, collision: plan.chosen?.volume ?? 0, error: plan.chosen?.error ?? null },
                     withinTolerance: plan.chosen?.withinTolerance ?? null,
                     nodes: written,

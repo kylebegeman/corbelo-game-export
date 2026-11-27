@@ -1,6 +1,6 @@
 import { exportBlockout } from "./blockout.js";
 import { checkGameAsset } from "./checks.js";
-import { refuse } from "./errors.js";
+import { notObject, refuse } from "./errors.js";
 import { assertJson } from "./export.js";
 import { checkKit } from "./kit-checks.js";
 import { cellSize, kitLayouts, resolveKit } from "./kit.js";
@@ -22,14 +22,14 @@ const worse = (a, b) => (a === "fail" || b === "fail" ? "fail" : a === "warn" ||
  * names, so the pieces share their slots. The same input always gives the same bytes.
  */
 export function exportKitPack(input) {
-    if (typeof input !== "object" || input === null)
+    if (notObject(input))
         refuse("BAD_KIT", "exportKitPack needs { name, source, grid, pieces }.");
     for (const key of ["generatedAt", "revision"]) {
         if (input[key] !== undefined && (typeof input[key] !== "string" || input[key] === ""))
             refuse("BAD_PACK", `${key} must be text.`);
     }
     for (const key of ["checks", "pieceChecks"]) {
-        if (input[key] !== undefined && input[key] !== false && (typeof input[key] !== "object" || input[key] === null))
+        if (input[key] !== undefined && input[key] !== false && (notObject(input[key])))
             refuse("BAD_PACK", `${key} must be false or an object of options.`);
     }
     if (input.scenes !== undefined && typeof input.scenes !== "boolean")

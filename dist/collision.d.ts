@@ -59,7 +59,8 @@ export interface ResolvedCollisionSettings {
     maxHullVertices: number;
 }
 /** Reads the `collision` option: a shape by name, or settings. Refuses anything else. */
-export declare function readCollisionSettings(option: CollisionRequest | CollisionSettings | undefined): ResolvedCollisionSettings;
+/** Reads collision settings. What they leave out is taken from `base`: the settings of the asset, for those of one body. */
+export declare function readCollisionSettings(option: CollisionRequest | CollisionSettings | undefined, base?: ResolvedCollisionSettings): ResolvedCollisionSettings;
 /** One convex piece of a collision shape. */
 export interface CollisionPiece extends Hull {
     /** `"box"` for the box around the body, which engines can hold as a box. Everything else is `"convex"`. */
@@ -97,6 +98,11 @@ export interface CollisionSource {
     closed: boolean;
     /** Pieces the caller made the body from, each a list of points. Each becomes its convex hull. */
     pieces: readonly ArrayLike<number>[] | undefined;
+    /** The solid that is the rest of the body, beside the pieces: what a decomposition cuts up in place of the whole body. */
+    remainder?: {
+        positions: ArrayLike<number>;
+        indices: ArrayLike<number>;
+    } | undefined;
 }
 /** Each place in space once: the kernel needs a mesh whose triangles share vertices where they meet. */
 export declare function weldExact(positions: ArrayLike<number>, indices: ArrayLike<number>): {
@@ -114,3 +120,25 @@ export declare function weldExact(positions: ArrayLike<number>, indices: ArrayLi
  * make too.
  */
 export declare function planCollision(source: CollisionSource, settings: ResolvedCollisionSettings, kernel: CollisionKernel | undefined): CollisionPlan;
+/** What `decomposeSolid` made. Volumes are in the cube of the unit the solid was given in. */
+export interface Decomposition {
+    /** The convex pieces, each the hull of one part of the solid. */
+    pieces: Hull[];
+    /** The volumes of the pieces added up. */
+    volume: number;
+    /** The volume of the solid itself. */
+    solidVolume: number;
+    /** `(volume - solidVolume) / solidVolume`: the share the pieces hold more than the solid does. */
+    error: number;
+    withinTolerance: boolean;
+}
+/**
+ * Cuts one closed solid into convex pieces with a kernel, the way the `"decomposition"` shape of
+ * an asset is made, and measures the pieces against the solid. The solid is taken as given, in
+ * its own unit and axes, with its faces pointing outwards. Without indices it is triangle soup.
+ * Refuses a solid that cannot be cut up with `BAD_COLLISION`, and says why.
+ */
+export declare function decomposeSolid(solid: {
+    positions: ArrayLike<number>;
+    indices?: ArrayLike<number>;
+}, kernel: CollisionKernel, settings?: Pick<CollisionSettings, "tolerance" | "maxPieces" | "maxHullVertices">): Decomposition;
