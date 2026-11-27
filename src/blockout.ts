@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { badOption, notObject } from "./errors.js";
 import { assertJson } from "./export.js";
 import { readGlb } from "./glb-read.js";
 import { encodeGlb } from "./glb-write.js";
@@ -139,7 +139,7 @@ interface Stored {
  * cell and quarter turn. The same input always gives the same bytes.
  */
 export function exportBlockout(input: KitInput | Kit, layout: string | KitLayoutInput, options: BlockoutOptions = {}): BlockoutResult {
-  if (typeof options !== "object" || options === null) refuse("BAD_OPTION", "Blockout options must be an object.");
+  if (notObject(options)) badOption("Blockout options must be an object.");
   if (options.provenance !== undefined) assertJson(options.provenance, "provenance", 0);
   const kit = kitOf(input);
   const placed = layoutOf(kit, layout);

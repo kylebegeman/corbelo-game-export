@@ -1,4 +1,4 @@
-import { forBody, refuse } from "./errors.js";
+import { badOption, badRefinement, forBody, notObject, refuse } from "./errors.js";
 import { BinaryBuilder, encodeGlb } from "./glb-write.js";
 import {
   EXTRAS_KEY,
@@ -85,12 +85,12 @@ export function assertJson(value: unknown, path: string, depth: number): void {
 export function readPivot(pivot: PivotOption, what = "pivot"): PivotMode {
   if (typeof pivot === "string") {
     if (!PIVOT_MODES.includes(pivot)) {
-      refuse("BAD_OPTION", `${what} must be one of ${PIVOT_MODES.map((mode) => `"${mode}"`).join(", ")} or a point [x, y, z]. Got ${JSON.stringify(pivot)}.`);
+      badOption(`${what} must be one of ${PIVOT_MODES.map((mode) => `"${mode}"`).join(", ")} or a point [x, y, z]. Got ${JSON.stringify(pivot)}.`);
     }
     return pivot;
   }
   if (!Array.isArray(pivot) || pivot.length !== 3 || !pivot.every((value) => Number.isFinite(value))) {
-    refuse("BAD_OPTION", "A pivot point must be three finite numbers [x, y, z] in source units.");
+    badOption("A pivot point must be three finite numbers [x, y, z] in source units.");
   }
   return "point";
 }
@@ -98,27 +98,27 @@ export function readPivot(pivot: PivotOption, what = "pivot"): PivotMode {
 function readSettings(input: ExportInput): Settings {
   const creaseAngle = input.creaseAngle ?? DEFAULT_CREASE_ANGLE;
   if (!(Number.isFinite(creaseAngle) && creaseAngle >= 0 && creaseAngle <= 180)) {
-    refuse("BAD_OPTION", `creaseAngle must be from 0 to 180 degrees. Got ${String(creaseAngle)}.`);
+    badOption(`creaseAngle must be from 0 to 180 degrees. Got ${String(creaseAngle)}.`);
   }
   const weldTolerance = input.weldTolerance ?? DEFAULT_WELD_TOLERANCE;
   if (!(Number.isFinite(weldTolerance) && weldTolerance >= 0)) {
-    refuse("BAD_OPTION", `weldTolerance must be zero or a positive number of metres. Got ${String(weldTolerance)}.`);
+    badOption(`weldTolerance must be zero or a positive number of metres. Got ${String(weldTolerance)}.`);
   }
   const maxTriangles = input.maxTriangles ?? DEFAULT_MAX_TRIANGLES;
   if (!(Number.isInteger(maxTriangles) && maxTriangles > 0)) {
-    refuse("BAD_OPTION", `maxTriangles must be a positive whole number. Got ${String(maxTriangles)}.`);
+    badOption(`maxTriangles must be a positive whole number. Got ${String(maxTriangles)}.`);
   }
   const normals = input.normals ?? "angle-area";
   if (normals !== "angle-area" && normals !== "face-weighted") {
-    refuse("BAD_OPTION", `normals must be "angle-area" or "face-weighted". Got ${JSON.stringify(normals)}.`);
+    badOption(`normals must be "angle-area" or "face-weighted". Got ${JSON.stringify(normals)}.`);
   }
   const placement = input.placement ?? "origin";
   if (placement !== "origin" && placement !== "designed" && placement !== "assembly") {
-    refuse("BAD_OPTION", `placement must be "origin", "designed" or "assembly". Got ${JSON.stringify(placement)}.`);
+    badOption(`placement must be "origin", "designed" or "assembly". Got ${JSON.stringify(placement)}.`);
   }
   const colorSpace = input.colorSpace ?? "srgb";
   if (colorSpace !== "srgb" && colorSpace !== "linear") {
-    refuse("BAD_OPTION", `colorSpace must be "srgb" or "linear". Got ${JSON.stringify(colorSpace)}.`);
+    badOption(`colorSpace must be "srgb" or "linear". Got ${JSON.stringify(colorSpace)}.`);
   }
   const pivot = input.pivot ?? "base-center";
   const pivotMode = readPivot(pivot);
@@ -190,7 +190,7 @@ export function checkMesh(mesh: { positions: ArrayLike<number>; indices?: ArrayL
  * refines have together. Refuses anything malformed.
  */
 function checkBody(body: BodyInput, index: number): { triangles: number; refined: number } {
-  if (typeof body !== "object" || body === null) refuse("BAD_POSITIONS", `Body ${index} is not an object.`);
+  if (notObject(body)) refuse("BAD_POSITIONS", `Body ${index} is not an object.`);
   if (typeof body.name !== "string" || body.name.trim() === "") refuse("BAD_NAME", `Body ${index} needs a name.`);
   const label = `Body "${body.name}"`;
   const triangles = checkMesh(body, label, "the body");
@@ -206,36 +206,35 @@ function checkBody(body: BodyInput, index: number): { triangles: number; refined
 
   let refined = 0;
   if (refines !== undefined) {
-    if (typeof refines !== "object" || refines === null) refuse("BAD_REFINEMENT", `${label}: refines must be { surfaces, triangleOf }.`);
+    if (notObject(refines)) badRefinement(`${label}: refines must be { surfaces, triangleOf }.`);
     const { surfaces, surfaceOf, triangleOf } = refines;
-    if (!Array.isArray(surfaces) || surfaces.length === 0) refuse("BAD_REFINEMENT", `${label}: refines.surfaces must be an array with at least one mesh.`);
+    if (!Array.isArray(surfaces) || surfaces.length === 0) badRefinement(`${label}: refines.surfaces must be an array with at least one mesh.`);
     const surfaceTriangles = surfaces.map((surface, at) => {
       const surfaceLabel = `${label}, surface ${at} of refines`;
-      if (typeof surface !== "object" || surface === null) refuse("BAD_REFINEMENT", `${surfaceLabel} is not an object.`);
+      if (notObject(surface)) badRefinement(`${surfaceLabel} is not an object.`);
       return checkMesh(surface, surfaceLabel, "the surface");
     });
     refined = surfaceTriangles.reduce((total, count) => total + count, 0);
     const wholeNumbers = (values: unknown, key: string): ArrayLike<number> => {
-      if (!isArrayLike(values)) refuse("BAD_REFINEMENT", `${label}: refines.${key} must be a typed array or an array of numbers.`);
+      if (!isArrayLike(values)) badRefinement(`${label}: refines.${key} must be a typed array or an array of numbers.`);
       if (values.length !== triangles) {
-        refuse("BAD_REFINEMENT", `${label}: refines.${key} holds ${values.length} numbers for ${triangles} triangles. It needs exactly one per triangle.`);
+        badRefinement(`${label}: refines.${key} holds ${values.length} numbers for ${triangles} triangles. It needs exactly one per triangle.`);
       }
       return values;
     };
     if (surfaceOf === undefined && surfaces.length > 1) {
-      refuse("BAD_REFINEMENT", `${label}: refines has ${surfaces.length} surfaces, so it needs surfaceOf to say which one each triangle lies in.`);
+      badRefinement(`${label}: refines has ${surfaces.length} surfaces, so it needs surfaceOf to say which one each triangle lies in.`);
     }
     const ofSurface = surfaceOf === undefined ? undefined : wholeNumbers(surfaceOf, "surfaceOf");
     const ofTriangle = wholeNumbers(triangleOf, "triangleOf");
     for (let at = 0; at < triangles; at += 1) {
       const surface = ofSurface === undefined ? 0 : ofSurface[at]!;
       if (!Number.isInteger(surface) || surface < 0 || surface >= surfaces.length) {
-        refuse("BAD_REFINEMENT", `${label}: refines.surfaceOf says triangle ${at} lies in surface ${String(surface)}, but there are ${surfaces.length} surfaces, numbered from 0.`);
+        badRefinement(`${label}: refines.surfaceOf says triangle ${at} lies in surface ${String(surface)}, but there are ${surfaces.length} surfaces, numbered from 0.`);
       }
       const triangle = ofTriangle[at]!;
       if (!Number.isInteger(triangle) || triangle < 0 || triangle >= surfaceTriangles[surface]!) {
-        refuse(
-          "BAD_REFINEMENT",
+        badRefinement(
           `${label}: refines.triangleOf says triangle ${at} lies in triangle ${String(triangle)}, but ${surfaces.length > 1 ? `surface ${surface}` : "the surface"} has ${surfaceTriangles[surface]!} triangles, numbered from 0.`,
         );
       }
@@ -375,7 +374,7 @@ function compareText(a: string, b: string): number {
  */
 export function draftScene(input: ExportInput, extension: SceneExtension = {}): SceneDraft {
   const caller = extension.caller ?? "exportGameGlb";
-  if (typeof input !== "object" || input === null) refuse("NO_BODIES", `${caller} needs { bodies, source }.`);
+  if (notObject(input)) refuse("NO_BODIES", `${caller} needs { bodies, source }.`);
   const settings = readSettings(input);
   const conversion = spaceConversion(input.source);
   const { bodies } = input;
@@ -391,7 +390,7 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
       let levelTriangles = 0;
       for (const [at, level] of levelsOf(index).entries()) {
         const label = `Body "${body.name}", detail level ${at + 1}`;
-        if (typeof level !== "object" || level === null) refuse("BAD_LOD", `${label} is not an object with positions.`);
+        if (notObject(level)) refuse("BAD_LOD", `${label} is not an object with positions.`);
         const triangles = checkMesh(level, label, "the level");
         if (level.faceColors !== undefined && (!Array.isArray(level.faceColors) || level.faceColors.length !== triangles)) {
           refuse("BAD_FACE_COLORS", `${label}: faceColors needs exactly one colour, or null, for each of its ${triangles} triangles.`);

@@ -1,6 +1,6 @@
 import { openingsAlong, playerName, resolvePlayer, STEP_MAX_RISE_METERS, walkable, type CheckStatus, type PlayerProfile, type SceneMesh } from "./checks.js";
 import { weldExact, type CollisionKernel, type KernelSolid } from "./collision.js";
-import { GameExportError, refuse } from "./errors.js";
+import { badOption, GameExportError, notObject } from "./errors.js";
 import { readAccessor, readGlb, readPack } from "./glb-read.js";
 import {
   cellSize,
@@ -908,12 +908,12 @@ function seamTypes(kit: Kit, entries: readonly Entry[], faceOfEntry: (entry: Ent
  * Another module size is one call: pass `{ grid }` in the options.
  */
 export function checkKit(input: KitInput | Kit, options: KitCheckOptions = {}): KitCheckReport {
-  if (typeof options !== "object" || options === null) refuse("BAD_OPTION", "Check options must be an object.");
+  if (notObject(options)) badOption("Check options must be an object.");
   const kit = kitOf(input, options.grid);
   const tolerance = options.toleranceMeters ?? DEFAULT_KIT_TOLERANCE_METERS;
-  if (!(Number.isFinite(tolerance) && tolerance > 0)) refuse("BAD_OPTION", `toleranceMeters must be a positive number of metres. Got ${String(tolerance)}.`);
-  if (options.kernel !== undefined && (typeof options.kernel !== "object" || options.kernel === null || typeof options.kernel.solid !== "function")) {
-    refuse("BAD_OPTION", "kernel must be an object with a solid(positions, indices) function.");
+  if (!(Number.isFinite(tolerance) && tolerance > 0)) badOption(`toleranceMeters must be a positive number of metres. Got ${String(tolerance)}.`);
+  if (options.kernel !== undefined && (notObject(options.kernel) || typeof options.kernel.solid !== "function")) {
+    badOption("kernel must be an object with a solid(positions, indices) function.");
   }
   const kernel = options.kernel;
   const player = resolvePlayer(options.player, kit.profile);
@@ -1065,7 +1065,7 @@ export function checkKit(input: KitInput | Kit, options: KitCheckOptions = {}): 
               try {
                 const others = placedShells(kernel, solid, otherPlacement, grid, made);
                 for (const first of placedShells(kernel, trim, placement, grid, made)) {
-                  if (first.intersect === undefined) refuse("BAD_OPTION", "The kernel's solids have no intersect(other), which measuring where trim overlaps needs.");
+                  if (first.intersect === undefined) badOption("The kernel's solids have no intersect(other), which measuring where trim overlaps needs.");
                   for (const second of others) {
                     const common = first.intersect(second);
                     made.push(common);

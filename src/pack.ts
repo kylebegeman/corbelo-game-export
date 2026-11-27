@@ -1,7 +1,7 @@
 import { exportGameAsset } from "./asset.js";
 import type { BlockoutFacts } from "./blockout.js";
 import { checkGameAsset, type AssetClass, type CheckOptions, type CheckReport, type GameBudget, type PlayerProfile } from "./checks.js";
-import { refuse } from "./errors.js";
+import { notObject, refuse } from "./errors.js";
 import { assertJson } from "./export.js";
 import type { KitManifest } from "./kit-pack.js";
 import { assetName, DEFAULT_NAME_PATTERNS } from "./naming.js";
@@ -129,7 +129,7 @@ export interface GamePack {
  */
 export function manifestJson(value: unknown, indent = ""): string {
   if (Array.isArray(value)) {
-    if (value.every((item) => typeof item !== "object" || item === null)) return `[${value.map((item) => JSON.stringify(item)).join(", ")}]`;
+    if (value.every((item) => notObject(item))) return `[${value.map((item) => JSON.stringify(item)).join(", ")}]`;
     return `[\n${value.map((item) => `${indent}  ${manifestJson(item, `${indent}  `)}`).join(",\n")}\n${indent}]`;
   }
   if (typeof value === "object" && value !== null) {
@@ -156,7 +156,7 @@ const PACK_ONLY_KEYS: readonly string[] = ["name", "bodies", "rows", "naming", "
  * The same input always gives the same bytes: nothing is read from the clock or the machine.
  */
 export function exportGamePack(input: PackInput): GamePack {
-  if (typeof input !== "object" || input === null) refuse("BAD_PACK", "exportGamePack needs { name, source, bodies } or { name, source, rows }.");
+  if (notObject(input)) refuse("BAD_PACK", "exportGamePack needs { name, source, bodies } or { name, source, rows }.");
   const hasBodies = input.bodies !== undefined;
   const hasRows = input.rows !== undefined;
   if (hasBodies === hasRows) refuse("BAD_PACK", "A pack is one asset or a family: give bodies or rows, and not both.");
@@ -164,7 +164,7 @@ export function exportGamePack(input: PackInput): GamePack {
   for (const key of ["generatedAt", "revision"] as const) {
     if (input[key] !== undefined && (typeof input[key] !== "string" || input[key] === "")) refuse("BAD_PACK", `${key} must be text.`);
   }
-  if (input.checks !== undefined && input.checks !== false && (typeof input.checks !== "object" || input.checks === null)) {
+  if (input.checks !== undefined && input.checks !== false && (notObject(input.checks))) {
     refuse("BAD_PACK", "checks must be false or the options of checkGameAsset.");
   }
   if (input.provenance !== undefined) assertJson(input.provenance, "provenance", 0);
@@ -179,7 +179,7 @@ export function exportGamePack(input: PackInput): GamePack {
   }
   const rows: readonly { row?: string; asset: string; bodies: readonly AssetBodyInput[]; provenance?: JsonValue }[] = hasRows
     ? input.rows!.map((row, at) => {
-        if (typeof row !== "object" || row === null) refuse("BAD_PACK", `Row ${at} must be { name, bodies }.`);
+        if (notObject(row)) refuse("BAD_PACK", `Row ${at} must be { name, bodies }.`);
         if (typeof row.name !== "string") refuse("BAD_PACK", `Row ${at} needs a name.`);
         if (row.provenance !== undefined) assertJson(row.provenance, `rows[${at}].provenance`, 0);
         return { row: row.name, asset: assetName(pattern, input.name, row.name), bodies: row.bodies, ...(row.provenance !== undefined ? { provenance: row.provenance } : {}) };
@@ -202,7 +202,7 @@ export function exportGamePack(input: PackInput): GamePack {
     const where = row === undefined ? "The asset" : `Row "${row}"`;
     if (!Array.isArray(bodies) || bodies.length === 0) refuse("NO_BODIES", `${where} needs at least one body.`);
     // One body is the asset: it takes the asset's name. Several keep their own.
-    const one = bodies.length === 1 && typeof bodies[0] === "object" && bodies[0] !== null ? bodies[0] : undefined;
+    const one = bodies.length === 1 && !notObject(bodies[0]) ? bodies[0] : undefined;
     const named = one !== undefined ? [{ ...one, name: asset }] : bodies;
     // What was given for that one body by the name it had goes with it to the name it takes.
     const own: Record<string, unknown> = {};
@@ -258,6 +258,6 @@ export function exportGamePack(input: PackInput): GamePack {
 
 /** A pack as one ZIP archive: every file of it, stored. The same pack always gives the same bytes. */
 export function packToZip(pack: Pick<GamePack, "files">): Uint8Array {
-  if (typeof pack !== "object" || pack === null || !Array.isArray(pack.files)) refuse("BAD_PACK", "packToZip needs what exportGamePack returned.");
+  if (notObject(pack) || !Array.isArray(pack.files)) refuse("BAD_PACK", "packToZip needs what exportGamePack returned.");
   return writeZip(pack.files.map((file) => ({ name: file.name, bytes: file.bytes })));
 }

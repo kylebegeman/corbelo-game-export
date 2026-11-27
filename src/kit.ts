@@ -1,5 +1,5 @@
 import { exportGameAsset } from "./asset.js";
-import { refuse } from "./errors.js";
+import { badOption, notObject, refuse } from "./errors.js";
 import { assertJson } from "./export.js";
 import { readPack } from "./glb-read.js";
 import { assetName, DEFAULT_NAME_PATTERNS } from "./naming.js";
@@ -232,7 +232,7 @@ function isCells(value: unknown, least: number): value is readonly [number, numb
 }
 
 export function readGrid(grid: KitGridInput): KitGrid {
-  if (typeof grid !== "object" || grid === null) refuse("BAD_KIT", "A kit needs grid: { moduleMeters, storeyMeters }.");
+  if (notObject(grid)) refuse("BAD_KIT", "A kit needs grid: { moduleMeters, storeyMeters }.");
   for (const key of ["moduleMeters", "storeyMeters"] as const) {
     if (!(Number.isFinite(grid[key]) && grid[key] > 0)) refuse("BAD_KIT", `grid.${key} must be a positive number of metres. Got ${String(grid[key])}.`);
   }
@@ -280,7 +280,7 @@ export function socketFrame(socket: Pick<KitSocket, "side" | "cell">, grid: KitG
 }
 
 function readSocket(input: KitSocketInput, where: string, cells: KitCell, grid: KitGrid, toBlock: (point: readonly number[]) => Vec3, toDirection: (direction: readonly number[]) => Vec3): Omit<KitSocket, "name"> & { name?: string } {
-  if (typeof input !== "object" || input === null) refuse("BAD_KIT", `${where} must be { type, side } or { type, plane }.`);
+  if (notObject(input)) refuse("BAD_KIT", `${where} must be { type, side } or { type, plane }.`);
   if (typeof input.type !== "string" || input.type.trim() === "") refuse("BAD_KIT", `${where} needs a type, like "wall end".`);
   if (input.name !== undefined && (typeof input.name !== "string" || input.name.trim() === "")) refuse("BAD_KIT", `${where}: name must be text.`);
   if ((input.side === undefined) === (input.plane === undefined)) refuse("BAD_KIT", `${where}: give side or plane, and not both.`);
@@ -296,7 +296,7 @@ function readSocket(input: KitSocketInput, where: string, cells: KitCell, grid: 
     cell = input.cell !== undefined ? [input.cell[0], input.cell[1], input.cell[2]] : [0, 0, 0];
   } else {
     const plane = input.plane!;
-    if (typeof plane !== "object" || plane === null || !isPoint(plane.point) || !isPoint(plane.normal) || Math.hypot(...plane.normal) === 0) {
+    if (notObject(plane) || !isPoint(plane.point) || !isPoint(plane.normal) || Math.hypot(...plane.normal) === 0) {
       refuse("BAD_KIT", `${where}: plane must be { point: [x, y, z], normal: [x, y, z] } with a normal that is not all zero.`);
     }
     const normal = toDirection(plane.normal);
@@ -341,7 +341,7 @@ function readLayouts(layouts: readonly KitLayoutInput[] | undefined, pieces: rea
   if (!Array.isArray(layouts)) refuse("BAD_LAYOUT", "layouts must be a list of { name, placements }.");
   const names = new Set<string>();
   return layouts.map((layout, at) => {
-    if (typeof layout !== "object" || layout === null || typeof layout.name !== "string" || layout.name.trim() === "") refuse("BAD_LAYOUT", `Layout ${at} needs a name.`);
+    if (notObject(layout) || typeof layout.name !== "string" || layout.name.trim() === "") refuse("BAD_LAYOUT", `Layout ${at} needs a name.`);
     if (names.has(layout.name.toLowerCase())) refuse("BAD_LAYOUT", `Two layouts are named "${layout.name}".`);
     names.add(layout.name.toLowerCase());
     return readLayout(layout, pieces);
@@ -350,11 +350,11 @@ function readLayouts(layouts: readonly KitLayoutInput[] | undefined, pieces: rea
 
 /** Checks a layout the caller wrote against the pieces there are. */
 export function readLayout(layout: KitLayoutInput, pieces: readonly { name: string }[]): KitLayout {
-  if (typeof layout !== "object" || layout === null || typeof layout.name !== "string" || layout.name.trim() === "") refuse("BAD_LAYOUT", "A layout needs a name.");
+  if (notObject(layout) || typeof layout.name !== "string" || layout.name.trim() === "") refuse("BAD_LAYOUT", "A layout needs a name.");
   if (!Array.isArray(layout.placements) || layout.placements.length === 0) refuse("BAD_LAYOUT", `Layout "${layout.name}" needs placements: a list of { piece, cell, turn }.`);
   const placements = layout.placements.map((placement: KitPlacementInput, at: number): KitPlacement => {
     const where = `Layout "${layout.name}", placement ${at}`;
-    if (typeof placement !== "object" || placement === null) refuse("BAD_LAYOUT", `${where} must be { piece, cell, turn }.`);
+    if (notObject(placement)) refuse("BAD_LAYOUT", `${where} must be { piece, cell, turn }.`);
     if (!pieces.some((piece) => piece.name === placement.piece)) refuse("BAD_LAYOUT", `${where}: the kit has no piece named ${JSON.stringify(placement.piece)}.`);
     if (!Array.isArray(placement.cell) || placement.cell.length !== 3 || !placement.cell.every((part) => Number.isInteger(part))) {
       refuse("BAD_LAYOUT", `${where}: cell must be three whole numbers, like [2, 0, 0].`);
@@ -374,7 +374,7 @@ export function readLayout(layout: KitLayoutInput, pieces: readonly { name: stri
  * The same input always gives the same bytes.
  */
 export function resolveKit(input: KitInput, grid?: KitGridInput): Kit {
-  if (typeof input !== "object" || input === null) refuse("BAD_KIT", "A kit is { name, source, grid, pieces }.");
+  if (notObject(input)) refuse("BAD_KIT", "A kit is { name, source, grid, pieces }.");
   if (typeof input.name !== "string" || input.name.trim() === "") refuse("BAD_KIT", "A kit needs a name.");
   for (const key of ["pivot", "pivots", "placement", "collisions"]) {
     if ((input as unknown as Record<string, unknown>)[key] !== undefined) {
@@ -388,7 +388,7 @@ export function resolveKit(input: KitInput, grid?: KitGridInput): Kit {
 
   const mates: Record<string, string> = {};
   if (input.mates !== undefined) {
-    if (typeof input.mates !== "object" || input.mates === null || Array.isArray(input.mates)) refuse("BAD_KIT", "mates must be an object of socket types, like { \"plug\": \"hole\" }.");
+    if (notObject(input.mates) || Array.isArray(input.mates)) refuse("BAD_KIT", "mates must be an object of socket types, like { \"plug\": \"hole\" }.");
     for (const [type, other] of Object.entries(input.mates)) {
       if (typeof other !== "string" || other.trim() === "" || type.trim() === "") refuse("BAD_KIT", `mates: "${type}" must name a socket type.`);
       for (const [from, to] of [[type.trim(), other.trim()], [other.trim(), type.trim()]] as const) {
@@ -407,7 +407,7 @@ export function resolveKit(input: KitInput, grid?: KitGridInput): Kit {
   const taken = new Map<string, string>();
   const pieceNames = new Set<string>();
   const pieces = given.map((piece: KitPieceInput, at: number): KitPiece => {
-    if (typeof piece !== "object" || piece === null) refuse("BAD_KIT", `Piece ${at} must be { name, bodies } or { name, glb }.`);
+    if (notObject(piece)) refuse("BAD_KIT", `Piece ${at} must be { name, bodies } or { name, glb }.`);
     if (typeof piece.name !== "string" || piece.name.trim() === "") refuse("BAD_KIT", `Piece ${at} needs a name.`);
     const where = `Piece "${piece.name}"`;
     if (pieceNames.has(piece.name)) refuse("BAD_KIT", `Two pieces are named "${piece.name}".`);
@@ -445,7 +445,7 @@ export function resolveKit(input: KitInput, grid?: KitGridInput): Kit {
       const bodies: readonly AssetBodyInput[] = piece.bodies;
       const sourcePivot = piece.pivot ?? piece.origin ?? [0, 0, 0];
       // One body is the piece: it takes the piece's file name, as the one body of an asset does.
-      const named = bodies.length === 1 && typeof bodies[0] === "object" && bodies[0] !== null ? [{ ...bodies[0], name: asset }] : bodies;
+      const named = bodies.length === 1 && !notObject(bodies[0]) ? [{ ...bodies[0]!, name: asset }] : bodies;
       const stored = piece.provenance ?? input.provenance;
       const result = exportGameAsset({
         ...(options as AssetOptions),
@@ -499,13 +499,13 @@ export function resolveKit(input: KitInput, grid?: KitGridInput): Kit {
 
 /** True for a kit `resolveKit` returned, false for one as it is given. */
 export function isKit(value: KitInput | Kit): value is Kit {
-  return typeof value === "object" && value !== null && typeof (value as Kit).profile === "string" && Array.isArray(value.pieces) && value.pieces.every((piece) => typeof piece === "object" && piece !== null && "glb" in piece && "facts" in piece);
+  return !notObject(value) && typeof (value as Kit).profile === "string" && Array.isArray(value.pieces) && value.pieces.every((piece) => !notObject(piece) && "glb" in piece && "facts" in piece);
 }
 
 /** A kit as `resolveKit` returns it, from that or from a kit as it is given. */
 export function kitOf(input: KitInput | Kit, grid?: KitGridInput): Kit {
   if (!isKit(input)) return resolveKit(input, grid);
-  if (grid !== undefined) refuse("BAD_OPTION", "A kit that is already written cannot be made for another grid: give the kit as it was given to resolveKit.");
+  if (grid !== undefined) badOption("A kit that is already written cannot be made for another grid: give the kit as it was given to resolveKit.");
   return input;
 }
 

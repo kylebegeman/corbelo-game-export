@@ -1,4 +1,4 @@
-import { NO_DECOMPOSITION, refuse } from "./errors.js";
+import { badOption, NO_DECOMPOSITION, notObject, refuse } from "./errors.js";
 import { readGlb, readPack, type GlbDocument, type PackBody } from "./glb-read.js";
 import { ENGINE_PROFILES, type EngineProfileId } from "./profiles.js";
 import type { CollisionFacts, CollisionRequest, CollisionShape, NormalMode, PackFacts, PivotMode, Vec3 } from "./types.js";
@@ -754,45 +754,45 @@ export function resolvePlayer(option: PlayerProfile | EngineProfileId | undefine
     // The player of the engine the file was written for. A custom profile gets Godot's, the default profile's.
     player = Object.hasOwn(PLAYER_PROFILES, profile) ? PLAYER_PROFILES[profile as EngineProfileId] : PLAYER_PROFILES.godot4;
   } else if (typeof option === "string") {
-    if (!Object.hasOwn(PLAYER_PROFILES, option)) refuse("BAD_OPTION", `Unknown player "${option}". Built-in players go by engine profile: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
+    if (!Object.hasOwn(PLAYER_PROFILES, option)) badOption(`Unknown player "${option}". Built-in players go by engine profile: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
     player = PLAYER_PROFILES[option];
   } else {
     player = option;
-    if (typeof player !== "object" || player === null || typeof player.id !== "string" || player.id === "") refuse("BAD_OPTION", "A player profile needs an id.");
+    if (notObject(player) || typeof player.id !== "string" || player.id === "") badOption("A player profile needs an id.");
     for (const key of ["capsuleRadiusM", "capsuleHeightM"] as const) {
-      if (!(Number.isFinite(player[key]) && player[key] > 0)) refuse("BAD_OPTION", `Player "${player.id}": ${key} must be a positive number of metres.`);
+      if (!(Number.isFinite(player[key]) && player[key] > 0)) badOption(`Player "${player.id}": ${key} must be a positive number of metres.`);
     }
     for (const key of ["stepHeightM", "jumpHeightM"] as const) {
-      if (!(Number.isFinite(player[key]) && player[key] >= 0)) refuse("BAD_OPTION", `Player "${player.id}": ${key} must be zero or a positive number of metres.`);
+      if (!(Number.isFinite(player[key]) && player[key] >= 0)) badOption(`Player "${player.id}": ${key} must be zero or a positive number of metres.`);
     }
     if (!(Number.isFinite(player.walkableSlopeDeg) && player.walkableSlopeDeg >= 0 && player.walkableSlopeDeg <= 90)) {
-      refuse("BAD_OPTION", `Player "${player.id}": walkableSlopeDeg must be from 0 to 90 degrees.`);
+      badOption(`Player "${player.id}": walkableSlopeDeg must be from 0 to 90 degrees.`);
     }
   }
   return player;
 }
 
 function readOptions(options: CheckOptions, facts: PackFacts): { assetClass: AssetClass; budget: GameBudget; player: PlayerProfile; gridMeters: number; lodDeviationShare: number } {
-  if (typeof options !== "object" || options === null) refuse("BAD_OPTION", "Check options must be an object.");
+  if (notObject(options)) badOption("Check options must be an object.");
   const assetClass = options.assetClass ?? DEFAULT_ASSET_CLASS;
-  if (!Object.hasOwn(ASSET_BUDGETS, assetClass)) refuse("BAD_OPTION", `assetClass must be one of ${Object.keys(ASSET_BUDGETS).map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(assetClass)}.`);
+  if (!Object.hasOwn(ASSET_BUDGETS, assetClass)) badOption(`assetClass must be one of ${Object.keys(ASSET_BUDGETS).map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(assetClass)}.`);
   const budget = { ...ASSET_BUDGETS[assetClass] };
   if (options.budget !== undefined) {
-    if (typeof options.budget !== "object" || options.budget === null) refuse("BAD_OPTION", "budget must be { maxTriangles, maxVertices, maxMaterialSlots }, each optional.");
+    if (notObject(options.budget)) badOption("budget must be { maxTriangles, maxVertices, maxMaterialSlots }, each optional.");
     for (const key of ["maxTriangles", "maxVertices", "maxMaterialSlots"] as const) {
       const value = options.budget[key];
       if (value === undefined) continue;
-      if (!(Number.isInteger(value) && value >= 1)) refuse("BAD_OPTION", `budget.${key} must be a whole number of at least 1. Got ${String(value)}.`);
+      if (!(Number.isInteger(value) && value >= 1)) badOption(`budget.${key} must be a whole number of at least 1. Got ${String(value)}.`);
       budget[key] = value;
     }
   }
   const player = resolvePlayer(options.player, facts.profile);
   const gridMeters = options.gridMeters ?? DEFAULT_GRID_METERS;
-  if (!(Number.isFinite(gridMeters) && gridMeters > 0)) refuse("BAD_OPTION", `gridMeters must be a positive number of metres. Got ${String(gridMeters)}.`);
+  if (!(Number.isFinite(gridMeters) && gridMeters > 0)) badOption(`gridMeters must be a positive number of metres. Got ${String(gridMeters)}.`);
   const lodDeviationShare = options.lodDeviationShare ?? DEFAULT_LOD_DEVIATION_SHARE;
-  if (!(Number.isFinite(lodDeviationShare) && lodDeviationShare >= 0)) refuse("BAD_OPTION", `lodDeviationShare must be zero or a positive share. Got ${String(lodDeviationShare)}.`);
+  if (!(Number.isFinite(lodDeviationShare) && lodDeviationShare >= 0)) badOption(`lodDeviationShare must be zero or a positive share. Got ${String(lodDeviationShare)}.`);
   if (options.collisionTolerance !== undefined && !(Number.isFinite(options.collisionTolerance) && options.collisionTolerance >= 0)) {
-    refuse("BAD_OPTION", `collisionTolerance must be zero or a positive share. Got ${String(options.collisionTolerance)}.`);
+    badOption(`collisionTolerance must be zero or a positive share. Got ${String(options.collisionTolerance)}.`);
   }
   return { assetClass, budget, player, gridMeters, lodDeviationShare };
 }

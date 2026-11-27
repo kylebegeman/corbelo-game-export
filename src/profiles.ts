@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { badOption, notObject } from "./errors.js";
 
 /** What an engine does with a node whose name follows a convention. */
 export type NodeRole =
@@ -105,18 +105,18 @@ export function resolveProfile(profile: EngineProfileId | EngineProfile | undefi
   if (profile === undefined) return ENGINE_PROFILES[DEFAULT_PROFILE];
   if (typeof profile === "string") {
     if (!Object.hasOwn(ENGINE_PROFILES, profile)) {
-      refuse("BAD_OPTION", `Unknown profile "${profile}". Built-in profiles: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
+      badOption(`Unknown profile "${profile}". Built-in profiles: ${Object.keys(ENGINE_PROFILES).join(", ")}.`);
     }
     return ENGINE_PROFILES[profile];
   }
-  if (typeof profile !== "object" || profile === null) refuse("BAD_OPTION", "profile must be a profile id or a profile object.");
-  if (typeof profile.id !== "string" || profile.id === "") refuse("BAD_OPTION", "A custom profile needs an id.");
+  if (notObject(profile)) badOption("profile must be a profile id or a profile object.");
+  if (typeof profile.id !== "string" || profile.id === "") badOption("A custom profile needs an id.");
   if (!(Number.isFinite(profile.unitMeters) && profile.unitMeters > 0)) {
-    refuse("BAD_OPTION", `Profile "${profile.id}": unitMeters must be a positive number.`);
+    badOption(`Profile "${profile.id}": unitMeters must be a positive number.`);
   }
-  if (profile.up !== "Y" && profile.up !== "Z") refuse("BAD_OPTION", `Profile "${profile.id}": up must be "Y" or "Z".`);
+  if (profile.up !== "Y" && profile.up !== "Z") badOption(`Profile "${profile.id}": up must be "Y" or "Z".`);
   if (!Array.isArray(profile.conventions?.collision) || !Array.isArray(profile.conventions?.lod)) {
-    refuse("BAD_OPTION", `Profile "${profile.id}": conventions needs collision and lod lists.`);
+    badOption(`Profile "${profile.id}": conventions needs collision and lod lists.`);
   }
   return profile;
 }

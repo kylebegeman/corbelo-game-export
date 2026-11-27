@@ -504,7 +504,7 @@ const { facts } = exportGameAsset({ bodies: [body], source, kernel });
 facts.bodies[0].collision; // { shape: "decomposition", pieces: 3, givenPieces: 1, ... }
 ```
 
-The `"decomposition"` shape is then the pieces given, each as its hull and first in order, and after them the parts the kernel cut the rest into. It is one shape: its volume is measured against the whole visible body, `maxPieces` counts the pieces given too, and `givenPieces` in the facts says how many of the pieces were yours. The kernel is handed the rest alone. The other shapes are as before, so `"pieces"` is still the pieces given by themselves. A rest that cannot be cut up is said the way a body that cannot be is, starting `What was given as the rest of the body was not cut up.`, and one that is not positions and triangles is refused with `BAD_COLLISION`. In a pack job it is `"collisionRemainder": { "stl": "bracket.stl" }`.
+The `"decomposition"` shape is then the pieces given, each as its hull and first in order, and after them the parts the kernel cut the rest into. It is one shape: its volume is measured against the whole visible body, `maxPieces` counts the pieces given too, and `givenPieces` in the facts says how many of the pieces were yours. The kernel is handed the rest alone. The other shapes are as before, so `"pieces"` is still the pieces given by themselves. A rest that cannot be cut up is said the way a body that cannot be is, starting `What was given as the rest of the body was not cut up.`, and one that is not positions and triangles is refused the way a body is, with the same codes. In a pack job it is `"collisionRemainder": { "stl": "bracket.stl" }`.
 
 #### A decomposition by itself
 

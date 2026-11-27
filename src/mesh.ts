@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { badRefinement } from "./errors.js";
 import type { NormalMode } from "./types.js";
 
 /**
@@ -552,7 +552,7 @@ export function buildMesh(
       const named = coarse.triangleOf[input]!;
       const within = `${coarse.where}: triangle ${input} is said to lie in triangle ${named}${coarse.meshes.length > 1 ? ` of surface ${surface}` : ""} of the mesh it refines`;
       const kept = coarse.keptOf[surface]![named]!;
-      if (kept < 0) refuse("BAD_REFINEMENT", `${within}, but that triangle has no area.`);
+      if (kept < 0) badRefinement(`${within}, but that triangle has no area.`);
       const mesh = coarse.meshes[surface]!;
       const fan = (fans[surface] ??= fansOf(mesh));
       coarseSurface[t] = surface;
@@ -567,8 +567,7 @@ export function buildMesh(
         const reach = Math.max(2 * options.weldTolerance, REFINEMENT_REACH * Math.sqrt(longest));
         const away = Math.sqrt(found[0]!);
         if (!(away <= reach)) {
-          refuse(
-            "BAD_REFINEMENT",
+          badRefinement(
             `${within}, but one of its corners is ${away.toPrecision(3)} m away from the mesh there. A corner may be ${reach.toPrecision(3)} m away at most.`,
           );
         }

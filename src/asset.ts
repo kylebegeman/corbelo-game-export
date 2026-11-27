@@ -1,6 +1,6 @@
 import { planCollision, readCollisionSettings, type CollisionPiece } from "./collision.js";
-import { forBody, refuse } from "./errors.js";
-import { boundsOf, draftScene, finishScene, isArrayLike, measuredBox, readPivot, toEngine, type DraftBody, type DraftMesh } from "./export.js";
+import { badOption, forBody, notObject, refuse } from "./errors.js";
+import { boundsOf, checkMesh, draftScene, finishScene, isArrayLike, measuredBox, readPivot, toEngine, type DraftBody, type DraftMesh } from "./export.js";
 import { COMPONENT_FLOAT, COMPONENT_UNSIGNED_INT, COMPONENT_UNSIGNED_SHORT, MODE_TRIANGLES, NODE_VISIBILITY_EXTENSION, TARGET_ARRAY_BUFFER, TARGET_ELEMENT_ARRAY_BUFFER } from "./gltf.js";
 import { meshDeviation } from "./lod.js";
 import { clearName, uniqueName } from "./names.js";
@@ -13,39 +13,44 @@ function isPoint(value: unknown): value is readonly [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every((part) => Number.isFinite(part));
 }
 
+function badCollision(message: string): never {
+  return refuse("BAD_COLLISION", message);
+}
+
+function badPoint(message: string): never {
+  return refuse("BAD_ATTACH_POINT", message);
+}
+
 /** Checks what a body has beyond a plain body. The meshes of detail levels are checked with the body's own. */
 function checkAssetBody(body: AssetBodyInput): void {
-  if (typeof body !== "object" || body === null) return;
+  if (notObject(body)) return;
   const label = `Body "${String(body.name)}"`;
   if (body.lods !== undefined && !Array.isArray(body.lods)) refuse("BAD_LOD", `${label}: lods must be a list of meshes, the nearest to full detail first.`);
   if (body.collisionPieces !== undefined) {
-    if (!Array.isArray(body.collisionPieces)) refuse("BAD_COLLISION", `${label}: collisionPieces must be a list of { positions }.`);
+    if (!Array.isArray(body.collisionPieces)) badCollision(`${label}: collisionPieces must be a list of { positions }.`);
     for (const [at, piece] of body.collisionPieces.entries()) {
       const where = `${label}, collision piece ${at}`;
-      if (typeof piece !== "object" || piece === null || !isArrayLike(piece.positions)) refuse("BAD_COLLISION", `${where} needs positions: x, y, z for each point.`);
-      if (piece.positions.length < 12 || piece.positions.length % 3 !== 0) refuse("BAD_COLLISION", `${where}: positions must hold x, y, z for at least four points.`);
+      if (notObject(piece) || !isArrayLike(piece.positions)) badCollision(`${where} needs positions: x, y, z for each point.`);
+      if (piece.positions.length < 12 || piece.positions.length % 3 !== 0) badCollision(`${where}: positions must hold x, y, z for at least four points.`);
       for (let n = 0; n < piece.positions.length; n += 1) {
-        if (!Number.isFinite(piece.positions[n])) refuse("BAD_COLLISION", `${where}: point ${Math.floor(n / 3)} has a coordinate that is not a finite number.`);
+        if (!Number.isFinite(piece.positions[n])) badCollision(`${where}: point ${Math.floor(n / 3)} has a coordinate that is not a finite number.`);
       }
     }
   }
   const rest = body.collisionRemainder;
   if (rest !== undefined) {
-    const count = isArrayLike(rest?.positions) ? rest.positions.length / 3 : 0;
-    const numbers = [...(count > 0 ? Array.from(rest.positions) : [NaN]), ...(rest?.indices === undefined ? [] : isArrayLike(rest.indices) ? Array.from(rest.indices, (vertex) => (Number.isInteger(vertex) && vertex >= 0 && vertex < count ? 0 : NaN)) : [NaN])];
-    if (!Number.isInteger(count) || ((rest.indices?.length ?? count) % 3 !== 0) || !numbers.every(Number.isFinite)) {
-      refuse("BAD_COLLISION", `${label}: collisionRemainder needs positions, x, y, z for each point as finite numbers, and with indices three vertex numbers for each triangle.`);
-    }
+    if (notObject(rest)) badCollision(`${label}: collisionRemainder must be { positions, indices }, one closed solid.`);
+    checkMesh(rest, `${label}, the rest of it for collision`, "the rest");
   }
   if (body.attachPoints !== undefined) {
-    if (!Array.isArray(body.attachPoints)) refuse("BAD_ATTACH_POINT", `${label}: attachPoints must be a list of { name, position }.`);
+    if (!Array.isArray(body.attachPoints)) badPoint(`${label}: attachPoints must be a list of { name, position }.`);
     for (const [at, point] of body.attachPoints.entries()) {
       const where = `${label}, attach point ${at}`;
-      if (typeof point !== "object" || point === null) refuse("BAD_ATTACH_POINT", `${where} is not an object.`);
-      if (typeof point.name !== "string" || point.name.trim() === "") refuse("BAD_ATTACH_POINT", `${where} needs a name.`);
-      if (!isPoint(point.position)) refuse("BAD_ATTACH_POINT", `${where}: position must be three finite numbers [x, y, z] in source units.`);
+      if (notObject(point)) badPoint(`${where} is not an object.`);
+      if (typeof point.name !== "string" || point.name.trim() === "") badPoint(`${where} needs a name.`);
+      if (!isPoint(point.position)) badPoint(`${where}: position must be three finite numbers [x, y, z] in source units.`);
       if (point.direction !== undefined && (!isPoint(point.direction) || Math.hypot(...point.direction) === 0)) {
-        refuse("BAD_ATTACH_POINT", `${where}: direction must be three finite numbers [x, y, z] that are not all zero.`);
+        badPoint(`${where}: direction must be three finite numbers [x, y, z] that are not all zero.`);
       }
     }
   }
@@ -57,12 +62,12 @@ function checkAssetBody(body: AssetBodyInput): void {
  */
 function perBody<T>(key: string, given: readonly (T | null | undefined)[] | Readonly<Record<string, T>> | undefined, bodies: readonly AssetBodyInput[]): (T | undefined)[] {
   if (given === undefined) return [];
-  if (typeof given !== "object" || given === null) refuse("BAD_OPTION", `${key} must be a list in the order of the bodies, or an object with an entry for each body name.`);
+  if (notObject(given)) badOption(`${key} must be a list in the order of the bodies, or an object with an entry for each body name.`);
   const list = Array.isArray(given) ? given : undefined;
   const names = list !== undefined ? [] : Object.keys(given);
   const missing = names.find((name) => !bodies.some((body) => body?.name === name));
-  if (missing !== undefined) refuse("BAD_OPTION", `${key} has an entry for a body named "${missing}", and no body has that name.`);
-  if (list !== undefined && list.length > bodies.length) refuse("BAD_OPTION", `${key} has ${list.length} entries, and there are ${bodies.length} bodies.`);
+  if (missing !== undefined) badOption(`${key} has an entry for a body named "${missing}", and no body has that name.`);
+  if (list !== undefined && list.length > bodies.length) badOption(`${key} has ${list.length} entries, and there are ${bodies.length} bodies.`);
   return bodies.map((body, index) => (list !== undefined ? list[index] : names.includes(body?.name) ? (given as Readonly<Record<string, T>>)[body.name] : undefined) ?? undefined);
 }
 
@@ -117,16 +122,16 @@ function turnFromZ(direction: Vec3): [number, number, number, number] | undefine
  * revision of a part to the next. The same input always gives the same bytes.
  */
 export function exportGameAsset(input: AssetInput): ExportResult {
-  if (typeof input !== "object" || input === null) refuse("NO_BODIES", "exportGameAsset needs { bodies, source }.");
+  if (notObject(input)) refuse("NO_BODIES", "exportGameAsset needs { bodies, source }.");
   const everyCollision = readCollisionSettings(input.collision);
   let tileMeters: number | undefined;
   if (input.texcoords !== undefined && input.texcoords !== false) {
-    if (input.texcoords !== true && (typeof input.texcoords !== "object" || input.texcoords === null)) refuse("BAD_OPTION", "texcoords must be true, false or { tileMeters }.");
+    if (input.texcoords !== true && (notObject(input.texcoords))) badOption("texcoords must be true, false or { tileMeters }.");
     tileMeters = (input.texcoords === true ? undefined : input.texcoords.tileMeters) ?? DEFAULT_TILE_METERS;
-    if (!(Number.isFinite(tileMeters) && tileMeters > 0)) refuse("BAD_OPTION", `texcoords.tileMeters must be a positive number of metres. Got ${String(tileMeters)}.`);
+    if (!(Number.isFinite(tileMeters) && tileMeters > 0)) badOption(`texcoords.tileMeters must be a positive number of metres. Got ${String(tileMeters)}.`);
   }
-  if (input.kernel !== undefined && (typeof input.kernel !== "object" || input.kernel === null || typeof input.kernel.solid !== "function")) {
-    refuse("BAD_OPTION", "kernel must be an object with a solid(positions, indices) function.");
+  if (input.kernel !== undefined && (notObject(input.kernel) || typeof input.kernel.solid !== "function")) {
+    badOption("kernel must be an object with a solid(positions, indices) function.");
   }
   const bodies: readonly AssetBodyInput[] = Array.isArray(input.bodies) ? input.bodies : [];
   for (const [index, body] of bodies.entries()) forBody(index, () => checkAssetBody(body));
@@ -138,7 +143,7 @@ export function exportGameAsset(input: AssetInput): ExportResult {
   const draft = draftScene(input, {
     caller: "exportGameAsset",
     pivots,
-    levels: bodies.map((body) => (typeof body === "object" && body !== null ? body.lods : undefined)),
+    levels: bodies.map((body) => (!notObject(body) ? body.lods : undefined)),
     slotOrder: "name",
     ...(tile !== undefined ? { texture: (mesh, offset) => boxProject(mesh, offset, tile) } : {}),
   });
@@ -227,7 +232,13 @@ export function exportGameAsset(input: AssetInput): ExportResult {
         const remainder =
           rest === undefined
             ? undefined
-            : { positions: own(rest.positions), indices: Uint32Array.from({ length: rest.indices?.length ?? rest.positions.length / 3 }, (_, at) => ((turn) => rest.indices?.[turn] ?? turn)(conversion.mirrored && at % 3 > 0 ? at + 3 - 2 * (at % 3) : at)) };
+            : {
+                positions: own(rest.positions),
+                indices: Uint32Array.from({ length: rest.indices?.length ?? rest.positions.length / 3 }, (_, at) => {
+                  const from = conversion.mirrored && at % 3 > 0 ? at + 3 - 2 * (at % 3) : at;
+                  return rest.indices?.[from] ?? from;
+                }),
+              };
         const plan = planCollision(
           { name: body.name, positions: drafted.stored, indices: drafted.mesh.indices, closed: drafted.mesh.openEdges === 0 && drafted.mesh.nonManifoldEdges === 0, pieces, remainder },
           collision,

@@ -35,11 +35,14 @@ interface Face {
   seenBy: number;
 }
 
+/** What a try at the hull gives when its faces did not close up. */
+const FAILED = 0;
+
 /**
  * One try at the hull. `level` is how far under a face a point may lie and still count as seeing
  * it: the tolerance, or nothing at all for the last try.
  */
-function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: number, level = tolerance): Hull | null | "failed" {
+function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: number, level = tolerance): Hull | null | typeof FAILED {
   const count = points.length / 3;
   const px = (p: number) => points[p * 3]!;
   const py = (p: number) => points[p * 3 + 1]!;
@@ -235,7 +238,7 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
     faces[from]!.seenBy = eye;
     for (let at = 0; at < seen.length; at += 1) {
       for (const next of faces[seen[at]!]!.near) {
-        if (next < 0) return "failed";
+        if (next < 0) return FAILED;
         const face = faces[next]!;
         if (face.seenBy === eye) continue;
         if (above(face, eye) > -level) {
@@ -253,7 +256,7 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
       for (let k = 0; k < 3; k += 1) {
         if (faces[near[k]!]!.seenBy === eye) continue;
         const corner = v[k]!;
-        if (rimOf[corner] === eye) return "failed";
+        if (rimOf[corner] === eye) return FAILED;
         rimOf[corner] = eye;
         rimTo[corner] = v[(k + 1) % 3]!;
         rimBeyond[corner] = near[k]!;
@@ -261,27 +264,27 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
         edges += 1;
       }
     }
-    if (edges < 3) return "failed";
+    if (edges < 3) return FAILED;
 
     // A new face from each edge of the hole to the point, linked to the face beyond the edge
     // and to the new faces on either side.
     const made: number[] = [];
     let corner = firstCorner;
     for (let step = 0; step < edges; step += 1) {
-      if (rimOf[corner] !== eye) return "failed";
+      if (rimOf[corner] !== eye) return FAILED;
       const to = rimTo[corner]!;
       const face = plane(corner, to, eye);
-      if (face === null) return "failed";
+      if (face === null) return FAILED;
       face.near[0] = rimBeyond[corner]!;
       const beyond = faces[face.near[0]]!;
       const at = beyond.v.indexOf(to);
-      if (at < 0 || beyond.v[(at + 1) % 3] !== corner) return "failed";
+      if (at < 0 || beyond.v[(at + 1) % 3] !== corner) return FAILED;
       beyond.near[at] = faces.length;
       made.push(faces.length);
       faces.push(face);
       corner = to;
     }
-    if (corner !== firstCorner) return "failed";
+    if (corner !== firstCorner) return FAILED;
     for (let at = 0; at < made.length; at += 1) {
       const face = faces[made[at]!]!;
       face.near[1] = made[(at + 1) % made.length]!;
@@ -306,10 +309,10 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
   for (const face of alive) {
     for (let k = 0; k < 3; k += 1) {
       const other = faces[face.near[k]!];
-      if (other === undefined || !other.alive) return "failed";
+      if (other === undefined || !other.alive) return FAILED;
       const at = other.v.indexOf(face.v[(k + 1) % 3]!);
-      if (at < 0 || other.v[(at + 1) % 3] !== face.v[k] || faces[other.near[at]!] !== face) return "failed";
-      if (above(face, other.v[(at + 2) % 3]!) > tolerance * 8) return "failed";
+      if (at < 0 || other.v[(at + 1) % 3] !== face.v[k] || faces[other.near[at]!] !== face) return FAILED;
+      if (above(face, other.v[(at + 2) % 3]!) > tolerance * 8) return FAILED;
     }
   }
 
@@ -328,7 +331,7 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
     }
   }
   // A closed surface with no handles has two more corners and faces together than edges.
-  if (numberOf.size - (alive.length * 3) / 2 + alive.length !== 2) return "failed";
+  if (numberOf.size - (alive.length * 3) / 2 + alive.length !== 2) return FAILED;
   const positions = new Float64Array(numberOf.size * 3);
   for (const [p, number] of numberOf) {
     positions[number * 3] = px(p);
@@ -336,7 +339,7 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
     positions[number * 3 + 2] = pz(p);
   }
   const volume = meshVolume(positions, indices);
-  if (!(volume > 0)) return "failed";
+  if (!(volume > 0)) return FAILED;
   return { positions, indices, volume, capped };
 }
 
@@ -396,12 +399,12 @@ export function convexHull(points: ArrayLike<number>, maxVertices = Infinity): H
   let tolerance = diagonal * HULL_FLATNESS;
   for (let tries = 0; tries < 4; tries += 1) {
     const hull = attempt(points, most, tolerance);
-    if (hull !== "failed") return hull;
+    if (hull !== FAILED) return hull;
     tolerance *= 10;
   }
   // Counting a face a point lies level with as seen is what gives way on a very fine round
   // shape: next to a face much larger than the new ones, it leaves a dent. One more try counts
   // only the faces the point is truly outside of.
   const hull = attempt(points, most, diagonal * HULL_FLATNESS, 0);
-  return hull === "failed" ? null : hull;
+  return hull === FAILED ? null : hull;
 }

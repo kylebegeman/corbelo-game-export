@@ -1,4 +1,4 @@
-import { NO_DECOMPOSITION, refuse } from "./errors.js";
+import { badOption, NO_DECOMPOSITION, notObject, refuse } from "./errors.js";
 import { convexHull, meshVolume, type Hull } from "./hull.js";
 import type { CollisionRequest, CollisionSettings, CollisionShape } from "./types.js";
 
@@ -72,15 +72,15 @@ export interface ResolvedCollisionSettings {
 /** Reads collision settings. What they leave out is taken from `base`: the settings of the asset, for those of one body. */
 export function readCollisionSettings(option: CollisionRequest | CollisionSettings | undefined, base?: ResolvedCollisionSettings): ResolvedCollisionSettings {
   const given: CollisionSettings = option === undefined ? {} : typeof option === "string" ? { shape: option } : option;
-  if (typeof given !== "object" || given === null) refuse("BAD_OPTION", `collision must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")} or { shape, tolerance, maxPieces, maxHullVertices }.`);
+  if (notObject(given)) badOption(`collision must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")} or { shape, tolerance, maxPieces, maxHullVertices }.`);
   const shape = given.shape ?? base?.shape ?? "auto";
-  if (!REQUESTS.includes(shape)) refuse("BAD_OPTION", `collision shape must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(shape)}.`);
+  if (!REQUESTS.includes(shape)) badOption(`collision shape must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(shape)}.`);
   const tolerance = given.tolerance ?? base?.tolerance ?? DEFAULT_COLLISION_TOLERANCE;
-  if (!(Number.isFinite(tolerance) && tolerance >= 0)) refuse("BAD_OPTION", `collision tolerance must be zero or a positive share of the visible volume, like 0.05. Got ${String(tolerance)}.`);
+  if (!(Number.isFinite(tolerance) && tolerance >= 0)) badOption(`collision tolerance must be zero or a positive share of the visible volume, like 0.05. Got ${String(tolerance)}.`);
   const maxPieces = given.maxPieces ?? base?.maxPieces ?? DEFAULT_MAX_COLLISION_PIECES;
-  if (!(Number.isInteger(maxPieces) && maxPieces >= 1)) refuse("BAD_OPTION", `collision maxPieces must be a whole number of at least 1. Got ${String(maxPieces)}.`);
+  if (!(Number.isInteger(maxPieces) && maxPieces >= 1)) badOption(`collision maxPieces must be a whole number of at least 1. Got ${String(maxPieces)}.`);
   const maxHullVertices = given.maxHullVertices ?? base?.maxHullVertices ?? DEFAULT_MAX_HULL_VERTICES;
-  if (!(Number.isInteger(maxHullVertices) && maxHullVertices >= 4)) refuse("BAD_OPTION", `collision maxHullVertices must be a whole number of at least 4. Got ${String(maxHullVertices)}.`);
+  if (!(Number.isInteger(maxHullVertices) && maxHullVertices >= 4)) badOption(`collision maxHullVertices must be a whole number of at least 4. Got ${String(maxHullVertices)}.`);
   return { shape, tolerance, maxPieces, maxHullVertices };
 }
 
@@ -540,7 +540,7 @@ export function decomposeSolid(
   settings: Pick<CollisionSettings, "tolerance" | "maxPieces" | "maxHullVertices"> = {},
 ): Decomposition {
   const { tolerance, maxPieces, maxHullVertices } = readCollisionSettings(settings);
-  if (typeof kernel?.solid !== "function") refuse("BAD_OPTION", "kernel must be an object with a solid(positions, indices) function.");
+  if (typeof kernel?.solid !== "function") badOption("kernel must be an object with a solid(positions, indices) function.");
   const positions = solid?.positions ?? [];
   const indices = solid.indices ?? Uint32Array.from({ length: positions.length / 3 }, (_, at) => at);
   const solidVolume = meshVolume(positions, indices);

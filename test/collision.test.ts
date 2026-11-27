@@ -596,13 +596,18 @@ describe("a decomposition of part of a body", () => {
     });
     const left = collisionOf({ bodies: [{ ...input, collisionRemainder: open }], kernel });
     expect(left.notes).toContain("No convex decomposition was made. What was given as the rest of the body was not cut up. 3 edges have a face on one side only once the body is stored, so its surface does not close.");
-    for (const bad of [{}, { positions: [0, 0, 0, 1] }, { positions: corner.positions, indices: [0, 1] }, { positions: corner.positions, indices: [0, 1, 9999] }, { positions: [0, 0, Number.NaN, 0, 0, 1, 0, 1, 0] }]) {
-      expect(refusal(() => collisionOf({ bodies: [{ ...input, collisionRemainder: bad as never }], kernel }))).toEqual({
-        code: "BAD_COLLISION",
-        body: 0,
-        message: 'Body "Stand": collisionRemainder needs positions, x, y, z for each point as finite numbers, and with indices three vertex numbers for each triangle.',
-      });
-    }
+    // What is left is checked the way a body is, and refused with the same codes.
+    const refused = (bad: unknown) => refusal(() => collisionOf({ bodies: [{ ...input, collisionRemainder: bad as never }], kernel }));
+    expect(refused("corner")).toEqual({ code: "BAD_COLLISION", body: 0, message: 'Body "Stand": collisionRemainder must be { positions, indices }, one closed solid.' });
+    expect(refused({})).toEqual({ code: "BAD_POSITIONS", body: 0, message: 'Body "Stand", the rest of it for collision: positions must be a Float32Array or an array of numbers.' });
+    expect(refused({ positions: [0, 0, 0, 1] }).code).toBe("BAD_POSITIONS");
+    expect(refused({ positions: [0, 0, Number.NaN, 0, 0, 1, 0, 1, 0] }).code).toBe("NON_FINITE_POSITION");
+    expect(refused({ positions: corner.positions, indices: [0, 1] }).code).toBe("BAD_INDICES");
+    expect(refused({ positions: corner.positions, indices: [0, 1, 9999] })).toEqual({
+      code: "INDEX_OUT_OF_RANGE",
+      body: 0,
+      message: 'Body "Stand", the rest of it for collision: index 2 points at vertex 9999, but the rest has 84 vertices.',
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { notObject, refuse } from "./errors.js";
 import type { SourceSpace, Vec3 } from "./types.js";
 
 /**
@@ -21,7 +21,7 @@ export interface SpaceConversion {
 }
 
 export function spaceConversion(source: SourceSpace): SpaceConversion {
-  if (typeof source !== "object" || source === null) refuse("BAD_SOURCE_SPACE", "source must be { unit, up }.");
+  if (notObject(source)) refuse("BAD_SOURCE_SPACE", "source must be { unit, up }.");
   if (!(Number.isFinite(source.unit) && source.unit > 0)) {
     refuse("BAD_SOURCE_SPACE", `source.unit must be a positive number of metres per source unit (0.001 for millimetres). Got ${String(source.unit)}.`);
   }
