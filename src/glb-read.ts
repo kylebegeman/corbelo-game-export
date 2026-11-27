@@ -119,6 +119,8 @@ export interface PackBody {
   positions: Float32Array;
   /** One per vertex. Empty when a primitive of the mesh has none. */
   normals: Float32Array;
+  /** u, v per vertex. Empty when a primitive of the mesh has no texture coordinates. */
+  texcoords: Float32Array;
   /** Three vertex numbers per triangle, counted in `positions`: every surface's triangles, in the same order. */
   indices: Uint32Array;
   /** The material of the first surface. A body with several colours has one for each: see `surfaces`. */
@@ -137,9 +139,12 @@ export interface PackContents {
 }
 
 /**
- * Reads a GLB written by this package back into plain arrays: one entry per mesh node of the
- * scene, with every primitive of its mesh, plus the facts, profile and provenance from the
- * scene extras.
+ * Reads a GLB written by this package back into plain arrays: one entry per body, with every
+ * primitive of its mesh at full detail, plus the facts, profile and provenance from the scene
+ * extras. Collision shapes, lower detail levels and attach points are not bodies: the facts say
+ * which nodes and meshes they are.
+ *
+ * A file without facts gives one entry per mesh node at the top of the scene.
  */
 export function readPack(glb: Uint8Array | GlbDocument): PackContents {
   const document = glb instanceof Uint8Array ? readGlb(glb) : glb;
@@ -147,13 +152,20 @@ export function readPack(glb: Uint8Array | GlbDocument): PackContents {
   const scene = json.scenes?.[json.scene ?? 0];
   const extras = scene?.extras?.[EXTRAS_KEY] as PackExtras | undefined;
   const bodies: PackBody[] = [];
-  for (const nodeIndex of scene?.nodes ?? []) {
+  // The facts name the node and the mesh of each body. A body with detail levels may have its
+  // mesh on a child of its node, so the two are not always one node.
+  const listed: { node: number; mesh: number | undefined }[] =
+    extras?.facts?.bodies !== undefined
+      ? extras.facts.bodies.map((body) => ({ node: body.node, mesh: body.mesh }))
+      : (scene?.nodes ?? []).map((node) => ({ node, mesh: json.nodes?.[node]?.mesh }));
+  for (const { node: nodeIndex, mesh: meshIndex } of listed) {
     const node = json.nodes?.[nodeIndex];
-    const primitives = node?.mesh === undefined ? undefined : json.meshes?.[node.mesh]?.primitives;
+    const primitives = meshIndex === undefined ? undefined : json.meshes?.[meshIndex]?.primitives;
     if (node === undefined || primitives === undefined || primitives.length === 0) continue;
     const parts = primitives.map((primitive) => {
       const position = primitive.attributes["POSITION"];
       const normal = primitive.attributes["NORMAL"];
+      const texcoord = primitive.attributes["TEXCOORD_0"];
       if (position === undefined) refuse("BAD_GLB", `Node "${node.name ?? nodeIndex}" has a mesh without positions.`);
       const positions = readAccessor(document, position);
       const source = primitive.material === undefined ? undefined : json.materials?.[primitive.material];
@@ -170,6 +182,7 @@ export function readPack(glb: Uint8Array | GlbDocument): PackContents {
       return {
         positions,
         normals: normal === undefined ? undefined : readAccessor(document, normal),
+        texcoords: texcoord === undefined ? undefined : readAccessor(document, texcoord),
         indices: primitive.indices === undefined ? undefined : readAccessor(document, primitive.indices),
         material,
       };
@@ -180,6 +193,8 @@ export function readPack(glb: Uint8Array | GlbDocument): PackContents {
     const positions = new Float32Array(vertexCount * 3);
     const withNormals = parts.every((part) => part.normals !== undefined);
     const normals = new Float32Array(withNormals ? vertexCount * 3 : 0);
+    const withTexcoords = parts.every((part) => part.texcoords !== undefined);
+    const texcoords = new Float32Array(withTexcoords ? vertexCount * 2 : 0);
     const indices = new Uint32Array(cornerCount);
     const surfaces: PackSurface[] = [];
     let firstVertex = 0;
@@ -189,6 +204,7 @@ export function readPack(glb: Uint8Array | GlbDocument): PackContents {
       const corners = part.indices?.length ?? vertices;
       positions.set(part.positions, firstVertex * 3);
       if (withNormals) normals.set(part.normals!, firstVertex * 3);
+      if (withTexcoords) texcoords.set(part.texcoords!, firstVertex * 2);
       for (let corner = 0; corner < corners; corner += 1) indices[firstCorner + corner] = firstVertex + (part.indices?.[corner] ?? corner);
       surfaces.push({ material: part.material, firstVertex, vertices, firstTriangle: firstCorner / 3, triangles: corners / 3 });
       firstVertex += vertices;
@@ -200,6 +216,7 @@ export function readPack(glb: Uint8Array | GlbDocument): PackContents {
       translation: [translation[0] ?? 0, translation[1] ?? 0, translation[2] ?? 0],
       positions,
       normals,
+      texcoords,
       indices,
       material: surfaces[0]!.material,
       surfaces,

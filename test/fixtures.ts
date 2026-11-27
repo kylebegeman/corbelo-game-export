@@ -355,3 +355,141 @@ export function asciiStl(positions: ArrayLike<number>, name = "shape"): Uint8Arr
 
 /** The millimetre, Z-up space both CAD consumers of this package model in. */
 export const MM_Z_UP = { unit: 0.001, up: "Z" } as const;
+
+/** Numbers from 0 up to 1 that are the same every run: for points scattered without a pattern. */
+export function seeded(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Several shapes as one: their triangles one after another, with face ids kept apart. */
+export function joined(...shapes: Shape[]): Shape {
+  const positions = new Float32Array(shapes.reduce((total, shape) => total + shape.positions.length, 0));
+  const faceIds = new Uint32Array(shapes.reduce((total, shape) => total + shape.faceIds.length, 0));
+  let at = 0;
+  let triangle = 0;
+  let firstFace = 0;
+  for (const shape of shapes) {
+    positions.set(shape.positions, at);
+    at += shape.positions.length;
+    let faces = 0;
+    for (const id of shape.faceIds) {
+      faceIds[triangle] = firstFace + id;
+      triangle += 1;
+      faces = Math.max(faces, id + 1);
+    }
+    firstFace += faces;
+  }
+  return { positions, faceIds };
+}
+
+/** A shape moved by `by`. */
+export function moved(shape: Shape, by: Point): Shape {
+  const positions = Float32Array.from(shape.positions);
+  for (let n = 0; n < positions.length; n += 1) positions[n] = positions[n]! + by[n % 3]!;
+  return { positions, faceIds: shape.faceIds };
+}
+
+/**
+ * A wall with a doorway through it, standing on z = 0 and Z up: `width` along X, `thickness`
+ * along Y and `height` tall, with an opening `doorWidth` wide and `doorHeight` tall in the
+ * middle, open at the floor. Made of two posts and a lintel that touch, so it is three closed
+ * boxes and not one closed body.
+ */
+export function doorway(width: number, thickness: number, height: number, doorWidth: number, doorHeight: number): Shape {
+  const left = (width - doorWidth) / 2;
+  return joined(
+    box([0, 0, 0], [left, thickness, height]),
+    box([left + doorWidth, 0, 0], [width, thickness, height]),
+    box([left, 0, doorHeight], [left + doorWidth, thickness, height]),
+  );
+}
+
+/** Stairs going up along +X, Z up: `steps` boxes side by side, each `run` deep, `width` wide and one `rise` taller than the last. */
+export function stairs(steps: number, rise: number, run: number, width: number): Shape {
+  return joined(...Array.from({ length: steps }, (_, step) => box([step * run, 0, 0], [(step + 1) * run, width, (step + 1) * rise])));
+}
+
+/** A ramp going up along +X, Z up: a wedge `length` long, `width` wide and `height` tall at its high end. Closed. */
+export function ramp(length: number, width: number, height: number): Shape {
+  const shape = new ShapeBuilder();
+  const inside: Point = [length * 0.6, width / 2, height * 0.2];
+  shape.polygon([[0, 0, 0], [length, 0, 0], [length, width, 0], [0, width, 0]], inside);
+  shape.polygon([[0, 0, 0], [length, 0, height], [length, width, height], [0, width, 0]], inside);
+  shape.polygon([[length, 0, 0], [length, width, 0], [length, width, height], [length, 0, height]], inside);
+  shape.polygon([[0, 0, 0], [length, 0, 0], [length, 0, height]], inside);
+  shape.polygon([[0, width, 0], [length, width, 0], [length, width, height]], inside);
+  return shape.build();
+}
+
+/**
+ * An L-shaped block, Z up: a `size` by `size` square with the quarter at high X and high Y cut
+ * away, `height` tall. One closed body that is not convex: its hull is an eighth of the square
+ * more than it, a sixth of its own volume.
+ */
+export function ell(size: number, height: number): Shape {
+  const shape = new ShapeBuilder();
+  const half = size / 2;
+  // The outline has a corner wherever two of the three squares of an end meet, so no edge of
+  // one triangle ends in the middle of an edge of another.
+  const outline: [number, number][] = [[0, 0], [half, 0], [size, 0], [size, half], [half, half], [half, size], [0, size], [0, half]];
+  const squares: [number, number][] = [[0, 0], [half, 0], [0, half]];
+  for (const z of [0, height]) {
+    const face = shape.face();
+    for (const [x, y] of squares) {
+      const corners: Point[] = [[x, y, z], [x + half, y, z], [x + half, y + half, z], [x, y + half, z]];
+      const ordered = z === 0 ? [...corners].reverse() : corners;
+      shape.triangle(ordered[0]!, ordered[1]!, ordered[2]!, face);
+      shape.triangle(ordered[0]!, ordered[2]!, ordered[3]!, face);
+    }
+  }
+  let face = 0;
+  for (let k = 0; k < outline.length; k += 1) {
+    const [ax, ay] = outline[k]!;
+    const [bx, by] = outline[(k + 1) % outline.length]!;
+    // Two pieces of the outline in one line are one flat side, and one exact face.
+    const [px, py] = outline[(k + outline.length - 1) % outline.length]!;
+    if (k === 0 || (ax - px) * (by - ay) !== (ay - py) * (bx - ax)) face = shape.face();
+    shape.triangle([ax, ay, 0], [bx, by, 0], [bx, by, height], face);
+    shape.triangle([ax, ay, 0], [bx, by, height], [ax, ay, height], face);
+  }
+  return shape.build();
+}
+
+/**
+ * A door frame as one closed body, standing on z = 0 and Z up: `width` along X, `thickness`
+ * along Y and `height` tall, with an opening `doorWidth` wide and `doorHeight` tall in the
+ * middle, open at the floor. Not convex: its hull fills the opening.
+ */
+export function doorFrame(width: number, thickness: number, height: number, doorWidth: number, doorHeight: number): Shape {
+  const shape = new ShapeBuilder();
+  const left = (width - doorWidth) / 2;
+  const right = left + doorWidth;
+  // Around the outline in the X and Z plane, anticlockwise seen from -Y.
+  const outline: [number, number][] = [[0, 0], [left, 0], [left, doorHeight], [right, doorHeight], [right, 0], [width, 0], [width, height], [0, height]];
+  // Three convex pieces of an end that share whole edges: the two posts and the part over the door.
+  const pieces = [[0, 1, 2, 7], [4, 5, 6, 3], [2, 3, 6, 7]];
+  for (const y of [0, thickness]) {
+    const face = shape.face();
+    for (const piece of pieces) {
+      const corners = piece.map((at) => [outline[at]![0], y, outline[at]![1]] as Point);
+      const ordered = y === 0 ? corners : [...corners].reverse();
+      shape.triangle(ordered[0]!, ordered[1]!, ordered[2]!, face);
+      shape.triangle(ordered[0]!, ordered[2]!, ordered[3]!, face);
+    }
+  }
+  for (let k = 0; k < outline.length; k += 1) {
+    const [ax, az] = outline[k]!;
+    const [bx, bz] = outline[(k + 1) % outline.length]!;
+    const face = shape.face();
+    shape.triangle([ax, 0, az], [bx, thickness, bz], [bx, 0, bz], face);
+    shape.triangle([ax, 0, az], [ax, thickness, az], [bx, thickness, bz], face);
+  }
+  return shape.build();
+}

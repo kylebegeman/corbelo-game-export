@@ -9,6 +9,7 @@ export interface GltfJson {
   accessors?: GltfAccessor[];
   bufferViews?: GltfBufferView[];
   buffers?: { byteLength: number; uri?: string }[];
+  extensionsUsed?: string[];
 }
 
 export interface GltfScene {
@@ -25,6 +26,7 @@ export interface GltfNode {
   rotation?: number[];
   scale?: number[];
   matrix?: number[];
+  extensions?: Record<string, unknown>;
 }
 
 export interface GltfPrimitive {
@@ -80,6 +82,9 @@ export const TARGET_ARRAY_BUFFER = 34962;
 export const TARGET_ELEMENT_ARRAY_BUFFER = 34963;
 
 export const MODE_TRIANGLES = 4;
+
+/** The glTF extension that says whether a node is shown. */
+export const NODE_VISIBILITY_EXTENSION = "KHR_node_visibility";
 
 /** The key under `scenes[0].extras` that holds the profile, the facts and the provenance. */
 export const EXTRAS_KEY = "corbeloGameExport";

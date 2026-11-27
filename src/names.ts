@@ -8,14 +8,23 @@ const MAX_NAME_LENGTH = 60;
  */
 const OTHER_GODOT_HINTS = ["noimp", "navmesh", "occ", "rigid", "vehicle", "wheel"];
 
-const reservedPrefixes: string[] = [];
-const reservedEndings: string[] = [...OTHER_GODOT_HINTS];
-for (const profile of Object.values(ENGINE_PROFILES)) {
-  for (const rule of [...profile.conventions.collision, ...profile.conventions.lod]) {
-    const list = rule.affix === "prefix" ? reservedPrefixes : reservedEndings;
-    const text = rule.affix === "prefix" ? rule.text.toLowerCase() : rule.text.replace(/^[-_]/, "").toLowerCase();
-    if (!list.includes(text)) list.push(text);
+let reserved: { prefixes: string[]; endings: string[] } | undefined;
+
+/** The prefixes and endings the built-in profiles act on, worked out the first time a name is checked. */
+function reservedAffixes(): { prefixes: string[]; endings: string[] } {
+  if (reserved === undefined) {
+    const prefixes: string[] = [];
+    const endings: string[] = [...OTHER_GODOT_HINTS];
+    for (const profile of Object.values(ENGINE_PROFILES)) {
+      for (const rule of [...profile.conventions.collision, ...profile.conventions.lod]) {
+        const list = rule.affix === "prefix" ? prefixes : endings;
+        const text = rule.affix === "prefix" ? rule.text.toLowerCase() : rule.text.replace(/^[-_]/, "").toLowerCase();
+        if (!list.includes(text)) list.push(text);
+      }
+    }
+    reserved = { prefixes, endings };
   }
+  return reserved;
 }
 
 /** Letters, digits, `_` and `-` only. Accents are dropped from letters; anything else becomes `_`. */
@@ -33,7 +42,7 @@ export function safeName(name: string, fallback: string): string {
 /** True when a built-in engine profile would read the name as a collision shape or a detail level. */
 export function hasReservedPrefix(name: string): boolean {
   const lower = name.toLowerCase();
-  return reservedPrefixes.some((prefix) => lower.startsWith(prefix));
+  return reservedAffixes().prefixes.some((prefix) => lower.startsWith(prefix));
 }
 
 /**
@@ -42,7 +51,27 @@ export function hasReservedPrefix(name: string): boolean {
  */
 export function hasReservedEnding(name: string): boolean {
   const lower = name.toLowerCase().replace(/[0-9_]+$/, "");
-  return reservedEndings.some((ending) => lower.endsWith(`-${ending}`) || lower.endsWith(`_${ending}`));
+  return reservedAffixes().endings.some((ending) => lower.endsWith(`-${ending}`) || lower.endsWith(`_${ending}`));
+}
+
+/**
+ * A name nothing in `used` has yet, without regard to letter case: `base`, or `base_2`, `base_3`
+ * and so on. `wrap` gives the full name for a candidate, for a name that must keep an ending or
+ * a prefix. The name is added to `used`.
+ */
+export function uniqueName(used: Set<string>, base: string, wrap: (candidate: string) => string = (candidate) => candidate): string {
+  let name = wrap(base);
+  for (let n = 2; used.has(name.toLowerCase()); n += 1) name = wrap(`${base}_${n}`);
+  used.add(name.toLowerCase());
+  return name;
+}
+
+/** A safe name that no built-in engine profile reads as a collision shape or a detail level. */
+export function clearName(name: string, fallback: string): string {
+  let base = safeName(name, fallback);
+  if (hasReservedPrefix(base)) base = `${fallback}_${base}`;
+  if (hasReservedEnding(base)) base = `${base}_${fallback}`;
+  return base;
 }
 
 /**
@@ -52,13 +81,5 @@ export function hasReservedEnding(name: string): boolean {
  */
 export function nodeNames(names: readonly string[]): string[] {
   const used = new Set<string>();
-  return names.map((name) => {
-    let base = safeName(name, "body");
-    if (hasReservedPrefix(base)) base = `body_${base}`;
-    if (hasReservedEnding(base)) base = `${base}_body`;
-    let candidate = base;
-    for (let n = 2; used.has(candidate.toLowerCase()); n += 1) candidate = `${base}_${n}`;
-    used.add(candidate.toLowerCase());
-    return candidate;
-  });
+  return names.map((name) => uniqueName(used, clearName(name, "body")));
 }

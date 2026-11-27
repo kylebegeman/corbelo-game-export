@@ -34,8 +34,8 @@ export interface EngineProfile {
   unitMeters: number;
   up: "Y" | "Z";
   /**
-   * Node names the engine's importer acts on. Recorded as data. This version of the package
-   * writes no collision shapes or detail levels; it only keeps body names clear of these rules.
+   * Node names the engine's importer acts on. `exportGameAsset` names collision shapes and
+   * detail levels by them, and every export keeps body names clear of them.
    */
   conventions: {
     collision: NodeNameConvention[];
