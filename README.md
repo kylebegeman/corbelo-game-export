@@ -540,14 +540,14 @@ const report = checkGameAsset(glb, { assetClass: "kit-piece", expect: { opening:
   "status": "pass",
   "counts": { "pass": 8, "warn": 0, "fail": 0, "notMeasured": 4 },
   "results": [
-    { "id": "size", "status": "pass", "message": "The asset is 1 m on its longest side, a size a small-prop has.", "values": { "...": "..." } },
+    { "id": "size", "status": "pass", "message": "The asset is 1 m on its longest side, a size a small prop has.", "values": { "...": "..." } },
     { "id": "collision", "status": "pass", "message": "Collision in 2 convex pieces, within 5% of the visible volume.", "values": { "tolerance": 0.05, "bodies": [{ "name": "Corner_Bench", "requested": "auto", "shape": "pieces", "pieces": 2, "error": 0, "withinTolerance": true }] } },
-    { "id": "detail-levels", "status": "not-measured", "message": "The file has no lower detail levels.", "reason": "No body was given lods. Engines that make their own levels on import need none.", "values": { "maxDeviationShare": 0.05, "bodies": [] } }
+    { "id": "detail-levels", "status": "not-measured", "message": "The file has no lower detail levels.", "reason": "No body was given lower detail levels. Engines that make their own levels on import need none.", "values": { "maxDeviationShare": 0.05, "bodies": [] } }
   ]
 }
 ```
 
-Every result has `id`, `status`, a `message` of one sentence for a person, and `values`, the numbers it was judged by. `status` is `"pass"`, `"warn"`, `"fail"` or `"not-measured"`, and a result that was not measured always has a `reason`. The report's own `status` is the worst of the results, and what was not measured does not count against it. `CHECK_IDS` lists the ids in order.
+Every result has `id`, `status`, a `message` for a person, and `values`, the numbers it was judged by. A message or a reason is written for someone who models parts: it names no function of this package, no option key and no id, and says an asset class, a pivot and a player by name. Read `values` and the report's own fields for the ids. `status` is `"pass"`, `"warn"`, `"fail"` or `"not-measured"`, and a result that was not measured always has a `reason`. The report's own `status` is the worst of the results, and what was not measured does not count against it. `CHECK_IDS` lists the ids in order.
 
 | `id` | Passes when | Warns when | Fails when | Not measured when |
 | --- | --- | --- | --- | --- |
@@ -568,7 +568,7 @@ What each one measures:
 
 - **Size.** The box around everything, in metres and in the engine's unit. The mix-ups looked for are millimetres, centimetres and inches read as metres, and the other way round.
 - **Pivot.** Where each body's pivot is against its own box. A pivot is on the grid when it is a whole number of grid steps from a face of the box, along every axis the body is at least one grid step long in. The grid is `gridMeters`, 1 metre unless given.
-- **Shading.** Hard and soft edges are counted from the file. The message says which normal rule the file was written with, and that face-weighted normals are there to ask for.
+- **Shading.** Hard and soft edges are counted from the file. The message says which normal rule the file was written with, and that weighting by the whole flat face is there to ask for.
 - **Clean mesh.** A sliver is a triangle whose doubled area is under 1% of its longest edge squared.
 - **Collision.** The volume error the facts state, against `collisionTolerance` or else the tolerance the file was written with. Where a shape `"auto"` settled for is outside it, the message says what would bring it nearer and never asks for what was given: the pieces the part was built from, a kernel when none was given, more pieces when a kernel made the most allowed, or the reason a kernel that was given made no decomposition. A body that is not closed is named with the count of its open edges.
 - **Detail levels.** The triangle counts and the `deviation.share` of each level, against `lodDeviationShare`, 0.05 unless given.
@@ -1617,6 +1617,8 @@ npm run size         # prints the size of the built files and of the minified bu
 ```
 
 The Godot and Blender proofs run when those programs are on the path and are skipped with a line on standard error when they are not. The decomposition tests use `manifold-3d`, which is a development dependency only.
+
+Every report a test makes is held to plain words as it is made, by `test/plain-words.setup.ts`: a message or a reason that names a function of this package, an option key or an id fails the test that brought it out. `test/wording.test.ts` walks every check through each state it can be in.
 
 `dist/` is committed. After changing anything in `src/`, run `npm run build` and commit the result with it. The test suite and the CI workflow both fail when `dist/` is stale.
 

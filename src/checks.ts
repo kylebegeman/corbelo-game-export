@@ -29,6 +29,17 @@ export const ASSET_SIZE_RANGES: Readonly<Record<AssetClass, { minMeters: number;
 };
 
 export const DEFAULT_ASSET_CLASS: AssetClass = "small-prop";
+
+// A message is read by a person, so it says an asset class, a pivot and a normal rule in words
+// and not by the id an option takes.
+const CLASS_WORDS: Readonly<Record<AssetClass, string>> = { "small-prop": "small prop", "large-prop": "large prop", "kit-piece": "kit piece" };
+const PIVOT_WORDS: Readonly<Record<PivotMode, string>> = {
+  "base-center": "the middle of the base",
+  center: "the middle of the body",
+  "min-corner": "the lowest corner of the box around the body",
+  origin: "the origin the body was modelled around",
+  point: "a point that was given",
+};
 /** The grid a pivot is checked against, in metres. */
 export const DEFAULT_GRID_METERS = 1;
 /** A lower detail level may move the outline by this share of the diagonal of the body before the check warns. */
@@ -807,7 +818,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
     const values: SizeValues = { meters: meters.size, engine: engine.size, unit, largestMeters, expectedMeters: [range.minMeters, range.maxMeters], suggestedScale: null };
     const sizeText = `${round(Math.max(...engine.size), 3)} ${unit} on its longest side`;
     if (largestMeters >= range.minMeters && largestMeters <= range.maxMeters) {
-      results.push({ id: "size", status: "pass", message: `The asset is ${sizeText}, a size a ${assetClass} has.`, values });
+      results.push({ id: "size", status: "pass", message: `The asset is ${sizeText}, a size a ${CLASS_WORDS[assetClass]} has.`, values });
     } else {
       // A mix-up of units is offered when it would land the size nearest the middle of the range.
       const middle = Math.sqrt(range.minMeters * range.maxMeters);
@@ -818,7 +829,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
         if (best === undefined || Math.abs(Math.log(scaled / middle)) < Math.abs(Math.log((largestMeters * best[0]) / middle))) best = mixup;
       }
       values.suggestedScale = best === undefined ? null : round(best[0], 6);
-      const expected = `a ${assetClass} is expected to be from ${range.minMeters} to ${range.maxMeters} m`;
+      const expected = `a ${CLASS_WORDS[assetClass]} is expected to be from ${range.minMeters} to ${range.maxMeters} m`;
       results.push({
         id: "size",
         status: "warn",
@@ -856,7 +867,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       results.push({ id: "pivot", status: "warn", message: `${plural(farOut, "body has", "bodies have")} a pivot further from the body than the body is long.`, values });
     } else {
       const first = values.bodies[0];
-      results.push({ id: "pivot", status: "pass", message: first === undefined ? "There are no bodies." : `The pivot is at "${first.mode}"${offGrid === 0 ? `, on the ${gridMeters} m grid` : ""}.`, values });
+      results.push({ id: "pivot", status: "pass", message: first === undefined ? "There are no bodies." : `The pivot is at ${PIVOT_WORDS[first.mode]}${offGrid === 0 ? `, on the ${gridMeters} m grid` : ""}.`, values });
     }
   }
 
@@ -866,7 +877,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       const values: CountValues = { count: facts.bodies.reduce((total, body) => total + pick(body), 0), budget: limit, bodies: facts.bodies.map((body) => ({ name: body.name, count: pick(body) })) };
       const over = values.count > limit;
       const what = id === "triangles" ? "triangles" : "vertices after hard edges split";
-      results.push({ id, status: over ? "fail" : "pass", message: `${values.count} ${what}, against a budget of ${limit} for a ${assetClass}.`, values });
+      results.push({ id, status: over ? "fail" : "pass", message: `${values.count} ${what}, against a budget of ${limit} for a ${CLASS_WORDS[assetClass]}.`, values });
     };
     count("triangles", budget.maxTriangles, (body) => body.triangles);
     count("vertices", budget.maxVertices, (body) => body.vertices);
@@ -884,7 +895,8 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       backFacingNormals: total((topology) => topology.backFacingNormals),
       maxNormalAngle: round(Math.max(0, ...topologies.map((topology) => topology.maxNormalAngle)), 3),
     };
-    const edges = `${plural(shading.hardEdges, "hard edge")} and ${plural(shading.softEdges, "soft edge")}, normals by "${shading.normals}"`;
+    const byFace = shading.normals === "face-weighted";
+    const edges = `${plural(shading.hardEdges, "hard edge")} and ${plural(shading.softEdges, "soft edge")}. Normals are weighted by ${byFace ? "the whole flat face each triangle belongs to" : "the area and angle of each triangle"}.`;
     if (pack.bodies.some((body) => body.normals.length !== body.positions.length)) {
       results.push({ id: "shading", status: "fail", message: "A body has no normals.", values: shading });
     } else if (shading.backFacingNormals > 0) {
@@ -893,11 +905,11 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       results.push({
         id: "shading",
         status: "warn",
-        message: `A normal is ${shading.maxNormalAngle} degrees from the face it shades, over ${NORMAL_ANGLE_WARNING_DEGREES}. A lower crease angle would make that edge hard. ${edges}.`,
+        message: `A normal is ${shading.maxNormalAngle} degrees from the face it shades, over ${NORMAL_ANGLE_WARNING_DEGREES}. A lower crease angle would make that edge hard. ${edges}`,
         values: shading,
       });
     } else {
-      results.push({ id: "shading", status: "pass", message: `${edges}. ${shading.normals === "face-weighted" ? "Face-weighted normals are in use." : "Face-weighted normals are there to ask for: normals \"face-weighted\"."}`, values: shading });
+      results.push({ id: "shading", status: "pass", message: `${edges}${byFace ? "" : " Weighting by the whole flat face is there to ask for."}`, values: shading });
     }
 
     const clean: CleanMeshValues = {
@@ -932,7 +944,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
     results.push({
       id: "material-slots",
       status: values.count > values.budget ? "fail" : "pass",
-      message: `${plural(values.count, "material slot")} on the body with the most, against a budget of ${values.budget} for a ${assetClass}.`,
+      message: `${plural(values.count, "material slot")} on the body with the most, against a budget of ${values.budget} for a ${CLASS_WORDS[assetClass]}.`,
       values,
     });
   }
@@ -963,7 +975,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
         id: "collision",
         status: "not-measured",
         message: "The file has no collision shape.",
-        reason: "No collision was written. exportGameAsset writes one unless collision is \"none\".",
+        reason: "No collision was written with the file. Write it again with a collision shape to have it measured.",
         values,
       });
     } else if (beyond.length > 0) {
@@ -1038,7 +1050,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       }
     }
     if (values.bodies.length === 0) {
-      results.push({ id: "detail-levels", status: "not-measured", message: "The file has no lower detail levels.", reason: "No body was given lods. Engines that make their own levels on import need none.", values });
+      results.push({ id: "detail-levels", status: "not-measured", message: "The file has no lower detail levels.", reason: "No body was given lower detail levels. Engines that make their own levels on import need none.", values });
     } else if (problems.length > 0) {
       results.push({ id: "detail-levels", status: "fail", message: `Detail levels: ${[...problems, ...notes].join("; ")}.`, values });
     } else if (notes.length > 0) {

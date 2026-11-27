@@ -1111,7 +1111,7 @@ export function checkKit(input: KitInput | Kit, options: KitCheckOptions = {}): 
     }
     const joints = values.layouts.reduce((total, layout) => total + layout.joints, 0);
     if (layouts.length === 0) {
-      results.push({ id: "layouts", status: "not-measured", message: "No test layout could be built from the kit's sockets.", reason: generated.skipped.map((skip) => `${skip.name}: ${skip.reason}`).join(" "), values });
+      results.push({ id: "layouts", status: "not-measured", message: "No test layout could be built from the kit's sockets.", reason: generated.skipped.map((skip) => `"${skip.name}": ${skip.reason}`).join(" "), values });
     } else if (problems.length > 0) {
       results.push({ id: "layouts", status: "fail", message: `Layouts do not close: ${problems.join("; ")}.`, values });
     } else if (unmeasured > 0) {

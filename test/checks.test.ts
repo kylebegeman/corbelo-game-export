@@ -209,7 +209,7 @@ describe("pivot", () => {
     expect(pivot.values.bodies).toHaveLength(1);
     expect(pivot.values.bodies[0]).toMatchObject({ name: "Part", mode: "base-center", inside: true, onGrid: true });
     expect(pivot.values.bodies[0]!.fromMinCorner.map((value) => Math.round(value * 1e4) / 1e4)).toEqual([1, 0, 0.1]);
-    expect(pivot.message).toBe('The pivot is at "base-center", on the 1 m grid.');
+    expect(pivot.message).toBe("The pivot is at the middle of the base, on the 1 m grid.");
   });
 
   it("fails a kit piece whose pivot is off the grid, and passes it on a finer grid or with a corner pivot", () => {
@@ -229,6 +229,14 @@ describe("pivot", () => {
     const far = check("pivot", asset(crate.positions, { pivot: [20000, 0, 0] }));
     expect(far.status).toBe("warn");
     expect(far.values.bodies[0]).toMatchObject({ mode: "point", inside: false });
+    // Just outside, the message says the pivot in words, as it does for every way of placing one.
+    const pivotOf = (pivot: AssetInput["pivot"]) => check("pivot", asset(crate.positions, { pivot })).message;
+    expect(([[-100, 250, 0], "center", "min-corner", "origin"] as const).map(pivotOf)).toEqual([
+      "The pivot is at a point that was given, on the 1 m grid.",
+      "The pivot is at the middle of the body, on the 1 m grid.",
+      "The pivot is at the lowest corner of the box around the body, on the 1 m grid.",
+      "The pivot is at the origin the body was modelled around, on the 1 m grid.",
+    ]);
     // Just outside is a choice, like a hinge: no warning.
     expect(check("pivot", asset(crate.positions, { pivot: [-100, 250, 0] })).status).toBe("pass");
   });
@@ -268,10 +276,10 @@ describe("shading", () => {
     // 48 lines down the side, 48 across the quads of the side, and the spokes of the two ends.
     expect(shading.values.softEdges).toBe(48 + 48 + 2 * 48);
     expect(shading.values.maxNormalAngle).toBeLessThan(5);
-    expect(shading.message).toContain('normals "face-weighted"');
+    expect(shading.message).toBe("96 hard edges and 192 soft edges. Normals are weighted by the area and angle of each triangle. Weighting by the whole flat face is there to ask for.");
     const weighted = check("shading", asset(post.positions, { normals: "face-weighted" }));
     expect(weighted).toMatchObject({ status: "pass", values: { normals: "face-weighted" } });
-    expect(weighted.message).toContain("Face-weighted normals are in use.");
+    expect(weighted.message).toBe("96 hard edges and 192 soft edges. Normals are weighted by the whole flat face each triangle belongs to.");
   });
 
   it("warns when a normal is far from a face it shades", () => {
@@ -404,7 +412,7 @@ describe("collision", () => {
   it("is not measured without a shape, or for a body with no volume to compare", () => {
     const none = check("collision", asset(crate.positions, { collision: "none" }));
     expect(none).toMatchObject({ status: "not-measured", values: { bodies: [{ shape: "none", pieces: 0, error: null, withinTolerance: null }] } });
-    expect(none.reason).toContain("No collision was written");
+    expect(none.reason).toBe("No collision was written with the file. Write it again with a collision shape to have it measured.");
     const open = check("collision", asset(crate.positions.slice(9)));
     expect(open).toMatchObject({ status: "not-measured", values: { bodies: [{ shape: "hull", pieces: 1, error: null }] } });
     expect(open.reason).toContain("encloses no volume");
@@ -449,7 +457,7 @@ describe("detail levels", () => {
   it("is not measured for an asset without lower levels", () => {
     const detail = check("detail-levels", asset(post.positions));
     expect(detail).toMatchObject({ status: "not-measured", values: { bodies: [] } });
-    expect(detail.reason).toContain("No body was given lods");
+    expect(detail.reason).toBe("No body was given lower detail levels. Engines that make their own levels on import need none.");
   });
 });
 
