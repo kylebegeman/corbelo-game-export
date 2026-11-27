@@ -202,9 +202,18 @@ export function exportGamePack(input: PackInput): GamePack {
     const where = row === undefined ? "The asset" : `Row "${row}"`;
     if (!Array.isArray(bodies) || bodies.length === 0) refuse("NO_BODIES", `${where} needs at least one body.`);
     // One body is the asset: it takes the asset's name. Several keep their own.
-    const named = bodies.length === 1 && typeof bodies[0] === "object" && bodies[0] !== null ? [{ ...bodies[0], name: asset }] : bodies;
+    const one = bodies.length === 1 && typeof bodies[0] === "object" && bodies[0] !== null ? bodies[0] : undefined;
+    const named = one !== undefined ? [{ ...one, name: asset }] : bodies;
+    // What was given for that one body by the name it had goes with it to the name it takes.
+    const own: Record<string, unknown> = {};
+    for (const key of ["pivots", "collisions"]) {
+      const given = (options as Record<string, unknown>)[key];
+      if (one === undefined || typeof given !== "object" || given === null || Array.isArray(given) || !Object.hasOwn(given, one.name)) continue;
+      const { [one.name]: entry, ...others } = given as Record<string, unknown>;
+      own[key] = { ...others, [asset]: entry };
+    }
     const stored = provenance ?? input.provenance;
-    const result = exportGameAsset({ ...(options as unknown as AssetOptions), source: input.source, bodies: named, ...(stored !== undefined ? { provenance: stored } : {}) });
+    const result = exportGameAsset({ ...(options as unknown as AssetOptions), ...own, source: input.source, bodies: named, ...(stored !== undefined ? { provenance: stored } : {}) });
     facts = result.facts;
     const fileName = `${asset}.glb`;
     for (const material of result.facts.materials) {

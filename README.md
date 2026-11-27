@@ -366,7 +366,7 @@ exportGameAsset({ bodies: [door, handle], source, pivot: "base-center", pivots: 
 exportGameAsset({ bodies: [door, handle], source, pivots: [null, "center"] });
 ```
 
-A body that is not named has `pivot`, and so does every body past the end of a list. The name is the one the body was given, before it was made safe for a node, and it stands for every body of that name. Each body's facts say its own pivot in `pivot`, with its `mode`, and `settings.pivot` stays the pivot of the asset. Collision, detail levels and attach points are in the frame of their body's own pivot. With `placement: "assembly"` the set's pivot is still taken with `pivot`. A name no body has, a list longer than the bodies and a pivot that cannot be read are refused with `BAD_OPTION`. In a family every row is written with the same `pivots`, so each row needs a body of each name.
+A body that is not named has `pivot`, and so does every body past the end of a list. The name is the one the body was given, before it was made safe for a node, and it stands for every body of that name. Each body's facts say its own pivot in `pivot`, with its `mode`, and `settings.pivot` stays the pivot of the asset. Collision, detail levels and attach points are in the frame of their body's own pivot. With `placement: "assembly"` the set's pivot is still taken with `pivot`. A name no body has, a list longer than the bodies and a pivot that cannot be read are refused with `BAD_OPTION`. In a pack the one body of an asset takes the asset's name, and is still found by the name it was given. In a family every row is written with the same `pivots`, so each row needs a body of each name.
 
 Two things differ from the plain export, both so that a part stays the same thing from one revision to the next:
 
@@ -844,7 +844,7 @@ const zip = packToZip(pack);
 
 ### The kit as data
 
-A kit takes the options of [`exportGameAsset`](#game-assets) (`profile`, `collision`, `texcoords`, `kernel`, `creaseAngle` and the rest) and applies them to every piece. It takes no `pivot` and no `placement`: each piece has its own pivot and sits at the origin of its own file.
+A kit takes the options of [`exportGameAsset`](#game-assets) (`profile`, `collision`, `texcoords`, `kernel`, `creaseAngle` and the rest) and applies them to every piece. It takes no `pivot`, `pivots` or `placement`, since each piece has its own pivot and sits at the origin of its own file, and no `collisions`: its collision settings are for every piece.
 
 | Field | Meaning |
 | --- | --- |
@@ -1432,7 +1432,7 @@ A job with `pieces` in place of `bodies` or `rows` makes a [kit pack](#kit-packs
 }
 ```
 
-It takes the keys of a pack job but `bodies`, `rows`, `pivot` and `placement`, and these:
+It takes the keys of a pack job but `bodies`, `rows`, `pivot`, `pivots`, `placement` and `collisions`, and these:
 
 | Key | Meaning |
 | --- | --- |
@@ -1544,7 +1544,7 @@ Bad input is refused with a `GameExportError`. Its `code` is stable and its `mes
 | `BAD_COLLISION` | `collisionPieces` is not a list of at least four finite points each, a collision shape asked for by name cannot be built, or the kernel failed when `"decomposition"` was asked for by name. Under `"auto"` a kernel that fails is passed over with a note. |
 | `BAD_ATTACH_POINT` | An attach point has no name, no position of three finite numbers, or a direction of no length. |
 | `BAD_PACK` | A pack has both `bodies` and `rows` or neither, an empty or badly formed row, two rows that come out with one name, or `checks`, `generatedAt` or `revision` of the wrong kind. Also a pack to install that has no manifest, more than one, or one that is not a manifest of this package or lists a file name that would leave the pack's folder. |
-| `BAD_KIT` | A kit cannot be read: no name, grid or pieces, a grid that is not positive numbers, two pieces of one name, a piece with both `bodies` and `glb` or neither, cells that are not whole numbers, a socket with no type, with both `side` and `plane` or neither, on a cell the piece does not have, on a face between two cells of its own piece, with a plane turned more than 1 degree from every axis, or two sockets of one name in a piece. Also `mates` that give one type two types to meet, two pieces that come out with one file name, `pivot` or `placement` given for the whole kit, and a layout's scene that comes out with the name of another file. |
+| `BAD_KIT` | A kit cannot be read: no name, grid or pieces, a grid that is not positive numbers, two pieces of one name, a piece with both `bodies` and `glb` or neither, cells that are not whole numbers, a socket with no type, with both `side` and `plane` or neither, on a cell the piece does not have, on a face between two cells of its own piece, with a plane turned more than 1 degree from every axis, or two sockets of one name in a piece. Also `mates` that give one type two types to meet, two pieces that come out with one file name, `pivot`, `pivots`, `placement` or `collisions` given for the whole kit, and a layout's scene that comes out with the name of another file. |
 | `BAD_LAYOUT` | A layout has no name or no placements, shares its name with another, names a piece the kit does not have, has a cell that is not whole numbers or a turn that is not a whole number, or a layout asked for by name is not one of the kit's. |
 | `BAD_ZIP` | An archive is not a ZIP, is in parts, uses the 64-bit extension, holds an encrypted file, a file packed another way than stored or deflate, a deflated file with no `inflate` given, a name that would leave its folder, two files of one name, or a file whose bytes do not match its checksum. |
 | `BAD_LOCK` | The lock file is not one, is not a plain file, or has no pack of the name given. Also `status` and `pin` in a project with no lock file. |

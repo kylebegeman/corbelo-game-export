@@ -200,6 +200,9 @@ describe("a pivot of its own for a body", () => {
   it("goes through a pack to every asset of it", () => {
     const pack = exportGamePack({ name: "door", bodies, source: MM_Z_UP, pivots: { handle: "center" }, checks: false });
     expect(pack.manifest.files[0]!.facts.bodies.map((body) => body.pivot.mode)).toEqual(["base-center", "center"]);
+    // The one body of an asset takes the asset's name, and is still found by the name it was given.
+    const one = exportGamePack({ name: "front door", bodies: [bodies[0]!], source: MM_Z_UP, pivots: { door: "min-corner" }, collisions: { door: "hull" }, checks: false });
+    expect(one.manifest.files[0]!.facts.bodies[0]).toMatchObject({ sourceName: "front_door", pivot: { mode: "min-corner" }, collision: { requested: "hull" } });
   });
 
   it("refuses a name no body has, a list longer than the bodies and a pivot it cannot read", () => {
