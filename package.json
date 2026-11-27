@@ -17,6 +17,10 @@
       "types": "./dist/node.d.ts",
       "default": "./dist/node.js"
     },
+    "./messages": {
+      "types": "./dist/messages.d.ts",
+      "default": "./dist/messages.js"
+    },
     "./schema/pack.schema.json": "./schema/pack.schema.json",
     "./schema/check-report.schema.json": "./schema/check-report.schema.json",
     "./schema/pack-manifest.schema.json": "./schema/pack-manifest.schema.json",

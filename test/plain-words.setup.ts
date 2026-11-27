@@ -2,7 +2,11 @@
 // of an asset check or a kit check is walked as it is made, wherever it is made, and a text that
 // names a function, an option key or an id of this package fails the test that brought it out.
 // See plain-words.ts for the rule and wording.test.ts for the checks walked on purpose.
+//
+// The same walk holds every text to its message key: what the English catalog and the named
+// values of a result rebuild is the text the result came with, to the letter. See message-keys.ts.
 import { beforeAll, vi } from "vitest";
+import { notRebuilt } from "./message-keys.js";
 import { identifiersIn, textsOf, vocabularyOf, walked, type Vocabulary } from "./plain-words.js";
 
 type Report = Parameters<typeof textsOf>[0];
@@ -22,6 +26,9 @@ function hold(report: Report): void {
 }
 
 function walk<Made extends Report>(report: Made): Made {
+  // Every text is also what the English catalog and the values of the result rebuild.
+  const rebuilt = notRebuilt(report);
+  if (rebuilt.length > 0) throw new Error(`A check says something its key and values do not rebuild.\n${rebuilt.join("\n")}`);
   if (vocabulary === undefined) waiting.push(report);
   else hold(report);
   return report;

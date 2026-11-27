@@ -271,7 +271,7 @@
       }
     },
     "SkippedLayouts": {
-      "description": "Test layouts the kit has no pieces for, and why.",
+      "description": "Test layouts the kit has no pieces for, and why: in English, and as a key of the message catalog with the values that fill it.",
       "type": "array",
       "items": {
         "type": "object",
@@ -287,6 +287,14 @@
           },
           "reason": {
             "type": "string"
+          },
+          "reasonKey": {
+            "description": "The key of the reason in the message catalog. Not on a report written before version 0.1.8.",
+            "type": "string",
+            "pattern": "^layouts\\.skipped\\.[a-z][a-z-]*$"
+          },
+          "reasonValues": {
+            "$ref": "check-report.schema.json#/$defs/MessageValues"
           }
         }
       }
@@ -943,9 +951,25 @@
           "description": "One sentence for a person.",
           "type": "string"
         },
+        "messageKey": {
+          "description": "What the message says, as a key of the message catalog: the id of the check, then what it found. Not on a report written before version 0.1.8.",
+          "type": "string",
+          "pattern": "^on-grid\\.[a-z][a-z-]*$"
+        },
+        "messageValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
+        },
         "reason": {
           "description": "Only with not-measured: why there is nothing to judge.",
           "type": "string"
+        },
+        "reasonKey": {
+          "description": "With a reason: its key in the message catalog, the message key and then .reason.",
+          "type": "string",
+          "pattern": "^on-grid\\.[a-z][a-z-]*\\.reason$"
+        },
+        "reasonValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
         },
         "values": {
           "$ref": "#/$defs/OnGridValues"
@@ -970,7 +994,9 @@
       },
       "else": {
         "properties": {
-          "reason": false
+          "reason": false,
+          "reasonKey": false,
+          "reasonValues": false
         }
       }
     },
@@ -995,9 +1021,25 @@
           "description": "One sentence for a person.",
           "type": "string"
         },
+        "messageKey": {
+          "description": "What the message says, as a key of the message catalog: the id of the check, then what it found. Not on a report written before version 0.1.8.",
+          "type": "string",
+          "pattern": "^seams\\.[a-z][a-z-]*$"
+        },
+        "messageValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
+        },
         "reason": {
           "description": "Only with not-measured: why there is nothing to judge.",
           "type": "string"
+        },
+        "reasonKey": {
+          "description": "With a reason: its key in the message catalog, the message key and then .reason.",
+          "type": "string",
+          "pattern": "^seams\\.[a-z][a-z-]*\\.reason$"
+        },
+        "reasonValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
         },
         "values": {
           "$ref": "#/$defs/SeamValues"
@@ -1022,7 +1064,9 @@
       },
       "else": {
         "properties": {
-          "reason": false
+          "reason": false,
+          "reasonKey": false,
+          "reasonValues": false
         }
       }
     },
@@ -1047,9 +1091,25 @@
           "description": "One sentence for a person.",
           "type": "string"
         },
+        "messageKey": {
+          "description": "What the message says, as a key of the message catalog: the id of the check, then what it found. Not on a report written before version 0.1.8.",
+          "type": "string",
+          "pattern": "^in-cells\\.[a-z][a-z-]*$"
+        },
+        "messageValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
+        },
         "reason": {
           "description": "Only with not-measured: why there is nothing to judge.",
           "type": "string"
+        },
+        "reasonKey": {
+          "description": "With a reason: its key in the message catalog, the message key and then .reason.",
+          "type": "string",
+          "pattern": "^in-cells\\.[a-z][a-z-]*\\.reason$"
+        },
+        "reasonValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
         },
         "values": {
           "$ref": "#/$defs/InCellsValues"
@@ -1074,7 +1134,9 @@
       },
       "else": {
         "properties": {
-          "reason": false
+          "reason": false,
+          "reasonKey": false,
+          "reasonValues": false
         }
       }
     },
@@ -1099,9 +1161,25 @@
           "description": "One sentence for a person.",
           "type": "string"
         },
+        "messageKey": {
+          "description": "What the message says, as a key of the message catalog: the id of the check, then what it found. Not on a report written before version 0.1.8.",
+          "type": "string",
+          "pattern": "^layouts\\.[a-z][a-z-]*$"
+        },
+        "messageValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
+        },
         "reason": {
           "description": "Only with not-measured: why there is nothing to judge.",
           "type": "string"
+        },
+        "reasonKey": {
+          "description": "With a reason: its key in the message catalog, the message key and then .reason.",
+          "type": "string",
+          "pattern": "^layouts\\.[a-z][a-z-]*\\.reason$"
+        },
+        "reasonValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
         },
         "values": {
           "$ref": "#/$defs/LayoutValues"
@@ -1126,7 +1204,9 @@
       },
       "else": {
         "properties": {
-          "reason": false
+          "reason": false,
+          "reasonKey": false,
+          "reasonValues": false
         }
       }
     },
@@ -1151,9 +1231,25 @@
           "description": "One sentence for a person.",
           "type": "string"
         },
+        "messageKey": {
+          "description": "What the message says, as a key of the message catalog: the id of the check, then what it found. Not on a report written before version 0.1.8.",
+          "type": "string",
+          "pattern": "^corners\\.[a-z][a-z-]*$"
+        },
+        "messageValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
+        },
         "reason": {
           "description": "Only with not-measured: why there is nothing to judge.",
           "type": "string"
+        },
+        "reasonKey": {
+          "description": "With a reason: its key in the message catalog, the message key and then .reason.",
+          "type": "string",
+          "pattern": "^corners\\.[a-z][a-z-]*\\.reason$"
+        },
+        "reasonValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
         },
         "values": {
           "$ref": "#/$defs/CornerValues"
@@ -1178,7 +1274,9 @@
       },
       "else": {
         "properties": {
-          "reason": false
+          "reason": false,
+          "reasonKey": false,
+          "reasonValues": false
         }
       }
     },
@@ -1203,9 +1301,25 @@
           "description": "One sentence for a person.",
           "type": "string"
         },
+        "messageKey": {
+          "description": "What the message says, as a key of the message catalog: the id of the check, then what it found. Not on a report written before version 0.1.8.",
+          "type": "string",
+          "pattern": "^walkable\\.[a-z][a-z-]*$"
+        },
+        "messageValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
+        },
         "reason": {
           "description": "Only with not-measured: why there is nothing to judge.",
           "type": "string"
+        },
+        "reasonKey": {
+          "description": "With a reason: its key in the message catalog, the message key and then .reason.",
+          "type": "string",
+          "pattern": "^walkable\\.[a-z][a-z-]*\\.reason$"
+        },
+        "reasonValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
         },
         "values": {
           "$ref": "#/$defs/WalkableValues"
@@ -1230,7 +1344,9 @@
       },
       "else": {
         "properties": {
-          "reason": false
+          "reason": false,
+          "reasonKey": false,
+          "reasonValues": false
         }
       }
     },
@@ -1255,9 +1371,25 @@
           "description": "One sentence for a person.",
           "type": "string"
         },
+        "messageKey": {
+          "description": "What the message says, as a key of the message catalog: the id of the check, then what it found. Not on a report written before version 0.1.8.",
+          "type": "string",
+          "pattern": "^collision-tiles\\.[a-z][a-z-]*$"
+        },
+        "messageValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
+        },
         "reason": {
           "description": "Only with not-measured: why there is nothing to judge.",
           "type": "string"
+        },
+        "reasonKey": {
+          "description": "With a reason: its key in the message catalog, the message key and then .reason.",
+          "type": "string",
+          "pattern": "^collision-tiles\\.[a-z][a-z-]*\\.reason$"
+        },
+        "reasonValues": {
+          "$ref": "check-report.schema.json#/$defs/MessageValues"
         },
         "values": {
           "$ref": "#/$defs/CollisionTileValues"
@@ -1282,7 +1414,9 @@
       },
       "else": {
         "properties": {
-          "reason": false
+          "reason": false,
+          "reasonKey": false,
+          "reasonValues": false
         }
       }
     }

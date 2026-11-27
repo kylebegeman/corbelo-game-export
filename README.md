@@ -596,7 +596,7 @@ const report = checkGameAsset(glb, { assetClass: "kit-piece", expect: { opening:
   "status": "pass",
   "counts": { "pass": 8, "warn": 0, "fail": 0, "notMeasured": 4 },
   "results": [
-    { "id": "size", "status": "pass", "message": "The asset is 1 m on its longest side, a size a small prop has.", "values": { "...": "..." } },
+    { "id": "size", "status": "pass", "message": "The asset is 1 m on its longest side, a size a small prop has.", "messageKey": "size.expected", "messageValues": { "longest": 1, "unit": "m", "assetClass": "small-prop" }, "values": { "...": "..." } },
     { "id": "collision", "status": "pass", "message": "Collision in 2 convex pieces, within 5% of the visible volume.", "values": { "tolerance": 0.05, "bodies": [{ "name": "Corner_Bench", "requested": "auto", "shape": "pieces", "pieces": 2, "error": 0, "withinTolerance": true }] } },
     { "id": "detail-levels", "status": "not-measured", "message": "The file has no lower detail levels.", "reason": "No body was given lower detail levels. Engines that make their own levels on import need none.", "values": { "maxDeviationShare": 0.05, "bodies": [] } }
   ]
@@ -604,6 +604,8 @@ const report = checkGameAsset(glb, { assetClass: "kit-piece", expect: { opening:
 ```
 
 Every result has `id`, `status`, a `message` for a person, and `values`, the numbers it was judged by. A message or a reason is written for someone who models parts: it names no function of this package, no option key and no id, and says an asset class, a pivot and a player by name. Read `values` and the report's own fields for the ids. `status` is `"pass"`, `"warn"`, `"fail"` or `"not-measured"`, and a result that was not measured always has a `reason`. The report's own `status` is the worst of the results, and what was not measured does not count against it. `CHECK_IDS` lists the ids in order.
+
+Beside the English text every result has `messageKey` and `messageValues`, and with a reason `reasonKey` and `reasonValues`: a stable name for what was found and the named values the sentence was written from. They are there to say the checks in another language, or in words of your own. See [Message keys](#message-keys). The example above shows them on the first result only.
 
 | `id` | Passes when | Warns when | Fails when | Not measured when |
 | --- | --- | --- | --- | --- |
@@ -708,6 +710,64 @@ These are meant to be the values a new character starts with in each engine, bef
 
 - A new Character starts with a capsule of radius 34 and half height 88, Max Step Height 45, Walkable Floor Angle 44.765 and Jump Z Velocity 420 against gravity of 980, all in Unreal units of one centimetre. The jump is 420 squared over twice 980, which is 90 cm.
 - Epic's reference for [UCharacterMovementComponent](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/UCharacterMovementComponent) describes these settings without printing their starting values. Those are set in the engine's source, which needs an Epic Games account to read. Copies of the two constructors that people have posted show them: the Character's `InitCapsuleSize(34.0f, 88.0f)` in [a thread on Epic's forum](https://forums.unrealengine.com/t/how-to-include-add-a-blueprint-component-to-c-actor/492414), and the movement component's `JumpZVelocity = 420.0f`, `MaxStepHeight = 45.0f` and `SetWalkableFloorZ(0.71f)` in [a posted copy of its code](https://gist.github.com/NoirMorilec/1ebe1a6f742c193101265a928b90c897). A floor Z of 0.71 is the angle 44.765 degrees. The copies of the movement component are from Unreal Engine 4; the editor of your version has the last word.
+
+### Message keys
+
+A message and a reason are English sentences. Each also has a key and the named values the sentence was written from, so that a program can say the same thing in another language without reading the English:
+
+```json
+{ "id": "clean-mesh", "status": "warn", "message": "The mesh has 4 open edges.", "messageKey": "clean-mesh.found", "messageValues": { "found": [{ "key": "clean-mesh.open", "values": { "count": 4 }, "text": "4 open edges" }] }, "values": { "...": "..." } }
+```
+
+| Field | On | Meaning |
+| --- | --- | --- |
+| `messageKey` | every result | The id of the check, a dot, and what the check found: `size.expected`, `clean-mesh.found`. |
+| `messageValues` | every result | The values the message is filled with, by name. `{}` for a message with none. |
+| `reasonKey` | a result that was not measured | Always the key of its message and `.reason`: `detail-levels.none.reason`. |
+| `reasonValues` | a result that was not measured | The values the reason is filled with. |
+
+A value is a text, a number, a part, or a list of those. A part is a piece of a sentence that has a key of its own, like each thing a mesh has wrong: `{ key, values, text }`, where `text` is the part in English as the message has it. A test layout that was left out has `reasonKey` (`layouts.skipped.` and why) and `reasonValues` beside its `reason`, in `kitLayouts`, in the values of Layouts close and in a kit pack's manifest. The same fields are in a report inside a pack manifest, and the schemas describe all of them as optional, so a report written by 0.1.7 is still valid.
+
+The English catalog and the functions that fill a template are an entry of their own, `corbelo-game-export/messages`. Nothing you import from the main entry carries them: a result brings its key, its values and its English text, and that is all.
+
+```ts
+import { ENGLISH_MESSAGES, fillMessage, fillReason, MESSAGE_KEYS, missingMessageKeys } from "corbelo-game-export/messages";
+
+const german = { "clean-mesh.found": "Das Netz hat {found, join, with { und }}.", "clean-mesh.open": "{count, plural, one {# offene Kante} other {# offene Kanten}}" };
+for (const result of report.results) console.log(fillMessage(result, german, "de"), fillReason(result, german, "de") ?? "");
+// "Das Netz hat 4 offene Kanten." for the result above, and the English text for every key the catalog does not have yet.
+```
+
+| Export | What it is |
+| --- | --- |
+| `ENGLISH_MESSAGES` | The English catalog: every key and its template. `fillMessage(result, ENGLISH_MESSAGES)` is `result.message`, letter for letter. |
+| `MESSAGE_KEYS` | Every key, in the order the checks come in. |
+| `missingMessageKeys(catalog)` | The keys a catalog of your own has no template for. Empty for a whole catalog. |
+| `fillMessage(result, catalog, locale?)` | The message of a result from a catalog. The English `message` for a key the catalog does not have, and for a result from before 0.1.8, which has no key. |
+| `fillReason(result, catalog, locale?)` | The same for the reason of a result or of a test layout that was left out. `undefined` where there is no reason. |
+| `fillTemplate(template, values?, catalog?, locale?)` | Fills one template. The catalog is where a part with a key of its own is looked up. |
+
+`MessageCatalog`, `MessageKey`, `MessagePart`, `MessageValue` and `MessageValues` are the types, and the main entry exports them too.
+
+A template names its values in braces, and has three ways to choose words:
+
+| In a template | Writes |
+| --- | --- |
+| `{name}` | The value. A part is filled from the catalog by its key, and said by its English `text` where the catalog has no template for it. A list is written with `, ` between its items. |
+| `{count, plural, =0 {none} one {# edge} other {# edges}}` | The words for a number. An exact `=N` is taken first, then the form the language has for that number: `one` and `other` in English, and `zero`, `two`, `few` and `many` where a language has them. `#` is the number. `other` is what is written when nothing else fits. |
+| `{mode, select, center {the middle} other {a point}}` | The words for a text, `other` when it is none of those named. |
+| `{names, join, with {, } each {"#"}}` | A list, with what stands between two items and, if given, what is written for each, `#` being the item. |
+
+`locale` is the language of the catalog as a BCP 47 tag, `"en"` unless given. It decides only which form a number picks. Numbers are written as the check rounded them, with a point for the decimals. A name the values do not have stays in the text as it is written, braces and all, so a misspelt name shows. A template cannot write a brace of its own, and inside `plural` and the `each` of `join` it cannot write a `#` of its own. Values are written as they are and are never read as a template.
+
+To hold a catalog of your own to the package, test that it is whole and that every template uses the names the English one does:
+
+```ts
+expect(missingMessageKeys(myCatalog)).toEqual([]);
+for (const result of report.results) expect(fillMessage(result, myCatalog, "de")).not.toMatch(/[{}]/);
+```
+
+**The keys are stable.** Within 0.1.x a key keeps its meaning and the names of its values: a key is never renamed or removed, a value a template may use is never renamed or removed, and a check does not start saying one key for what it said with another. New keys may be added, for a new check or a new thing an existing check finds, and a result may be given a value it did not have. So a catalog written for one 0.1.x says every result of a later one, in English where a key is new, and `missingMessageKeys` lists what to add. The English wording is not part of this: a template may be reworded, which is why a program should read `messageKey` and `values` and never the sentence. One value is English as it comes: `why` of `collision.nearer.refused` is what a kernel said when it would not take a body.
 
 ## Packs
 
@@ -925,7 +985,7 @@ A layout is pieces in their places:
 
 `cell` is the cell the piece's first cell, `[0, 0, 0]`, lands on. `turn` is a whole number of quarter turns about the up axis, anticlockwise seen from above, about the middle of the piece's first cell. Default 0. Cells may be negative.
 
-Six test layouts are built from the sockets alone, so a kit is tested as it will be used without anyone laying it out: `run` (a straight run closed at both ends), `corner`, `tee`, `cross`, `rise` (from one storey to the next) and `room` (a closed ring). A piece is read by its sockets on the four sides: one is an end, two on opposite sides of one storey a through piece, two at a right angle a bend, two on different storeys a rise, three a tee and four a crossing. A layout the kit has no pieces for is left out, and the reason is given: `kitLayouts(kit)` returns `{ layouts, skipped: [{ name, reason }] }`.
+Six test layouts are built from the sockets alone, so a kit is tested as it will be used without anyone laying it out: `run` (a straight run closed at both ends), `corner`, `tee`, `cross`, `rise` (from one storey to the next) and `room` (a closed ring). A piece is read by its sockets on the four sides: one is an end, two on opposite sides of one storey a through piece, two at a right angle a bend, two on different storeys a rise, three a tee and four a crossing. A layout the kit has no pieces for is left out, and the reason is given: `kitLayouts(kit)` returns `{ layouts, skipped: [{ name, reason, reasonKey, reasonValues }] }`, the last two being the [message key](#message-keys) of the reason and its values.
 
 `layoutJoints(kit, layout)` says what meets what in a layout from the cells and the sockets alone: `joints` (two sockets face to face whose types meet), `open` (a socket facing an empty cell), `blocked` (a socket facing a side of a piece with no socket there), `mismatched` (face to face, with types that do not meet), `doubled` (cells more than one piece is in) and `cells`. `turnSide(side, turn)`, `turnCell(cell, turn)`, `oppositeSide(side)`, `cellSize(grid)` and `placePoint(point, placement, grid)` are the same arithmetic the package uses, for a caller that draws a layout itself.
 
@@ -964,7 +1024,7 @@ Six test layouts are built from the sockets alone, so a kit is tested as it will
 }
 ```
 
-- Each result is `{ id, status, message, values }`, with `reason` added when the status is `"not-measured"`. `message` is one sentence for a person. `values` holds the numbers the check was judged by, and its shape is fixed for each check: `schema/kit-check-report.schema.json` has all seven.
+- Each result is `{ id, status, message, messageKey, messageValues, values }`, with `reason`, `reasonKey` and `reasonValues` added when the status is `"not-measured"`. `message` is one sentence for a person, and the key and the named values are for saying it in another language: see [Message keys](#message-keys). `values` holds the numbers the check was judged by, and its shape is fixed for each check: `schema/kit-check-report.schema.json` has all seven.
 - `status` at the top is the worst of the results. What was not measured does not count.
 - `layouts` lists every layout that was checked: the test layouts, then your own. `origin` is `"generated"` or `"given"`.
 - Walkable measures the collision shapes a piece brings, and the visible mesh of a piece that brings none. `values.pieces[].geometry` says which.
@@ -1681,7 +1741,7 @@ npm run size         # prints the size of the built files and of the minified bu
 
 The Godot and Blender proofs run when those programs are on the path and are skipped with a line on standard error when they are not. The decomposition tests use `manifold-3d`, which is a development dependency only.
 
-Every report a test makes is held to plain words as it is made, by `test/plain-words.setup.ts`: a message or a reason that names a function of this package, an option key or an id fails the test that brought it out. `test/wording.test.ts` walks every check through each state it can be in.
+Every report a test makes is held to plain words as it is made, by `test/plain-words.setup.ts`: a message or a reason that names a function of this package, an option key or an id fails the test that brought it out. `test/wording.test.ts` walks every check through each state it can be in. The same file holds every report to its [message keys](#message-keys): a message, a reason or a part of one that is not, letter for letter, what the English catalog and the named values rebuild fails the test that brought it out, and so does a template that uses a value it was not given or leaves one unused. The walk ends by asking that every key of the catalog was said at least once, and `test/messages.test.ts` lists every key by name, so a key that goes missing or changes its name fails there.
 
 `dist/` is committed. After changing anything in `src/`, run `npm run build` and commit the result with it. The test suite and the CI workflow both fail when `dist/` is stale.
 

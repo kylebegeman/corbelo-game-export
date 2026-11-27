@@ -86,6 +86,7 @@ export {
   type LayoutJoint,
   type LayoutJoints,
   type PlacedSocket,
+  type SkippedLayout,
 } from "./kit.js";
 export {
   checkKit,
@@ -107,6 +108,8 @@ export {
 export { exportKitPack, type KitManifest, type KitManifestPiece, type KitMeshLibrary, type KitPackInput } from "./kit-pack.js";
 export { DEVIATION_MAX_SAMPLES, meshDeviation } from "./lod.js";
 export { DEFAULT_COLOR } from "./materials.js";
+// Types only: the catalog and the function that fills a template are the entry `corbelo-game-export/messages`.
+export type { MessageCatalog, MessageKey, MessagePart, MessageValue, MessageValues } from "./messages.js";
 export { DEGENERATE_AREA_RATIO, FLAT_FACE_ANGLE_DEGREES } from "./mesh.js";
 export { nodeNames } from "./names.js";
 export { assetName, DEFAULT_NAME_PATTERNS } from "./naming.js";

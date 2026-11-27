@@ -5,10 +5,12 @@
 // walked through each state the fixtures bring it to.
 import { describe, expect, it } from "vitest";
 import * as api from "../src/index.js";
-import { checkGameAsset, checkKit, CHECK_IDS, exportGameAsset, exportGameGlb, KIT_CHECK_IDS, type AssetInput, type CheckOptions, type KitGrid, type KitPieceInput } from "../src/index.js";
+import { checkGameAsset, checkKit, CHECK_IDS, exportGameAsset, exportGameGlb, EXTRAS_KEY, KIT_CHECK_IDS, PLAYER_PROFILES, readGlb, type AssetInput, type CheckOptions, type GlbDocument, type KitGrid, type KitPieceInput } from "../src/index.js";
 import { box, chamferedBlock, cylinder, doorFrame, doorway, ell, halfPaintedSide, holedBlock, joined, MM_Z_UP, moved, ramp, stairs, tube, turned, type Shape } from "./fixtures.js";
 import { loadKernel } from "./kernel.js";
-import { bodyOf, corridorKit, corridorPieces, doorBoxes, flatBoxes, prismX, SLAB, stairsPiece, swap, WALL } from "./kit-fixtures.js";
+import { bodyOf, corridorKit, corridorPieces, doorBoxes, flatBoxes, piece, prismX, SLAB, stairsPiece, swap, WALL } from "./kit-fixtures.js";
+import { ENGLISH_MESSAGES, MESSAGE_KEYS } from "../src/messages.js";
+import { seen as keysSeen } from "./message-keys.js";
 import { identifiersIn, textsOf, vocabularyOf, walked } from "./plain-words.js";
 
 const vocabulary = vocabularyOf(api);
@@ -81,7 +83,7 @@ describe("every message and reason of the asset checks", () => {
     const { seen, texts, walk } = walker();
     const asset = (positions: ArrayLike<number>, more: Partial<AssetInput> = {}, body: Partial<AssetInput["bodies"][number]> = {}) =>
       exportGameAsset({ bodies: [{ name: "Part", positions, ...body }], source: MM_Z_UP, ...more }).glb;
-    const check = (glb: Uint8Array, options: CheckOptions = {}): void => walk(checkGameAsset(glb, options));
+    const check = (glb: Uint8Array | GlbDocument, options: CheckOptions = {}): void => walk(checkGameAsset(glb, options));
 
     const crate = box([0, 0, 0], [500, 500, 500]);
     const post = cylinder(150, 400, 48);
@@ -127,6 +129,29 @@ describe("every message and reason of the asset checks", () => {
     check(asset(turnedFace, { kernel }));
     check(asset(holed.slice(9), { kernel }));
     check(asset(ell(1000, 500).positions, {}, { collisionPieces: [{ positions: box([0, 0, 0], [1000, 1000, 500]).positions }] }));
+
+    // A kernel that was given and not turned to, since the file was written to a wider share
+    // than it is checked by, and one that cut as far as cuts would go.
+    check(asset(ell(1000, 500).positions, { kernel, collision: { tolerance: 0.9 } }), { collisionTolerance: 0.05 });
+    check(asset(tube(300, 250, 1000, 24).positions, { kernel, collision: { maxPieces: 64 } }), { collisionTolerance: 0.0001 });
+
+    // Bodies with a pivot, a share and a shape of their own, a triangle with no area, and two
+    // files as no export of this package writes them: one with no normals and one with no bodies.
+    const two = (more: Partial<AssetInput>): Uint8Array =>
+      exportGameAsset({ bodies: [{ name: "Crate", positions: crate.positions }, { name: "Post", positions: moved(post, [1000, 0, 0]).positions }], source: MM_Z_UP, ...more }).glb;
+    check(two({ pivots: { Post: "center" } }));
+    check(two({ pivots: { Post: [333, 0, 0] } }));
+    check(two({ collisions: { Post: { tolerance: 0.2 } } }));
+    check(two({ collision: "none", collisions: { Post: "hull" } }));
+    check(asset(Float32Array.from([...crate.positions, 0, 0, 0, 0, 0, 0, 500, 0, 0])));
+    const bare = readGlb(asset(crate.positions));
+    delete bare.json.meshes![0]!.primitives[0]!.attributes["NORMAL"];
+    check(bare);
+    const empty = readGlb(asset(crate.positions, { collision: "none" }));
+    const extras = empty.json.scenes![0]!.extras as Record<string, { facts: { bodies: unknown[] } }>;
+    extras[EXTRAS_KEY]!.facts.bodies = [];
+    empty.json.scenes![0]!.nodes = [];
+    check(empty);
 
     // Detail levels.
     check(asset(post.positions, {}, levels(24, 12)));
@@ -282,6 +307,61 @@ describe("every message and reason of the kit checks", () => {
     walk(checkKit(corridorKit((pieces) => pieces.slice(0, 2).map((piece) => ({ ...piece, sockets: [] })))));
     walk(checkKit(corridorKit((pieces) => [pieces[0]!, pieces[4]!, pieces[5]!])));
 
+    // A socket whose plane is off the face of its cell, and a kit whose one socket meets nothing.
+    walk(checkKit(corridorKit((pieces) => pieces.map((one) => (one.name === "endcap" ? { ...one, sockets: [{ type: "corridor", plane: { point: [2990, 1500, 1500], normal: [1, 0, 0] }, passage: true }] } : one)))));
+    walk(checkKit(corridorKit((pieces) => [pieces[5]!])));
+    // One end with a post to one side of its opening: turned to face itself, the outlines differ, so no seam has points to compare.
+    walk(checkKit(corridorKit((_, grid) => [piece("endcap", grid, ["+x"], [[[sizes(grid).M - 200, 200, SLAB], [sizes(grid).M, 700, sizes(grid).S]]])])));
+    // Sockets whose types meet nothing: no row of through pieces, nothing to put against a bend, and no ring.
+    const typed = (one: KitPieceInput): KitPieceInput => ({ ...one, sockets: one.sockets!.map((socket, at) => ({ ...socket, type: at === 0 ? "plug" : "peg" })) });
+    walk(checkKit(corridorKit((pieces) => [typed(pieces[0]!), typed(pieces[1]!)], { mates: { plug: "hole", peg: "slot" } })));
+    // A layout of the caller's own that joins two types that do not meet, and one whose pieces stop short of each other.
+    walk(
+      checkKit(
+        corridorKit((pieces, grid) => [...pieces, { ...piece("duct", grid, ["+x", "-x"]), sockets: [{ type: "duct", side: "+x" }, { type: "duct", side: "-x" }] }], {
+          layouts: [{ name: "wrong ends", placements: [{ piece: "straight", cell: [0, 0, 0] }, { piece: "duct", cell: [1, 0, 0] }] }],
+        }),
+      ),
+    );
+    walk(
+      checkKit(
+        corridorKit(
+          swap((grid) => {
+            const { M } = sizes(grid);
+            const short = flatBoxes(grid, ["+x", "-x"]).map(([min, max]): [typeof min, typeof max] => [min, [Math.min(max[0], M - 100), max[1], max[2]]]);
+            return { ...straight(grid), bodies: [bodyOf("straight", short)] };
+          }),
+        ),
+      ),
+    );
+    // Trim that a kernel cannot make a solid of, since it is not closed.
+    walk(
+      checkKit(
+        corridorKit(
+          swap((grid) => {
+            const made = threshold(grid);
+            const open = made.bodies![1]!;
+            return { ...made, bodies: [made.bodies![0]!, { ...open, positions: Float32Array.from(open.positions).slice(9), faceIds: undefined }] };
+          }),
+        ),
+        { kernel },
+      ),
+    );
+    // A passage on a side that is a wall, a slope too steep for a careful player, and a piece
+    // that brings no collision shape next to pieces that do.
+    walk(checkKit(corridorKit(swap((grid) => ({ ...corridorPieces(grid)[5]!, sockets: [{ type: "corridor", side: "+x", passage: true }, { type: "wall", side: "-x", passage: true }] })))));
+    walk(checkKit(corridorKit(), { player: { ...PLAYER_PROFILES.godot4, id: "careful", name: "A careful walker", walkableSlopeDeg: 20 } }));
+    walk(
+      checkKit(
+        corridorKit(
+          swap((grid) => {
+            const made = corridorPieces(grid)[5]!;
+            return { name: "endcap", glb: exportGameAsset({ bodies: made.bodies!, source: MM_Z_UP, collision: "none" }).glb, sockets: made.sockets! };
+          }),
+        ),
+      ),
+    );
+
     expect([...seen].sort()).toEqual(
       [
         "on-grid: pass",
@@ -308,5 +388,16 @@ describe("every message and reason of the kit checks", () => {
     );
     expect(new Set([...seen].map((one) => one.split(":")[0]))).toEqual(new Set(KIT_CHECK_IDS));
     expect(texts.size).toBeGreaterThan(40);
+  });
+});
+
+describe("every key of the message catalog", () => {
+  it("is brought out by the two walks above, so each template is held to what a check really says", () => {
+    // The setup file rebuilds every text of every report from its key and values as the report
+    // is made, and keeps the keys. A key no walk brings out would be a template nothing tests.
+    const walkedBoth = ["size.expected", "on-grid.whole"].every((key) => keysSeen.has(key));
+    if (!walkedBoth) return;
+    expect(MESSAGE_KEYS.filter((key) => !keysSeen.has(key))).toEqual([]);
+    expect([...keysSeen].filter((key) => !Object.hasOwn(ENGLISH_MESSAGES, key))).toEqual([]);
   });
 });

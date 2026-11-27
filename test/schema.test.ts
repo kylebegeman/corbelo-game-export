@@ -329,6 +329,45 @@ describe("schema/check-report.schema.json", () => {
     expect(withBody((body) => (body["tolerance"] = -1))).toBe(false);
   });
 
+  it("describes the key and the named values of each message, and still reads a report from before they were there", () => {
+    const report = JSON.parse(JSON.stringify(checkGameAsset(exportGameAsset(assets["the defaults"]!).glb))) as { results: Record<string, unknown>[] };
+    for (const result of report.results) expect(Object.keys(result), result["id"] as string).toEqual(expect.arrayContaining(["messageKey", "messageValues"]));
+    const at = (id: string) => report.results.findIndex((result) => result["id"] === id);
+    const withResult = (id: string, change: (result: Record<string, unknown>) => void) => {
+      const changed = JSON.parse(JSON.stringify(report)) as typeof report;
+      change(changed.results[at(id)]!);
+      return validReport(changed);
+    };
+    const withAll = (change: (result: Record<string, unknown>) => void) => {
+      const changed = JSON.parse(JSON.stringify(report)) as typeof report;
+      for (const result of changed.results) change(result);
+      return validReport(changed);
+    };
+    expect(withAll(() => undefined), JSON.stringify(validReport.errors)).toBe(true);
+    // Version 0.1.7 wrote the English text alone.
+    expect(withAll((result) => { for (const key of ["messageKey", "messageValues", "reasonKey", "reasonValues"]) delete result[key]; }), JSON.stringify(validReport.errors)).toBe(true);
+    // A key is the id of its check, a dot and what was found.
+    expect(withResult("size", (result) => (result["messageKey"] = "size.some-new-finding"))).toBe(true);
+    expect(withResult("size", (result) => (result["messageKey"] = "pivot.same"))).toBe(false);
+    expect(withResult("size", (result) => (result["messageKey"] = "size"))).toBe(false);
+    expect(withResult("size", (result) => (result["messageKey"] = "size.Expected"))).toBe(false);
+    expect(withResult("size", (result) => (result["messageKey"] = 7))).toBe(false);
+    // A value is a text, a number, a part with a key of its own, or a list of those.
+    const nested = { found: [{ key: "clean-mesh.open", values: { count: 2 }, text: "2 open edges" }, "more", 3], why: { key: "collision.has-edges" } };
+    expect(withResult("size", (result) => (result["messageValues"] = nested)), JSON.stringify(validReport.errors)).toBe(true);
+    expect(withResult("size", (result) => (result["messageValues"] = { flag: true }))).toBe(false);
+    expect(withResult("size", (result) => (result["messageValues"] = { part: { values: {} } }))).toBe(false);
+    expect(withResult("size", (result) => (result["messageValues"] = { part: { key: "size.units", guessed: 1 } }))).toBe(false);
+    expect(withResult("size", (result) => (result["messageValues"] = ["longest"]))).toBe(false);
+    // The key of a reason goes with not-measured, as the reason does, and is the key of its message with ".reason".
+    expect(report.results[at("detail-levels")]).toMatchObject({ status: "not-measured", reasonKey: "detail-levels.none.reason", reasonValues: {} });
+    expect(withResult("detail-levels", (result) => (result["reasonKey"] = "detail-levels.none"))).toBe(false);
+    expect(withResult("detail-levels", (result) => (result["reasonKey"] = "collision.none.reason"))).toBe(false);
+    expect(withResult("detail-levels", (result) => (result["reasonValues"] = { flag: null }))).toBe(false);
+    expect(withResult("size", (result) => (result["reasonKey"] = "size.expected.reason"))).toBe(false);
+    expect(withResult("size", (result) => (result["reasonValues"] = {}))).toBe(false);
+  });
+
   it("sees every status in the reports it was given", () => {
     const seen = new Set<string>();
     for (const [, input, options] of reports) for (const result of checkGameAsset(exportGameAsset(input).glb, options).results) seen.add(`${result.id}:${result.status}`);
@@ -484,6 +523,40 @@ describe("schema/kit-check-report.schema.json", () => {
     expect(validKitReport(report), JSON.stringify(validKitReport.errors)).toBe(true);
     walk.values["playerName"] = 7;
     expect(validKitReport(report)).toBe(false);
+  });
+
+  it("describes the key and the named values of each message and of each layout left out, and still reads a report from before they were there", () => {
+    type Loose = { results: (Record<string, unknown> & { values: { skipped?: Record<string, unknown>[] } })[] };
+    const report = json(checkKit(corridorKit((pieces) => [pieces[0]!, pieces[4]!, pieces[5]!]))) as unknown as Loose;
+    const skippedOf = (copy: Loose) => copy.results.find((result) => result["id"] === "layouts")!.values.skipped!;
+    expect(skippedOf(report).length).toBeGreaterThan(0);
+    for (const skip of skippedOf(report)) expect(skip).toMatchObject({ reasonKey: "layouts.skipped.no-piece", reasonValues: { layout: skip["name"] } });
+    for (const result of report.results) expect(Object.keys(result), result["id"] as string).toEqual(expect.arrayContaining(["messageKey", "messageValues"]));
+    const changed = (change: (report: Loose) => void) => {
+      const copy = json(report);
+      change(copy);
+      return validKitReport(copy);
+    };
+    expect(changed(() => undefined), JSON.stringify(validKitReport.errors)).toBe(true);
+    // Version 0.1.7 wrote the English text alone.
+    const strip = (value: Record<string, unknown>) => { for (const key of ["messageKey", "messageValues", "reasonKey", "reasonValues"]) delete value[key]; };
+    expect(changed((copy) => [...copy.results, ...skippedOf(copy)].forEach(strip)), JSON.stringify(validKitReport.errors)).toBe(true);
+    expect(changed((copy) => (copy.results[0]!["messageKey"] = "seams.match"))).toBe(false);
+    expect(changed((copy) => (copy.results[0]!["messageKey"] = "on-grid.some-new-finding"))).toBe(true);
+    expect(changed((copy) => (copy.results[0]!["messageValues"] = { flag: false }))).toBe(false);
+    expect(changed((copy) => (copy.results[0]!["reasonKey"] = "on-grid.whole.reason"))).toBe(false);
+    expect(changed((copy) => (skippedOf(copy)[0]!["reasonKey"] = "layouts.none.reason"))).toBe(false);
+    expect(changed((copy) => (skippedOf(copy)[0]!["reasonKey"] = "layouts.skipped.some-new-reason"))).toBe(true);
+    expect(changed((copy) => (skippedOf(copy)[0]!["reasonValues"] = { layout: null }))).toBe(false);
+    expect(changed((copy) => (skippedOf(copy)[0]!["guessed"] = true))).toBe(false);
+    // The manifest of a kit pack holds the same layouts left out, to the same rule.
+    const manifest = json(exportKitPack(corridorKit((pieces) => [pieces[0]!, pieces[4]!, pieces[5]!])).manifest) as unknown as { kit: { skippedLayouts: Record<string, unknown>[] } };
+    expect(manifest.kit.skippedLayouts[0]).toMatchObject({ reasonKey: "layouts.skipped.no-piece" });
+    expect(validManifest(manifest), JSON.stringify(validManifest.errors)).toBe(true);
+    manifest.kit.skippedLayouts.forEach(strip);
+    expect(validManifest(manifest), JSON.stringify(validManifest.errors)).toBe(true);
+    manifest.kit.skippedLayouts[0]!["reasonKey"] = "seams.no-pairs.reason";
+    expect(validManifest(manifest)).toBe(false);
   });
 
   it("refuses a report with a result missing, out of order, or of a kind it does not know", () => {

@@ -3,7 +3,7 @@ import { checkGameAsset, type CheckOptions, type CheckReport } from "./checks.js
 import { notObject, refuse } from "./errors.js";
 import { assertJson } from "./export.js";
 import { checkKit, type KitCheckOptions, type KitCheckReport } from "./kit-checks.js";
-import { cellSize, kitLayouts, resolveKit, type KitCell, type KitGrid, type KitInput, type KitLayout, type KitSocket } from "./kit.js";
+import { cellSize, kitLayouts, resolveKit, type KitCell, type KitGrid, type KitInput, type KitLayout, type KitSocket, type SkippedLayout } from "./kit.js";
 import { assetName } from "./naming.js";
 import { GLB_MEDIA_TYPE, MANIFEST_MEDIA_TYPE, manifestJson, type GamePack, type PackFile, type PackManifest, type PackManifestFile, type PackManifestScene } from "./pack.js";
 import { resolveProfile } from "./profiles.js";
@@ -76,7 +76,7 @@ export interface KitManifest {
   /** Every layout: the test layouts built from the sockets, then the caller's own. `scene` names its file when the pack has one. */
   layouts: (KitLayout & { scene?: string })[];
   /** Test layouts the kit has no pieces for, and why. */
-  skippedLayouts: { name: string; reason: string }[];
+  skippedLayouts: SkippedLayout[];
   /** Only when the kit checks ran. */
   checks?: KitCheckReport;
   meshLibrary: KitMeshLibrary;

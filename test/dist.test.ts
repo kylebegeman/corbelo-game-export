@@ -68,7 +68,7 @@ describe("package", () => {
     expect(reader.code.length).toBeLessThan(6_000);
     // The checks read a file: they bring no exporter, no collision and no pack.
     const checks = await bundle("checkGameAsset");
-    expect(used(checks.modules)).toEqual(["checks", "errors", "glb-read", "gltf", "profiles", "version"]);
+    expect(used(checks.modules)).toEqual(["checks", "errors", "glb-read", "gltf", "version"]);
     expect(checks.code.length).toBeLessThan(30_000);
     // An asset brings collision, detail levels and texture coordinates, and no checks, pack or archive.
     const asset = await bundle("exportGameAsset");
@@ -84,6 +84,47 @@ describe("package", () => {
     expect(used((await bundle("sha256Hex")).modules)).toEqual(["sha256"]);
     expect(used((await bundle("convexHull")).modules)).toEqual(["hull"]);
     expect(used((await bundle("assetName")).modules)).toEqual(["errors", "names", "naming"]);
+  });
+
+  it("keeps the catalog of messages out of the main entry, as an entry of its own", async () => {
+    // A result carries its key and its English text. The templates and the function that fills
+    // one are for a caller that says the checks in other words, and for no one else.
+    for (const name of ["checkGameAsset", "exportGamePack", "checkKit", "exportKitPack", null]) {
+      const { code, modules } = await bundle(name);
+      for (const file of ["messages", "message-catalog", "message-fill"]) expect(modules[file] ?? 0, `${String(name)}: ${file}`).toBe(0);
+      for (const text of [", plural, ", ", select, ", "PluralRules"]) expect(code.includes(text), `${String(name)}: ${text}`).toBe(false);
+    }
+    const entry = JSON.stringify(join(root, "dist/messages.js"));
+    const contents = `import { ENGLISH_MESSAGES, fillMessage, fillReason, fillTemplate, MESSAGE_KEYS, missingMessageKeys } from ${entry};\nglobalThis.use = [ENGLISH_MESSAGES, fillMessage, fillReason, fillTemplate, MESSAGE_KEYS, missingMessageKeys];`;
+    const result = await build({ stdin: { contents, resolveDir: root, loader: "js" }, bundle: true, platform: "browser", format: "esm", minify: true, write: false, metafile: true, logLevel: "silent" });
+    const inputs = Object.entries(Object.values(result.metafile.outputs)[0]!.inputs).filter(([file, input]) => file.includes("dist/") && input.bytesInOutput > 0).map(([file]) => file);
+    // It stands alone: the catalog brings no check, no reader and no exporter with it.
+    expect(inputs.map((file) => file.slice(file.lastIndexOf("/") + 1)).sort()).toEqual(["message-catalog.js", "message-fill.js"]);
+    const code = result.outputFiles[0]!.text;
+    expect(/["']node:|\brequire\(/.test(code)).toBe(false);
+    expect(code.length).toBeLessThan(17_000);
+    // A caller with a catalog of its own carries the functions that fill, and not the English catalog.
+    const filler = await build({ stdin: { contents: `import { fillMessage, fillReason, fillTemplate } from ${entry};\nglobalThis.use = [fillMessage, fillReason, fillTemplate];`, resolveDir: root, loader: "js" }, bundle: true, platform: "browser", format: "esm", minify: true, write: false, logLevel: "silent" });
+    expect(filler.outputFiles[0]!.text.includes("longest side")).toBe(false);
+    expect(filler.outputFiles[0]!.text.length).toBeLessThan(2_000);
+  });
+
+  it("is found by the name of the package, with the catalog under its own name", () => {
+    const script = [
+      'const main = await import("corbelo-game-export");',
+      'const messages = await import("corbelo-game-export/messages");',
+      'const report = main.checkGameAsset(main.exportGameGlb({ bodies: [{ name: "Block", positions: [0,0,0, 1,0,0, 0,1,0, 0,0,0, 0,0,1, 1,0,0, 0,0,0, 0,1,0, 0,0,1, 1,0,0, 0,0,1, 0,1,0] }], source: { unit: 1, up: "Z" } }).glb);',
+      "const same = report.results.every((result) => messages.fillMessage(result, messages.ENGLISH_MESSAGES) === result.message && messages.fillReason(result, messages.ENGLISH_MESSAGES) === result.reason);",
+      'console.log(JSON.stringify({ main: Object.keys(main).filter((name) => /message|MESSAGE/i.test(name)), messages: Object.keys(messages).sort(), keys: messages.MESSAGE_KEYS.length, missing: messages.missingMessageKeys(messages.ENGLISH_MESSAGES).length, same }));',
+    ].join("\n");
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd: root, encoding: "utf8" });
+    expect(result.stderr).toBe("");
+    const said = JSON.parse(result.stdout) as { main: string[]; messages: string[]; keys: number; missing: number; same: boolean };
+    expect(said.main).toEqual([]);
+    expect(said.messages).toEqual(["ENGLISH_MESSAGES", "MESSAGE_KEYS", "fillMessage", "fillReason", "fillTemplate", "missingMessageKeys"]);
+    expect(said.keys).toBeGreaterThan(100);
+    expect(said.missing).toBe(0);
+    expect(said.same).toBe(true);
   });
 
   it("charges for kits, blockouts and installs only where they are used", async () => {

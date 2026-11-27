@@ -28,10 +28,16 @@ export const ENTRIES = [
   [null, "everything the main entry exports"],
 ];
 
-/** Bundles a file that imports `name` from the main entry, or all of it, for a browser. */
-export async function bundleOf(name, minify = true) {
-  const entry = JSON.stringify(join(dist, "index.js"));
-  const contents = name === null ? `export * from ${entry};` : `import { ${name} } from ${entry};\nglobalThis.use = ${name};`;
+/** What a consumer might import from `corbelo-game-export/messages`, which no import of the main entry carries. */
+export const MESSAGE_ENTRIES = [
+  ["fillMessage, fillReason, fillTemplate", "saying a result from a catalog of your own"],
+  [null, "that and the English catalog"],
+];
+
+/** Bundles a file that imports `name` from an entry, or all of it, for a browser. Several names go with commas between. */
+export async function bundleOf(name, minify = true, file = "index.js") {
+  const entry = JSON.stringify(join(dist, file));
+  const contents = name === null ? `export * from ${entry};` : `import { ${name} } from ${entry};\nglobalThis.use = ${name.includes(",") ? `[${name}]` : name};`;
   const result = await build({ stdin: { contents, resolveDir: root, loader: "js" }, bundle: true, platform: "browser", format: "esm", minify, write: false, logLevel: "silent" });
   return result.outputFiles[0].contents;
 }
@@ -44,7 +50,12 @@ async function measure() {
     const minified = await bundleOf(name);
     entries.push({ import: name ?? "*", what, minified: minified.length, gzipped: gzipSync(minified).length });
   }
-  return { shipped: { bytes: shipped, files: scripts.length }, entries };
+  const messages = [];
+  for (const [name, what] of MESSAGE_ENTRIES) {
+    const minified = await bundleOf(name, true, "messages.js");
+    messages.push({ import: name ?? "*", what, minified: minified.length, gzipped: gzipSync(minified).length });
+  }
+  return { shipped: { bytes: shipped, files: scripts.length }, entries, messages };
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -57,6 +68,11 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     const wide = Math.max(...sizes.entries.map((entry) => entry.import.length));
     for (const entry of sizes.entries) {
       console.log(`  ${entry.import.padEnd(wide)}  ${String(entry.minified).padStart(7)} bytes  ${String(entry.gzipped).padStart(6)} gzipped  ${entry.what}`);
+    }
+    console.log("From corbelo-game-export/messages, which none of those carry:");
+    const wider = Math.max(...sizes.messages.map((entry) => entry.import.length));
+    for (const entry of sizes.messages) {
+      console.log(`  ${entry.import.padEnd(wider)}  ${String(entry.minified).padStart(7)} bytes  ${String(entry.gzipped).padStart(6)} gzipped  ${entry.what}`);
     }
   }
 }

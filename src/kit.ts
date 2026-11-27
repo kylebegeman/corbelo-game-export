@@ -2,6 +2,7 @@ import { exportGameAsset } from "./asset.js";
 import { badOption, notObject, refuse } from "./errors.js";
 import { assertJson } from "./export.js";
 import { readPack } from "./glb-read.js";
+import type { MessageValues } from "./messages.js";
 import { assetName, DEFAULT_NAME_PATTERNS } from "./naming.js";
 import { resolveProfile, type EngineProfileId } from "./profiles.js";
 import { pointToGltfSpace, spaceConversion, type SpaceConversion } from "./space.js";
@@ -688,6 +689,15 @@ function settled(name: string, kit: Pick<Kit, "pieces">, placements: readonly Ki
 /** The names of the test layouts, in the order they come. */
 export const KIT_LAYOUT_NAMES = ["run", "corner", "tee", "cross", "rise", "room"] as const;
 
+/** A test layout the kit has no pieces for, and why: in English, and as a key of the message catalog with the values that fill it. */
+export interface SkippedLayout {
+  name: string;
+  reason: string;
+  /** Not on a report written before version 0.1.8. */
+  reasonKey?: string;
+  reasonValues?: MessageValues;
+}
+
 /**
  * Builds the test layouts from the sockets alone: a straight run, a corner, a tee, a crossing,
  * a rise from one storey to the next and a closed room. A layout the kit has no pieces for is
@@ -697,7 +707,7 @@ export const KIT_LAYOUT_NAMES = ["run", "corner", "tee", "cross", "rise", "room"
  * storey: a through piece. Two at a right angle: a bend. Two on different storeys: a rise.
  * Three and four: a tee and a crossing.
  */
-export function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): { layouts: KitLayout[]; skipped: { name: string; reason: string }[] } {
+export function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): { layouts: KitLayout[]; skipped: SkippedLayout[] } {
   const flat = kit.pieces.filter((piece) => piece.sockets.length > 0 && piece.sockets.every((socket) => sideAxis(socket.side) !== 2));
   const level = (piece: KitPiece): boolean => piece.sockets.every((socket) => socket.cell[2] === piece.sockets[0]!.cell[2]);
   const two = flat.filter((piece) => piece.sockets.length === 2);
@@ -708,7 +718,10 @@ export function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): { layouts: KitLa
   const tees = flat.filter((piece) => piece.sockets.length === 3 && level(piece));
   const crossings = flat.filter((piece) => piece.sockets.length === 4 && level(piece));
   const layouts: KitLayout[] = [];
-  const skipped: { name: string; reason: string }[] = [];
+  const skipped: SkippedLayout[] = [];
+  const skip = (name: string, why: string, reason: string, reasonValues: MessageValues): void => {
+    skipped.push({ name, reason, reasonKey: `layouts.skipped.${why}`, reasonValues });
+  };
 
   /** Puts the first of `candidates` that fits against a socket of a placed piece. Returns the piece and the socket it was joined by. */
   const grow = (state: Growing, from: KitPiece, socket: number, placement: KitPlacement, candidates: readonly KitPiece[]): { piece: KitPiece; placement: KitPlacement; joined: number } | null => {
@@ -725,7 +738,7 @@ export function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): { layouts: KitLa
   const around = (name: string, seeds: readonly KitPiece[], what: string): void => {
     const seed = seeds[0];
     if (seed === undefined) {
-      skipped.push({ name, reason: `No piece has ${what}.` });
+      skip(name, "no-piece", `No piece has ${what}.`, { layout: name });
       return;
     }
     const state = start(seed);
@@ -734,13 +747,13 @@ export function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): { layouts: KitLa
     for (let socket = 0; socket < seed.sockets.length; socket += 1) {
       if (grow(state, seed, socket, first, [...throughs, ...ends, ...flat]) !== null) joined += 1;
     }
-    if (joined === 0) skipped.push({ name, reason: `No piece has a socket that meets a socket of "${seed.name}".` });
+    if (joined === 0) skip(name, "no-mate", `No piece has a socket that meets a socket of "${seed.name}".`, { piece: seed.name });
     else layouts.push(settled(name, kit, state.placements));
   };
 
   // A straight run: every through piece in turn, at least three pieces, with an end on each end.
   if (throughs.length === 0) {
-    skipped.push({ name: "run", reason: "No piece has two sockets on opposite sides of one storey." });
+    skip("run", "no-piece", "No piece has two sockets on opposite sides of one storey.", { layout: "run" });
   } else {
     const state = start(throughs[0]!);
     let last = { piece: throughs[0]!, placement: state.placements[0]!, joined: 0 };
@@ -753,7 +766,7 @@ export function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): { layouts: KitLa
       else last = next;
     }
     if (state.placements.length < 2) {
-      skipped.push({ name: "run", reason: `The sockets of "${throughs[0]!.name}" do not meet each other, so no two through pieces go in a row.` });
+      skip("run", "no-row", `The sockets of "${throughs[0]!.name}" do not meet each other, so no two through pieces go in a row.`, { piece: throughs[0]!.name });
     } else {
       grow(state, last.piece, last.joined === 0 ? 1 : 0, last.placement, ends);
       grow(state, throughs[0]!, 0, state.placements[0]!, ends);
@@ -767,7 +780,7 @@ export function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): { layouts: KitLa
 
   // A closed room: a ring of four bends with a through piece between each two, every socket met.
   if (bends.length === 0) {
-    skipped.push({ name: "room", reason: "No piece has two sockets at a right angle on one storey." });
+    skip("room", "no-piece", "No piece has two sockets at a right angle on one storey.", { layout: "room" });
   } else {
     const bend = bends[0]!;
     const order: KitPiece[] = [];
@@ -796,7 +809,7 @@ export function kitLayouts(kit: Pick<Kit, "pieces" | "mates">): { layouts: KitLa
       return false;
     };
     if (close(0, bend, 1, state.placements[0]!)) layouts.push(settled("room", kit, state.placements));
-    else skipped.push({ name: "room", reason: `Four of "${bend.name}"${throughs.length > 0 ? " with a through piece between each two" : ""} do not close a ring.` });
+    else skip("room", "no-ring", `Four of "${bend.name}"${throughs.length > 0 ? " with a through piece between each two" : ""} do not close a ring.`, { piece: bend.name, throughs: throughs.length });
   }
   return { layouts, skipped };
 }
