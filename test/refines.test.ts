@@ -319,6 +319,24 @@ describe("triangles that reach across several triangles of a flat part", () => {
     expect(code).toBe("BAD_REFINEMENT");
     expect(message).toContain("triangle 10 is said to lie in triangle 0 of the mesh it refines, but one of its corners is 1.00 m away from the mesh there.");
   });
+
+  it("finds a corner on the far edge of a long flat side, wherever along that edge it is", () => {
+    // One flat side of a round wall: long, narrow and in two triangles. A cut across it leaves
+    // triangles that name the first of the two and have a corner on the far edge of the second.
+    // That corner is nearest the first triangle on the diagonal, exactly: it has no share in the
+    // corner opposite, and the second triangle is looked for across the diagonal.
+    const [near, far] = [[-0.336, 7.0179], [0, 6.999]] as const;
+    const [top, bottom] = [15.001, -15.001];
+    const side = Float32Array.from([...near, top, ...far, top, ...near, bottom, ...far, top, ...far, bottom, ...near, bottom]);
+    const STEPS = 400;
+    const along = Array.from({ length: STEPS + 1 }, (_, step) => [...far, top + ((bottom - top) * step) / STEPS]);
+    const pieces = Float32Array.from([...along.slice(1).flatMap((point, step) => [...near, top, ...along[step]!, ...point]), ...near, top, ...far, bottom, ...near, bottom]);
+    const { body, facts } = run({ positions: pieces, refines: { surfaces: [{ positions: side }], triangleOf: new Array<number>(STEPS + 1).fill(0) } });
+    expect(facts.bodies[0]!.triangles).toBe(STEPS + 1);
+    // Flat, so every point of it has the one normal of the side.
+    const normals = new Set([...normalsByPosition(body).values()].flat());
+    expect(normals.size).toBe(1);
+  });
 });
 
 describe("a mesh that refines itself", () => {

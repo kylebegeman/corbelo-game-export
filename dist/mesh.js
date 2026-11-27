@@ -215,7 +215,9 @@ function cornerOf(triangleVertex, triangle, vertex) {
  * as the share of each corner: the point is their weighted sum. Returns the distance squared.
  *
  * The point is found by the region of the triangle's plane the projection falls in: nearest a
- * corner, nearest an edge, or inside. A point nearest a corner gets exactly that corner.
+ * corner, nearest an edge, or inside. A point nearest a corner gets exactly that corner, and one
+ * nearest an edge has a share of exactly nothing in the corner opposite: `locate` reads from the
+ * shares which edge to look across.
  */
 function nearestOnTriangle(px, py, pz, positions, a, b, c, weights) {
     const ax = positions[a * 3];
@@ -235,6 +237,9 @@ function nearestOnTriangle(px, py, pz, positions, a, b, c, weights) {
     const d2 = acx * apx + acy * apy + acz * apz;
     let wb;
     let wc;
+    // Nearest the edge from `b` to `c`. What is left of one after the other two shares is then a
+    // rounding error, not a share.
+    let onFarEdge = false;
     if (d1 <= 0 && d2 <= 0) {
         wb = 0;
         wc = 0;
@@ -272,6 +277,7 @@ function nearestOnTriangle(px, py, pz, positions, a, b, c, weights) {
         else if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
             wc = (d4 - d3) / (d4 - d3 + (d5 - d6));
             wb = 1 - wc;
+            onFarEdge = true;
         }
         else {
             const total = va + vb + vc;
@@ -279,7 +285,7 @@ function nearestOnTriangle(px, py, pz, positions, a, b, c, weights) {
             wc = vc / total;
         }
     }
-    weights[0] = 1 - wb - wc;
+    weights[0] = onFarEdge ? 0 : 1 - wb - wc;
     weights[1] = wb;
     weights[2] = wc;
     const dx = apx - abx * wb - acx * wc;

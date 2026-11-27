@@ -11,13 +11,13 @@ It is used by Corbelo and Corbelo Studio. It has no runtime dependencies, runs i
 The built `dist/` folder is committed, so the package installs straight from a git tag with no build step:
 
 ```sh
-npm install github:kylebegeman/corbelo-game-export#v0.1.3
+npm install github:kylebegeman/corbelo-game-export#v0.1.4
 ```
 
 Where the build machine has no `git` program, install the tag's tarball instead. The lock file then holds a plain HTTPS address and a checksum:
 
 ```sh
-npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.3.tar.gz
+npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.4.tar.gz
 ```
 
 ## Use
@@ -225,7 +225,7 @@ Facts are measured from the geometry that was written, not from the input. A sho
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.3",
+  "generator": "corbelo-game-export 0.1.4",
   "profile": "unreal5",
   "engine": { "unit": "cm", "unitMeters": 0.01, "up": "Z" },
   "source": { "unit": 0.001, "up": "Z", "handedness": "right" },
