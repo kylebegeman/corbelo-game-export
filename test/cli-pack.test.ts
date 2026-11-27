@@ -256,8 +256,8 @@ describe("pack command", () => {
     expect(await refused([])).toContain("error [BAD_JOB]: A pack job must be a JSON object.");
     expect(await refused(nameless)).toContain('The job needs a "name"');
     expect(await refused({ ...postJob, source: "mm" })).toContain('The job needs a "source" object');
-    expect(await refused({ ...postJob, rows: [] })).toContain('The job needs "bodies" for one asset or "rows" for a family, and not both.');
-    expect(await refused({ ...postJob, bodies: undefined })).toContain('The job needs "bodies" for one asset or "rows" for a family');
+    expect(await refused({ ...postJob, rows: [] })).toContain('The job needs "bodies" for one asset, "rows" for a family or "pieces" for a kit, and only one of them.');
+    expect(await refused({ ...postJob, bodies: undefined })).toContain('The job needs "bodies" for one asset, "rows" for a family');
     expect(await refused({ ...postJob, bodies: [] })).toContain('The job needs a "bodies" list with at least one body.');
     expect(await refused({ ...postJob, bodies: undefined, rows: [] })).toContain('"rows" must be a list with at least one row.');
     expect(await refused({ ...postJob, bodies: undefined, rows: [{ name: "small", bodies: [] }] })).toContain('Row "small" needs a "bodies" list with at least one body.');
