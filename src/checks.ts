@@ -222,6 +222,10 @@ export interface CollisionValues {
     /** `(collision - visible) / visible`. Null when the body is not closed. */
     error: number | null;
     withinTolerance: boolean | null;
+    /** The share this body was judged by: the one given to the check, or else its own. */
+    tolerance?: number;
+    /** What this body alone comes to. The worst of them is the status of the check. */
+    status?: CheckStatus;
   }[];
 }
 
@@ -351,13 +355,14 @@ function plural(count: number, one: string, many = `${one}s`): string {
  * out past the tolerance. It reads what was tried, so it never asks for what was already given.
  */
 function nearer(name: string, collision: CollisionFacts, settings: PackFacts["settings"]["collision"]): string {
+  const maxPieces = collision.maxPieces ?? settings?.maxPieces;
   const refused = collision.notes.find((note) => note.startsWith(NO_DECOMPOSITION));
   if (refused !== undefined) return ` A kernel was given, but no convex decomposition was made. ${refused.slice(NO_DECOMPOSITION.length)}`;
   const gavePieces = collision.tried.some((tier) => tier.shape === "pieces");
   const cut = collision.tried.find((tier) => tier.shape === "decomposition");
   if (cut !== undefined) {
     const into = ` "${name}" was cut into ${plural(cut.pieces, "convex piece")}`;
-    if (settings !== undefined && cut.pieces >= settings.maxPieces) {
+    if (maxPieces !== undefined && cut.pieces >= maxPieces) {
       return `${into}, the most allowed. ${gavePieces ? "More pieces" : "More pieces, or the pieces the part was built from,"} would bring it nearer.`;
     }
     return `${into}, and no further cut that fits brought it nearer.${gavePieces ? "" : " The pieces the part was built from would."}`;
@@ -978,21 +983,23 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       tolerance,
       bodies: facts.bodies.map((body) => {
         const error = body.collision?.volume.error ?? null;
-        return {
-          name: body.name,
-          requested: body.collision?.requested ?? "none",
-          shape: body.collision?.shape ?? "none",
-          pieces: body.collision?.pieces ?? 0,
-          error,
-          withinTolerance: error === null ? null : Math.abs(error) <= tolerance,
-        };
+        const requested = body.collision?.requested ?? "none";
+        const shape = body.collision?.shape ?? "none";
+        const allowed = options.collisionTolerance ?? body.collision?.tolerance ?? tolerance;
+        const within = error === null ? null : Math.abs(error) <= allowed;
+        // A shape the caller named is the caller's choice, and only worth a warning. One that
+        // was settled for because nothing nearer could be built is a failure. A body left
+        // without a shape on purpose is as it was asked for.
+        const status: CheckStatus =
+          shape === "none" ? (body.collision !== undefined && requested === "none" ? "pass" : "warn") : within === null ? "not-measured" : within ? "pass" : requested === "auto" ? "fail" : "warn";
+        return { name: body.name, requested, shape, pieces: body.collision?.pieces ?? 0, error, withinTolerance: within, tolerance: allowed, status };
       }),
     };
-    const without = values.bodies.filter((body) => body.shape === "none");
+    const without = values.bodies.filter((body) => body.shape === "none" && body.status !== "pass");
     const beyond = values.bodies.filter((body) => body.withinTolerance === false);
-    const unknown = values.bodies.filter((body) => body.shape !== "none" && body.withinTolerance === null);
+    const unknown = values.bodies.filter((body) => body.status === "not-measured");
     const factsOf = (body: CollisionValues["bodies"][number]) => facts.bodies[values.bodies.indexOf(body)]!;
-    if (without.length === values.bodies.length) {
+    if (values.bodies.every((body) => body.shape === "none")) {
       results.push({
         id: "collision",
         status: "not-measured",
@@ -1001,14 +1008,13 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
         values,
       });
     } else if (beyond.length > 0) {
-      const worst = beyond.reduce((a, b) => (Math.abs(b.error!) > Math.abs(a.error!) ? b : a));
-      // A shape the caller named is the caller's choice, and only worth a warning. One that
-      // "auto" settled for because nothing nearer could be built is a failure.
-      const chosen = beyond.every((body) => body.requested !== "auto");
+      // The body that fails is said before one that only warns, and of those the furthest out.
+      const chosen = beyond.every((body) => body.status === "warn");
+      const worst = beyond.filter((body) => chosen || body.status === "fail").reduce((a, b) => (Math.abs(b.error!) > Math.abs(a.error!) ? b : a));
       results.push({
         id: "collision",
         status: chosen ? "warn" : "fail",
-        message: `The collision of "${worst.name}" (${worst.shape}, ${plural(worst.pieces, "piece")}) is ${round(Math.abs(worst.error!) * 100, 1)}% ${worst.error! > 0 ? "more" : "less"} volume than the visible part, over the ${round(tolerance * 100, 1)}% allowed.${chosen ? "" : nearer(worst.name, factsOf(worst).collision!, facts.settings.collision)}`,
+        message: `The collision of "${worst.name}" (${worst.shape}, ${plural(worst.pieces, "piece")}) is ${round(Math.abs(worst.error!) * 100, 1)}% ${worst.error! > 0 ? "more" : "less"} volume than the visible part, over the ${round(worst.tolerance! * 100, 1)}% allowed.${chosen ? "" : nearer(worst.name, factsOf(worst).collision!, facts.settings.collision)}`,
         values,
       });
     } else if (without.length > 0) {
@@ -1037,7 +1043,9 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       });
     } else {
       const pieces = values.bodies.reduce((total, body) => total + body.pieces, 0);
-      results.push({ id: "collision", status: "pass", message: `Collision in ${plural(pieces, "convex piece")}, within ${round(tolerance * 100, 1)}% of the visible volume.`, values });
+      const shares = new Set(values.bodies.filter((body) => body.shape !== "none").map((body) => body.tolerance!));
+      const within = shares.size > 1 ? "each body within the share of its visible volume allowed for it" : `within ${round([...shares][0]! * 100, 1)}% of the visible volume`;
+      results.push({ id: "collision", status: "pass", message: `Collision in ${plural(pieces, "convex piece")}, ${within}.`, values });
     }
   }
 

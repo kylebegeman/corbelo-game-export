@@ -215,6 +215,21 @@ describe("schema/pack.schema.json for a game asset", () => {
     expect(validFacts(JSON.parse(JSON.stringify(facts))), JSON.stringify(validFacts.errors)).toBe(true);
   });
 
+  it("describes what each body's collision was made with, and still reads facts from before that was there", () => {
+    const facts = JSON.parse(JSON.stringify(exportGameAsset({ ...assets["the defaults"]!, collisions: [{ shape: "hull", maxPieces: 4, maxHullVertices: 16 }] }).facts)) as { bodies: { collision: Record<string, unknown> }[] };
+    expect(facts.bodies[0]!.collision).toMatchObject({ requested: "hull", maxPieces: 4, maxHullVertices: 16 });
+    const withCollision = (change: (collision: Record<string, unknown>) => void) => {
+      const changed = JSON.parse(JSON.stringify(facts)) as typeof facts;
+      change(changed.bodies[0]!.collision);
+      return validFacts(changed);
+    };
+    expect(withCollision(() => undefined)).toBe(true);
+    // Version 0.1.7 wrote neither.
+    expect(withCollision((collision) => (delete collision["maxPieces"], delete collision["maxHullVertices"]))).toBe(true);
+    expect(withCollision((collision) => (collision["maxPieces"] = 0))).toBe(false);
+    expect(withCollision((collision) => (collision["maxHullVertices"] = 3))).toBe(false);
+  });
+
   it("refuses collision, detail levels and attach points that cannot be", () => {
     const facts = JSON.parse(JSON.stringify(exportGameAsset(assets["everything, for Godot"]!).facts)) as Record<string, unknown>;
     const body = (facts["bodies"] as Record<string, unknown>[])[0]!;
@@ -280,6 +295,22 @@ describe("schema/check-report.schema.json", () => {
     expect(withValues((values) => delete values["playerName"])).toBe(true);
     expect(withValues((values) => (values["playerName"] = 7))).toBe(false);
     expect(withValues((values) => delete values["player"])).toBe(false);
+  });
+
+  it("describes what each body's collision came to, and still reads a report from before that was there", () => {
+    const report = JSON.parse(JSON.stringify(checkGameAsset(exportGameAsset(assets["the defaults"]!).glb))) as { results: { id: string; values: { bodies: Record<string, unknown>[] } }[] };
+    const bodies = () => report.results.find((result) => result.id === "collision")!.values.bodies;
+    expect(bodies()[0]).toMatchObject({ tolerance: 0.05, status: "pass" });
+    const withBody = (change: (body: Record<string, unknown>) => void) => {
+      const changed = JSON.parse(JSON.stringify(report)) as typeof report;
+      change(changed.results.find((result) => result.id === "collision")!.values.bodies[0]!);
+      return validReport(changed);
+    };
+    expect(withBody(() => undefined)).toBe(true);
+    // Version 0.1.7 wrote neither.
+    expect(withBody((body) => (delete body["tolerance"], delete body["status"]))).toBe(true);
+    expect(withBody((body) => (body["status"] = "fine"))).toBe(false);
+    expect(withBody((body) => (body["tolerance"] = -1))).toBe(false);
   });
 
   it("sees every status in the reports it was given", () => {

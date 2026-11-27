@@ -198,6 +198,12 @@ export interface AssetOptions extends ExportOptions {
   pivots?: readonly (PivotOption | null | undefined)[] | Readonly<Record<string, PivotOption>>;
   /** Default `"auto"`. */
   collision?: CollisionRequest | CollisionSettings;
+  /**
+   * Collision of its own for some bodies: a list in the order of the bodies, where `null` leaves
+   * a body to `collision`, or an object with an entry for each body name. An entry is a shape or
+   * settings, and what it leaves out is taken from `collision`.
+   */
+  collisions?: readonly (CollisionRequest | CollisionSettings | null | undefined)[] | Readonly<Record<string, CollisionRequest | CollisionSettings>>;
   /** `true` or `{ tileMeters }` writes box-projected texture coordinates. Default none. */
   texcoords?: boolean | TexcoordOptions;
   /** Needed only for a general convex decomposition. */
@@ -321,6 +327,10 @@ export interface CollisionFacts {
   /** How many convex pieces, and so how many nodes. */
   pieces: number;
   tolerance: number;
+  /** The most convex pieces a decomposition of this body makes. Not in files written before 0.1.8. */
+  maxPieces?: number;
+  /** The most corners one convex piece of this body has. Not in files written before 0.1.8. */
+  maxHullVertices?: number;
   /** Cubic metres. `visible` and `error` are null for a body that is not closed. */
   volume: { visible: number | null; collision: number; error: number | null };
   withinTolerance: boolean | null;

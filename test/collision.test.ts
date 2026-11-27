@@ -14,7 +14,7 @@ import {
   type CollisionKernel,
   type GameExportErrorCode,
 } from "../src/index.js";
-import { box, chamferedBlock, cylinder, doorFrame, ell, fold, holedBlock, MM_Z_UP, tube } from "./fixtures.js";
+import { box, chamferedBlock, cylinder, doorFrame, ell, fold, holedBlock, MM_Z_UP, moved, tube } from "./fixtures.js";
 import { counting, loadKernel } from "./kernel.js";
 
 let kernel: CollisionKernel;
@@ -442,5 +442,87 @@ describe("collision as written", () => {
     // Unreal is in centimetres with Z up.
     expect(facts.bodies[0]!.collision!.nodes[0]!.bounds.engine.size.map((value) => Math.round(value))).toEqual([100, 50, 25]);
     expect(facts.settings.collision).toEqual({ shape: "auto", tolerance: 0.05, maxPieces: 8, maxHullVertices: 64, kernel: false });
+  });
+});
+
+describe("collision chosen for each body", () => {
+  // A corner whose hull is a sixth too large, a round post whose box is a quarter too large, and a crate.
+  const bodies = [
+    { name: "Corner", positions: ell(1000, 500).positions },
+    { name: "Post", positions: moved(cylinder(150, 400, 24), [2000, 0, 0]).positions },
+    { name: "Crate", positions: moved(crate, [0, 2000, 0]).positions },
+  ];
+  const asset = (more: Partial<AssetInput>) => exportGameAsset({ bodies, source: MM_Z_UP, ...more }).facts;
+  const said = (facts: ReturnType<typeof asset>) => facts.bodies.map((body) => (body.collision === undefined ? null : [body.collision.requested, body.collision.shape, body.collision.tolerance, body.collision.withinTolerance]));
+
+  it("takes a shape and its settings for a body by its name, and the asset's for every other body", () => {
+    const facts = asset({ collisions: { Corner: { shape: "hull", tolerance: 0.2 }, Post: "box" } });
+    expect(said(facts)).toEqual([
+      ["hull", "hull", 0.2, true],
+      ["box", "box", 0.05, false],
+      ["auto", "box", 0.05, true],
+    ]);
+    // What the asset was given stays what the settings say, and each body says its own.
+    expect(facts.settings.collision).toEqual({ shape: "auto", tolerance: 0.05, maxPieces: 8, maxHullVertices: 64, kernel: false });
+    expect(facts.bodies.map((body) => [body.collision!.maxPieces, body.collision!.maxHullVertices])).toEqual([[8, 64], [8, 64], [8, 64]]);
+  });
+
+  it("takes them in the order of the bodies too, and a setting a body leaves out from the asset", () => {
+    const facts = asset({ collision: { shape: "hull", tolerance: 0.3, maxHullVertices: 32 }, collisions: [null, { maxHullVertices: 8 }] });
+    expect(said(facts).map((body) => body!.slice(0, 3))).toEqual([
+      ["hull", "hull", 0.3],
+      ["hull", "hull", 0.3],
+      ["hull", "hull", 0.3],
+    ]);
+    expect(facts.bodies.map((body) => [body.collision!.maxHullVertices, body.collision!.nodes[0]!.vertices, body.collision!.nodes[0]!.capped])).toEqual([
+      [32, 10, false],
+      [8, 8, true],
+      [32, 8, false],
+    ]);
+  });
+
+  it("leaves a body without collision where the others have it, and gives one collision where the others have none", () => {
+    const without = asset({ collisions: { Post: "none" } });
+    expect(said(without)).toEqual([
+      ["auto", "hull", 0.05, false],
+      ["none", "none", 0.05, null],
+      ["auto", "box", 0.05, true],
+    ]);
+    expect(without.bodies[1]!.collision).toMatchObject({ pieces: 0, nodes: [], tried: [], notes: [], volume: { visible: null, collision: 0, error: null } });
+    const only = asset({ collision: "none", collisions: { Crate: "box" } });
+    expect(said(only)).toEqual([null, null, ["box", "box", 0.05, true]]);
+    expect(only.settings.collision!.shape).toBe("none");
+  });
+
+  it("gives each body its own pieces and its own most pieces", () => {
+    const facts = exportGameAsset({
+      bodies: [
+        { name: "Frame", positions: frame.positions, collisionPieces: framePieces.map((piece) => ({ positions: piece.positions })) },
+        { name: "Corner", positions: moved(ell(1000, 500), [0, 2000, 0]).positions },
+        { name: "Holed", positions: moved(holedBlock(600, 300, 120, 16), [0, 4000, 0]).positions },
+      ],
+      source: MM_Z_UP,
+      kernel,
+      collisions: { Frame: "pieces", Holed: { shape: "decomposition", maxPieces: 3 } },
+    }).facts;
+    expect(facts.bodies.map((body) => [body.collision!.requested, body.collision!.shape, body.collision!.pieces, body.collision!.maxPieces])).toEqual([
+      ["pieces", "pieces", 3, 8],
+      ["auto", "decomposition", 2, 8],
+      ["decomposition", "decomposition", 3, 3],
+    ]);
+  });
+
+  it("writes the file it wrote before when no body has an entry", () => {
+    const plain = exportGameAsset({ bodies, source: MM_Z_UP }).glb;
+    expect(exportGameAsset({ bodies, source: MM_Z_UP, collisions: {} }).glb).toEqual(plain);
+    expect(exportGameAsset({ bodies, source: MM_Z_UP, collisions: [] }).glb).toEqual(plain);
+  });
+
+  it("refuses a name no body has and settings it cannot read, naming the body", () => {
+    expect(refusal(() => asset({ collisions: { Lid: "box" } }))).toEqual({ code: "BAD_OPTION", message: 'collisions has an entry for a body named "Lid", and no body has that name.' });
+    expect(refusal(() => asset({ collisions: "box" as never }))).toEqual({ code: "BAD_OPTION", message: "collisions must be a list in the order of the bodies, or an object with an entry for each body name." });
+    expect(refusal(() => asset({ collisions: [null, null, null, "box"] }))).toEqual({ code: "BAD_OPTION", message: "collisions has 4 entries, and there are 3 bodies." });
+    expect(refusal(() => asset({ collisions: { Post: "sphere" as never } }))).toMatchObject({ code: "BAD_OPTION", body: 1 });
+    expect(refusal(() => asset({ collisions: [{ tolerance: -1 }] }))).toMatchObject({ code: "BAD_OPTION", body: 0, message: "collision tolerance must be zero or a positive share of the visible volume, like 0.05. Got -1." });
   });
 });

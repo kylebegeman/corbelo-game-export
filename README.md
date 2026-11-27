@@ -353,6 +353,7 @@ And these options besides the [plain ones](#options):
 | --- | --- | --- |
 | `pivots` | none | A pivot of its own for some bodies, beside `pivot`. See [A pivot for one body](#a-pivot-for-one-body). |
 | `collision` | `"auto"` | `"none"`, `"auto"`, `"box"`, `"hull"`, `"pieces"` or `"decomposition"`, or `{ shape, tolerance, maxPieces, maxHullVertices }`. |
+| `collisions` | none | Collision of its own for some bodies, beside `collision`. See [Collision for one body](#collision-for-one-body). |
 | `texcoords` | none | `true` or `{ tileMeters }` writes texture coordinates. See [Texture coordinates](#texture-coordinates). |
 | `kernel` | none | A solid kernel, needed only for `"decomposition"`. See [A kernel for convex decomposition](#a-kernel-for-convex-decomposition). |
 
@@ -398,6 +399,18 @@ A shape asked for by name is built, or refused with `BAD_COLLISION` when it cann
 | `maxPieces` | `8` | The most parts a decomposition makes. |
 | `maxHullVertices` | `64` | The most corners one convex piece has. A piece stopped there may leave points outside it, and its facts say `capped: true`. |
 
+#### Collision for one body
+
+`collision` is the collision of every body. `collisions` gives some bodies a shape and settings of their own. Like [`pivots`](#a-pivot-for-one-body) it is an object with an entry for each body name, or a list in the order of the bodies where `null` leaves a body to `collision`. An entry is what `collision` takes, and a setting it leaves out is the one `collision` has:
+
+```js
+exportGameAsset({ bodies: [frame, post, handle], source, collision: { tolerance: 0.05 },
+  collisions: { Frame: { shape: "decomposition", maxPieces: 12 }, Handle: "none" } });
+exportGameAsset({ bodies: [frame, post], source, collisions: [null, { shape: "hull", tolerance: 0.1 }] });
+```
+
+The pieces a body was made from were always its own: each body has its `collisionPieces`. Each body's facts say what it was made with in `requested`, `tolerance`, `maxPieces` and `maxHullVertices`, and `settings.collision` stays what `collision` said. A body whose own entry asks for `"none"` has collision facts with `shape: "none"` and no nodes, so that it is seen to be a choice, and the [collision check](#game-checks) does not hold it against the asset. Settings that cannot be read are refused with `BAD_OPTION` and the number of the body.
+
 The hulls are built by this package, with no dependency. `convexHull(points, maxVertices)` is exported for use on its own: it gives `{ positions, indices, volume, capped }`, or `null` for points with no volume between them. With no `maxVertices` it keeps every corner, and the time it takes grows with the points about as fast as their number does: a ring of 256 sides by 64, which is 16,384 points and 8,448 corners, takes about 40 ms where 0.1.7 took about 400 ms, so a caller does not need a limit to keep a view moving. A ball of 256 sides by 128, for which 0.1.7 had no hull, gets one. One shape is still slow: a flat end with very many corners on its rim, where every corner added remakes the triangles of that end. A cylinder of 2,048 sides takes over a second.
 
 Each piece is a node of its own with a mesh that holds positions only, a child of the body's node, named the way the profile's engine reads it:
@@ -419,6 +432,8 @@ What the facts say, for an L-shaped bench with its two blocks given as pieces:
   "shape": "pieces",
   "pieces": 2,
   "tolerance": 0.05,
+  "maxPieces": 8,
+  "maxHullVertices": 64,
   "volume": { "visible": 0.18, "collision": 0.18, "error": 0 },
   "withinTolerance": true,
   "nodes": [
@@ -586,7 +601,7 @@ What each one measures:
 - **Pivot.** Where each body's pivot is against its own box. A pivot is on the grid when it is a whole number of grid steps from a face of the box, along every axis the body is at least one grid step long in. The grid is `gridMeters`, 1 metre unless given. Bodies that all have the same pivot are said as one. Where a body has a pivot of its own the message names every body with its pivot, and `values.bodies` has the `mode` of each.
 - **Shading.** Hard and soft edges are counted from the file. The message says which normal rule the file was written with, and that weighting by the whole flat face is there to ask for.
 - **Clean mesh.** A sliver is a triangle whose doubled area is under 1% of its longest edge squared.
-- **Collision.** The volume error the facts state, against `collisionTolerance` or else the tolerance the file was written with. Where a shape `"auto"` settled for is outside it, the message says what would bring it nearer and never asks for what was given: the pieces the part was built from, a kernel when none was given, more pieces when a kernel made the most allowed, or the reason a kernel that was given made no decomposition. A body that is not closed is named with the count of its open edges.
+- **Collision.** The volume error the facts state for each body, against `collisionTolerance` or else the tolerance that body was written with. `values.bodies` has the `tolerance` each body was judged by and the `status` it comes to alone, and the worst of them is the status of the check: a body that fails is said before one that only warns, and of those the one furthest out. A body left without a shape on purpose passes. Where a shape `"auto"` settled for is outside it, the message says what would bring it nearer and never asks for what was given: the pieces the part was built from, a kernel when none was given, more pieces when a kernel made the most allowed, or the reason a kernel that was given made no decomposition. A body that is not closed is named with the count of its open edges.
 - **Detail levels.** The triangle counts and the `deviation.share` of each level, against `lodDeviationShare`, 0.05 unless given.
 - **Player openings.** The asset is drawn as a filled outline on a grid, once looking along X and once along Z, standing on a floor at its lowest point. Each free region the outline shuts in is an opening: a doorway, an arch, a window, a tunnel. A gap that is open to the sky is not one. The player fits when the capsule stands in it, and walks in when the sill is no higher than a step. The grid is 384 cells on its longer side, and sizes are good to about two cells: `cellMeters` says how large a cell was.
 - **Player steps.** Flat places large enough to stand on are found from the triangles that face up, as heights above the bottom of the asset. A stair is two or more rises in a row of 0.6 metres or less. One rise alone is a stair only when `expect.stairs` is `true`.
@@ -1350,6 +1365,7 @@ The keys of a pack job:
 | `profile`, `pivot`, `placement`, `creaseAngle`, `normals`, `weldTolerance`, `maxTriangles`, `colorSpace`, `provenance` | As in the [options](#options). `profile` may be an id or a profile object. |
 | `pivots` | A pivot for some bodies: `{ "door": [0, 20, 0] }` or `[null, "center"]`. See [A pivot for one body](#a-pivot-for-one-body). |
 | `collision` | A shape by name, or `{ "shape", "tolerance", "maxPieces", "maxHullVertices" }`. |
+| `collisions` | The same for some bodies: `{ "Frame": { "shape": "decomposition", "maxPieces": 12 } }` or `[null, "hull"]`. See [Collision for one body](#collision-for-one-body). |
 | `texcoords` | `true` or `{ "tileMeters": 0.5 }`. |
 | `kernel` | Only `"manifold-3d"`. Loads that package for a general convex decomposition. It must be installed next to this one, and the job is refused with `BAD_JOB` when it is not. |
 | `naming` | The [name pattern](#names-that-stay). |
@@ -1519,7 +1535,7 @@ Bad input is refused with a `GameExportError`. Its `code` is stable and its `mes
 | `BAD_COLOR` | A colour cannot be read. Transparency is not supported. For a face colour the message names the triangle. |
 | `MATERIAL_CONFLICT` | One material name is used with two colours, or one colour of a body is given two names. In a family, also one name with two colours in two rows, and in a kit in two pieces. |
 | `BAD_SOURCE_SPACE` | `source` is missing or has a bad unit, up axis or handedness. |
-| `BAD_OPTION` | An option is outside its range, or the profile is unknown. This covers `pivots`, the collision settings, `texcoords`, `kernel` and the options of the checks. |
+| `BAD_OPTION` | An option is outside its range, or the profile is unknown. This covers `pivots`, `collisions`, the collision settings, `texcoords`, `kernel` and the options of the checks. |
 | `BAD_PROVENANCE` | `provenance` is not plain JSON. |
 | `BAD_STL` | An STL file cannot be read. |
 | `BAD_GLB` | A GLB file cannot be read, or one given to the checks was not written by this package. |

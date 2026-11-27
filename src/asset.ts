@@ -110,7 +110,7 @@ function turnFromZ(direction: Vec3): [number, number, number, number] | undefine
  */
 export function exportGameAsset(input: AssetInput): ExportResult {
   if (typeof input !== "object" || input === null) refuse("NO_BODIES", "exportGameAsset needs { bodies, source }.");
-  const collision = readCollisionSettings(input.collision);
+  const everyCollision = readCollisionSettings(input.collision);
   let tileMeters: number | undefined;
   if (input.texcoords !== undefined && input.texcoords !== false) {
     if (input.texcoords !== true && (typeof input.texcoords !== "object" || input.texcoords === null)) refuse("BAD_OPTION", "texcoords must be true, false or { tileMeters }.");
@@ -123,6 +123,7 @@ export function exportGameAsset(input: AssetInput): ExportResult {
   const bodies: readonly AssetBodyInput[] = Array.isArray(input.bodies) ? input.bodies : [];
   for (const [index, body] of bodies.entries()) forBody(index, () => checkAssetBody(body));
 
+  const collisions = perBody("collisions", input.collisions, bodies).map((own, index) => (own === undefined ? undefined : forBody(index, () => readCollisionSettings(own, everyCollision))));
   const pivots = perBody("pivots", input.pivots, bodies);
   for (const [index, pivot] of pivots.entries()) if (pivot !== undefined) forBody(index, () => readPivot(pivot, `The pivot of body "${bodies[index]!.name}"`));
   const tile = tileMeters;
@@ -144,7 +145,7 @@ export function exportGameAsset(input: AssetInput): ExportResult {
     return nodes.length - 1;
   };
 
-  facts.settings.collision = { ...collision, kernel: input.kernel !== undefined };
+  facts.settings.collision = { ...everyCollision, kernel: input.kernel !== undefined };
   if (tile !== undefined) facts.settings.texcoords = { projection: "box", tileMeters: tile };
   // An engine that reads detail levels from names wants every level as a child of one node.
   const levelRule = profile.conventions.lod.find((convention) => convention.role === "lod");
@@ -202,8 +203,10 @@ export function exportGameAsset(input: AssetInput): ExportResult {
         bodyFacts.lods = lods;
       }
 
-      // Collision, planned in the body's own frame: metres from its pivot.
-      if (collision.shape !== "none") {
+      // Collision, planned in the body's own frame: metres from its pivot. A body with settings
+      // of its own has facts even when they ask for no shape, so that is seen to be a choice.
+      const collision = collisions[index] ?? everyCollision;
+      if (collision.shape !== "none" || collisions[index] !== undefined) {
         const pieces = body.collisionPieces?.map((piece) => {
           const points = new Float64Array(piece.positions.length);
           toGltfSpace(piece.positions, conversion, points);
@@ -247,6 +250,8 @@ export function exportGameAsset(input: AssetInput): ExportResult {
           shape: plan.chosen?.shape ?? "none",
           pieces: written.length,
           tolerance: collision.tolerance,
+          maxPieces: collision.maxPieces,
+          maxHullVertices: collision.maxHullVertices,
           volume: { visible: plan.visibleVolume, collision: plan.chosen?.volume ?? 0, error: plan.chosen?.error ?? null },
           withinTolerance: plan.chosen?.withinTolerance ?? null,
           nodes: written,

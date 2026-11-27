@@ -432,6 +432,16 @@
           "type": "number",
           "minimum": 0
         },
+        "maxPieces": {
+          "description": "The most convex pieces a decomposition of this body makes. Not in files written before 0.1.8.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxHullVertices": {
+          "description": "The most corners one convex piece of this body has. Not in files written before 0.1.8.",
+          "type": "integer",
+          "minimum": 4
+        },
         "volume": {
           "description": "Cubic metres. visible and error are null for a body that is not closed.",
           "type": "object",

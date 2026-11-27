@@ -549,6 +549,15 @@
                   "boolean",
                   "null"
                 ]
+              },
+              "tolerance": {
+                "description": "The share this body was judged by: the one given to the check, or else its own. Not in reports made before 0.1.8.",
+                "type": "number",
+                "minimum": 0
+              },
+              "status": {
+                "description": "What this body alone comes to. The worst of them is the status of the check. Not in reports made before 0.1.8.",
+                "$ref": "#/$defs/CheckStatus"
               }
             }
           }

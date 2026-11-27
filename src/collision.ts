@@ -69,16 +69,17 @@ export interface ResolvedCollisionSettings {
 }
 
 /** Reads the `collision` option: a shape by name, or settings. Refuses anything else. */
-export function readCollisionSettings(option: CollisionRequest | CollisionSettings | undefined): ResolvedCollisionSettings {
+/** Reads collision settings. What they leave out is taken from `base`: the settings of the asset, for those of one body. */
+export function readCollisionSettings(option: CollisionRequest | CollisionSettings | undefined, base?: ResolvedCollisionSettings): ResolvedCollisionSettings {
   const given: CollisionSettings = option === undefined ? {} : typeof option === "string" ? { shape: option } : option;
   if (typeof given !== "object" || given === null) refuse("BAD_OPTION", `collision must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")} or { shape, tolerance, maxPieces, maxHullVertices }.`);
-  const shape = given.shape ?? "auto";
+  const shape = given.shape ?? base?.shape ?? "auto";
   if (!REQUESTS.includes(shape)) refuse("BAD_OPTION", `collision shape must be one of ${REQUESTS.map((name) => `"${name}"`).join(", ")}. Got ${JSON.stringify(shape)}.`);
-  const tolerance = given.tolerance ?? DEFAULT_COLLISION_TOLERANCE;
+  const tolerance = given.tolerance ?? base?.tolerance ?? DEFAULT_COLLISION_TOLERANCE;
   if (!(Number.isFinite(tolerance) && tolerance >= 0)) refuse("BAD_OPTION", `collision tolerance must be zero or a positive share of the visible volume, like 0.05. Got ${String(tolerance)}.`);
-  const maxPieces = given.maxPieces ?? DEFAULT_MAX_COLLISION_PIECES;
+  const maxPieces = given.maxPieces ?? base?.maxPieces ?? DEFAULT_MAX_COLLISION_PIECES;
   if (!(Number.isInteger(maxPieces) && maxPieces >= 1)) refuse("BAD_OPTION", `collision maxPieces must be a whole number of at least 1. Got ${String(maxPieces)}.`);
-  const maxHullVertices = given.maxHullVertices ?? DEFAULT_MAX_HULL_VERTICES;
+  const maxHullVertices = given.maxHullVertices ?? base?.maxHullVertices ?? DEFAULT_MAX_HULL_VERTICES;
   if (!(Number.isInteger(maxHullVertices) && maxHullVertices >= 4)) refuse("BAD_OPTION", `collision maxHullVertices must be a whole number of at least 4. Got ${String(maxHullVertices)}.`);
   return { shape, tolerance, maxPieces, maxHullVertices };
 }

@@ -335,6 +335,7 @@ const PACK_JOB_KEYS = [
   "colorSpace",
   "provenance",
   "collision",
+  "collisions",
   "texcoords",
   "kernel",
   "naming",

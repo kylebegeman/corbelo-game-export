@@ -391,6 +391,56 @@ describe("material slots", () => {
   });
 });
 
+describe("collision of each body", () => {
+  // A corner whose hull is a sixth too large, a round post whose box is a quarter too large, and a crate.
+  const bodies = [
+    { name: "Corner", positions: ell(1000, 500).positions },
+    { name: "Post", positions: moved(cylinder(150, 400, 24), [2000, 0, 0]).positions },
+    { name: "Crate", positions: moved(crate, [0, 2000, 0]).positions },
+  ];
+  const collision = (collisions: AssetInput["collisions"], options: CheckOptions = {}) => check("collision", exportGameAsset({ bodies, source: MM_Z_UP, collisions }).glb, options);
+
+  it("judges each body by the tolerance it was written with", () => {
+    const loose = collision({ Corner: { shape: "hull", tolerance: 0.2 } });
+    expect(loose.status).toBe("pass");
+    expect(loose.values.tolerance).toBe(0.05);
+    expect(loose.values.bodies.map((body) => [body.name, body.tolerance, body.withinTolerance, body.status])).toEqual([
+      ["Corner", 0.2, true, "pass"],
+      ["Post", 0.05, true, "pass"],
+      ["Crate", 0.05, true, "pass"],
+    ]);
+    expect(loose.message).toBe("Collision in 3 convex pieces, each body within the share of its visible volume allowed for it.");
+    // A tolerance given to the check is the one for every body.
+    expect(collision({ Corner: { shape: "hull", tolerance: 0.2 } }, { collisionTolerance: 0.1 }).values.bodies.map((body) => [body.tolerance, body.status])).toEqual([
+      [0.1, "warn"],
+      [0.1, "pass"],
+      [0.1, "pass"],
+    ]);
+  });
+
+  it("takes its status and its message from the worst body", () => {
+    // The post's box is further out than the corner's hull. The box was asked for, which is a
+    // warning. The hull is what was settled for, which fails, and the failure is what is said.
+    const mixed = collision({ Post: "box" });
+    expect(mixed.values.bodies.map((body) => body.status)).toEqual(["fail", "warn", "pass"]);
+    expect(mixed.status).toBe("fail");
+    expect(mixed.message).toBe(
+      'The collision of "Corner" (hull, 1 piece) is 16.7% more volume than the visible part, over the 5% allowed. The pieces the part was built from, or a solid kernel to cut it into convex pieces, would bring it nearer.',
+    );
+    const asked = collision({ Post: "box", Corner: "hull" });
+    expect(asked.values.bodies.map((body) => body.status)).toEqual(["warn", "warn", "pass"]);
+    expect(asked.status).toBe("warn");
+    expect(asked.message).toBe('The collision of "Post" (box, 1 piece) is 28.8% more volume than the visible part, over the 5% allowed.');
+  });
+
+  it("does not hold a body left without collision on purpose against the asset", () => {
+    const without = collision({ Post: "none" }, { collisionTolerance: 0.2 });
+    expect(without.values.bodies.map((body) => [body.shape, body.status])).toEqual([["hull", "pass"], ["none", "pass"], ["box", "pass"]]);
+    expect(without.status).toBe("pass");
+    expect(without.message).toBe("Collision in 2 convex pieces, within 20% of the visible volume.");
+  });
+});
+
 describe("collision", () => {
   it("passes a shape within the tolerance", () => {
     const collision = check("collision", asset(crate.positions));
