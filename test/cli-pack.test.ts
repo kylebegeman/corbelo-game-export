@@ -184,6 +184,29 @@ describe("pack command", () => {
     expect(without.code).toBe(0);
   });
 
+  it("takes a pivot and collision for one body, and the rest of a body for the kernel to cut up", async () => {
+    const job = {
+      name: "ell",
+      source,
+      bodies: [{ name: "Ell", stl: "parts/ell.stl", collisionPieces: [{ stl: "parts/ell-a.stl" }], collisionRemainder: { stl: "parts/ell-b.stl" } }],
+      pivots: { Ell: "center" },
+      collisions: [{ shape: "decomposition", maxPieces: 4 }],
+      kernel: "manifold-3d",
+      output: { dir: "out/ell-rest" },
+    };
+    const { code, err } = await command(["pack", writeJob("ell-rest.json", job)]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+    const body = readPack(readFileSync(join(dir, "out/ell-rest/ell.glb"))).facts!.bodies[0]!;
+    expect(body.pivot.mode).toBe("center");
+    expect(body.collision).toMatchObject({ requested: "decomposition", shape: "decomposition", pieces: 2, givenPieces: 1, maxPieces: 4, withinTolerance: true });
+    const refused = async (collisionRemainder: unknown): Promise<string> => (await command(["pack", writeJob("ell-rest-bad.json", { ...job, bodies: [{ ...job.bodies[0]!, collisionRemainder }] })])).err;
+    expect(await refused({})).toContain('Body "Ell", collision remainder needs an "stl" file path.');
+    expect(await refused([])).toContain('Body "Ell", collision remainder must be an object with "stl".');
+    // A name no body of the asset was given is still refused.
+    expect((await command(["pack", writeJob("ell-rest-bad.json", { ...job, pivots: { Elle: "center" } })])).err).toContain('pivots has an entry for a body named "Elle", and no body has that name.');
+  });
+
   it('loads the kernel a job names, "manifold-3d", for a general convex decomposition', async () => {
     const job = { name: "ell", source, bodies: [{ name: "Ell", stl: "parts/ell.stl" }], kernel: "manifold-3d", output: { dir: "out/ell-kernel" } };
     const { code, out, err } = await command(["pack", writeJob("ell-kernel.json", job)]);
@@ -236,7 +259,7 @@ describe("pack command", () => {
     };
     const [body] = postJob.bodies;
     expect(await refused({ ...postJob, colision: "box" })).toContain('error [BAD_JOB]: The job has an unknown key "colision". Known keys: name, source, bodies, rows, profile,');
-    expect(await refused({ ...postJob, bodies: [{ ...body, lod: [] }] })).toContain('Body 0 has an unknown key "lod". Known keys: name, stl, color, materialName, faceIds, faceColors, faceMaterialNames, refines, lods, collisionPieces, attachPoints.');
+    expect(await refused({ ...postJob, bodies: [{ ...body, lod: [] }] })).toContain('Body 0 has an unknown key "lod". Known keys: name, stl, color, materialName, faceIds, faceColors, faceMaterialNames, refines, lods, collisionPieces, collisionRemainder, attachPoints.');
     expect(await refused({ ...postJob, bodies: [{ ...body, lods: [{ stl: "parts/post-lod1.stl", color: "#fff" }] }] })).toContain('Body "Post", detail level 1 has an unknown key "color". Known keys: stl, faceIds, faceColors.');
     expect(await refused({ ...postJob, bodies: [{ ...body, collisionPieces: [{ stl: "parts/ell-a.stl", name: "a" }] }] })).toContain('Body "Post", collision piece 0 has an unknown key "name". Known keys: stl.');
     expect(await refused({ ...postJob, output: { folder: "out" } })).toContain('"output" has an unknown key "folder". Known keys: dir, zip.');

@@ -253,6 +253,8 @@ export interface PackJobBody extends JobBody {
   lods?: PackJobLod[];
   /** The pieces the body was made from, each an STL file. Only their points are used. */
   collisionPieces?: { stl: string }[];
+  /** The rest of the body beside its pieces, as one closed STL: what a decomposition cuts up in place of the whole body. */
+  collisionRemainder?: { stl: string };
   attachPoints?: AttachPointInput[];
 }
 
@@ -344,9 +346,9 @@ const PACK_JOB_KEYS = [
   "revision",
   "output",
 ];
-const KIT_JOB_KEYS = [...PACK_JOB_KEYS.filter((key) => key !== "bodies" && key !== "rows" && key !== "pivot" && key !== "pivots" && key !== "placement"), "grid", "pieces", "mates", "layouts", "pieceChecks", "scenes"];
+const KIT_JOB_KEYS = [...PACK_JOB_KEYS.filter((key) => key !== "bodies" && key !== "rows" && key !== "pivot" && key !== "pivots" && key !== "placement" && key !== "collisions"), "grid", "pieces", "mates", "layouts", "pieceChecks", "scenes"];
 const KIT_PIECE_KEYS = ["name", "bodies", "glb", "cells", "origin", "pivot", "sockets", "trim", "provenance"];
-const PACK_BODY_KEYS = [...BODY_KEYS, "lods", "collisionPieces", "attachPoints"];
+const PACK_BODY_KEYS = [...BODY_KEYS, "lods", "collisionPieces", "collisionRemainder", "attachPoints"];
 const LOD_KEYS = ["stl", "faceIds", "faceColors"];
 const PIECE_KEYS = ["stl"];
 const ROW_KEYS = ["name", "bodies", "provenance"];
@@ -381,6 +383,14 @@ function readPackBody(value: unknown, label: string, base: string): AssetBodyInp
       if (typeof piece["stl"] !== "string" || piece["stl"] === "") refuse("BAD_JOB", `${pieceWhere} needs an "stl" file path.`);
       return { positions: readStlFile(resolve(base, piece["stl"]), pieceWhere) };
     });
+  }
+  const rest = entry["collisionRemainder"];
+  if (rest !== undefined) {
+    const restWhere = `${where}, collision remainder`;
+    if (!isRecord(rest)) refuse("BAD_JOB", `${restWhere} must be an object with "stl".`);
+    refuseUnknownKeys(rest, PIECE_KEYS, restWhere);
+    if (typeof rest["stl"] !== "string" || rest["stl"] === "") refuse("BAD_JOB", `${restWhere} needs an "stl" file path.`);
+    asset.collisionRemainder = { positions: readStlFile(resolve(base, rest["stl"]), restWhere) };
   }
   // Written into the job itself. The exporter checks them.
   if (entry["attachPoints"] !== undefined) asset.attachPoints = entry["attachPoints"] as AttachPointInput[];

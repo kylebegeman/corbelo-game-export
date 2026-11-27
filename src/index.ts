@@ -40,8 +40,10 @@ export {
   DEFAULT_COLLISION_TOLERANCE,
   DEFAULT_MAX_COLLISION_PIECES,
   DEFAULT_MAX_HULL_VERTICES,
+  decomposeSolid,
   manifoldKernel,
   type CollisionKernel,
+  type Decomposition,
   type KernelMesh,
   type KernelSolid,
 } from "./collision.js";

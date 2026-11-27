@@ -427,6 +427,11 @@
           "type": "integer",
           "minimum": 0
         },
+        "givenPieces": {
+          "description": "Only for a decomposition of a body given the rest of it to cut up: how many of the pieces are the ones the caller gave. They come first.",
+          "type": "integer",
+          "minimum": 0
+        },
         "tolerance": {
           "description": "How far the collision volume may be from the visible volume, as a share of it.",
           "type": "number",

@@ -345,6 +345,7 @@ A body may have these fields besides those of a [plain body](#bodies):
 | --- | --- |
 | `lods` | Lower detail levels, the nearest to full detail first. Each is `{ positions, indices?, faceIds?, faceColors? }`, read like a body's and in the same units and axes. See [Detail levels](#detail-levels). |
 | `collisionPieces` | The pieces the body was made from, each `{ positions }` with at least four points. Only the points are used: each piece becomes their convex hull. See [Collision](#collision). |
+| `collisionRemainder` | The rest of the body beside those pieces, `{ positions, indices }`: one closed solid for the kernel to cut up in place of the whole body. See [Part of a body](#part-of-a-body). |
 | `attachPoints` | Named points, each `{ name, position, direction? }` in the body's units and axes. See [Attach points](#attach-points). |
 
 And these options besides the [plain ones](#options):
@@ -492,6 +493,30 @@ const { glb, facts } = exportGameAsset({ bodies, source, collision: "auto", kern
 `manifold-3d` is not a dependency of this package. Install it yourself where you want a decomposition. The tests run against version 3.5.5.
 
 The decomposition cuts the body by planes along the three axes. It takes the part whose hull adds the most volume, tries up to 12 places along each axis where that part has vertices, and keeps the cut that leaves the least extra volume. A hole through an otherwise convex part is not opened by any one cut, since each half still has a hull that fills its share of the hole. Where no cut helps by itself, the cut along each axis that leaves the most even parts is looked at one cut further, and the one that opens the most is kept. It stops when the hulls together are within the tolerance or there are `maxPieces` parts. A wall with a doorway comes out as three parts with no extra volume. A block 0.6 m square with a round hole 0.24 m across is within 5% in 8 parts or fewer. A round or slanted hollow that takes up most of a body needs more parts: a ring 1.2 m across with a hole 0.8 m across needs 13 parts to come within 5% and is 9% over at the default of 8. Give `collisionPieces` from the construction for such a body, or raise `maxPieces`.
+
+#### Part of a body
+
+A body that is mostly simple pieces with one awkward part does not need the kernel for all of it. Give the pieces you have as `collisionPieces` and the rest of the body as `collisionRemainder`, one closed solid in the body's units and axes with its faces outwards (`{ positions, indices }`, triangle soup without `indices`):
+
+```js
+const body = { name: "Stand", positions, collisionPieces: [{ positions: post }], collisionRemainder: { positions: bracket } };
+const { facts } = exportGameAsset({ bodies: [body], source, kernel });
+facts.bodies[0].collision; // { shape: "decomposition", pieces: 3, givenPieces: 1, ... }
+```
+
+The `"decomposition"` shape is then the pieces given, each as its hull and first in order, and after them the parts the kernel cut the rest into. It is one shape: its volume is measured against the whole visible body, `maxPieces` counts the pieces given too, and `givenPieces` in the facts says how many of the pieces were yours. The kernel is handed the rest alone. The other shapes are as before, so `"pieces"` is still the pieces given by themselves. A rest that cannot be cut up is said the way a body that cannot be is, starting `What was given as the rest of the body was not cut up.`, and one that is not positions and triangles is refused with `BAD_COLLISION`. In a pack job it is `"collisionRemainder": { "stl": "bracket.stl" }`.
+
+#### A decomposition by itself
+
+`decomposeSolid(solid, kernel, settings)` runs the same decomposition on one closed solid and gives the pieces with what was measured:
+
+```js
+const made = decomposeSolid({ positions, indices }, kernel, { tolerance: 0.05, maxPieces: 8, maxHullVertices: 64 });
+made.pieces; // [{ positions, indices, volume, capped }, ...], each a convex hull
+made.error; // (made.volume - made.solidVolume) / made.solidVolume, and made.withinTolerance
+```
+
+The solid is taken as given: in its own unit and axes, faces outwards, triangle soup without `indices`. Nothing is converted, so the pieces and the volumes are in that unit too. The settings are the ones of [collision](#collision) and have the same defaults. A solid that cannot be cut up is refused with `BAD_COLLISION` and a message that starts `No convex decomposition was made.` and goes on with the reason.
 
 A decomposition is made only for a body the kernel can take as a solid: closed, every face pointing outwards, with no hollow shut inside it and a surface that does not cross itself. Any other body gets no decomposition and a reason in plain words: which edges are open or join faces that point opposite ways, what the kernel said when it did not take the body, or that the parts it made do not add up to the body's volume. A surface that crosses itself is not looked for directly. It is caught when the kernel refuses the body or the volumes do not add up.
 
@@ -1379,6 +1404,7 @@ A body of a pack job has the keys of a body of a plain job (`name`, `stl`, `colo
 | --- | --- |
 | `lods` | `[{ "stl": "lod1.stl", "faceIds": "lod1.faces.json", "faceColors": "lod1.colors.json" }]`, the nearest to full detail first. The two JSON files are optional and read like a body's. |
 | `collisionPieces` | `[{ "stl": "piece.stl" }]`. Only the points of each file are used. |
+| `collisionRemainder` | `{ "stl": "rest.stl" }`. The rest of the body beside its pieces, one closed solid. See [Part of a body](#part-of-a-body). |
 | `attachPoints` | `[{ "name": "Seat", "position": [150, 150, 400], "direction": [0, 0, 1] }]`, written in the job itself, in source units and axes. |
 
 Unknown keys are refused, at every level. Paths inside the job are relative to the job file. For a job on standard input they are relative to `--base`, or to the working directory without it. `--dir` and `--zip` are relative to the working directory and win over the job's `output`. A job with nowhere to write is refused.

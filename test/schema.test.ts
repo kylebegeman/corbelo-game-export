@@ -29,7 +29,7 @@ import {
   type KitPieceInput,
   type PackInput,
 } from "../src/index.js";
-import { box, chamferedBlock, cutCylinder, cylinder, doorFrame, ell, halfPaintedSide, joined, MM_Z_UP, paintedPatch, paintedTop, ramp, stairs } from "./fixtures.js";
+import { box, chamferedBlock, cutCylinder, cylinder, doorFrame, ell, halfPaintedSide, joined, MM_Z_UP, moved, paintedPatch, paintedTop, ramp, stairs } from "./fixtures.js";
 import { loadKernel } from "./kernel.js";
 import { bodyOf, corridorKit, corridorPieces, flatBoxes, SLAB, swap, WALL, withLamp } from "./kit-fixtures.js";
 
@@ -226,8 +226,24 @@ describe("schema/pack.schema.json for a game asset", () => {
     expect(withCollision(() => undefined)).toBe(true);
     // Version 0.1.7 wrote neither.
     expect(withCollision((collision) => (delete collision["maxPieces"], delete collision["maxHullVertices"]))).toBe(true);
+    // Only a decomposition of a body given the rest of it says how many pieces were the caller's.
+    expect(facts.bodies[0]!.collision["givenPieces"]).toBeUndefined();
+    expect(withCollision((collision) => (collision["givenPieces"] = 2))).toBe(true);
+    expect(withCollision((collision) => (collision["givenPieces"] = -1))).toBe(false);
     expect(withCollision((collision) => (collision["maxPieces"] = 0))).toBe(false);
     expect(withCollision((collision) => (collision["maxHullVertices"] = 3))).toBe(false);
+  });
+
+  it("accepts a decomposition of the rest of a body, beside the pieces that were given", () => {
+    const post = cylinder(150, 400, 24);
+    const corner = moved(ell(1000, 500), [1000, 0, 0]);
+    const { facts } = exportGameAsset({
+      bodies: [{ name: "Stand", positions: joined(post, corner).positions, collisionPieces: [{ positions: post.positions }], collisionRemainder: { positions: corner.positions } }],
+      source: MM_Z_UP,
+      kernel,
+    });
+    expect(facts.bodies[0]!.collision).toMatchObject({ shape: "decomposition", pieces: 3, givenPieces: 1 });
+    expect(validFacts(JSON.parse(JSON.stringify(facts))), JSON.stringify(validFacts.errors)).toBe(true);
   });
 
   it("refuses collision, detail levels and attach points that cannot be", () => {
@@ -600,6 +616,15 @@ describe("schema/kit-job.schema.json", () => {
   it("accepts a kit written as data", () => {
     expect(validKitJob(job), JSON.stringify(validKitJob.errors)).toBe(true);
     expect(validKitJob({ name: "hall", source: MM_Z_UP, grid: job.grid, pieces: [{ name: "a", glb: "a.glb" }], checks: false, pieceChecks: false, scenes: false })).toBe(true);
+  });
+
+  it("knows the rest of a body that is given to be cut up, and refuses what a kit does not take", () => {
+    const withBody = (changed: Record<string, unknown>) => validKitJob({ ...job, pieces: [{ ...job.pieces[0], bodies: [{ ...bodies[0], ...changed }] }] });
+    expect(withBody({ collisionRemainder: { stl: "straight-rest.stl" } })).toBe(true);
+    expect(withBody({ collisionRemainder: { stl: "" } })).toBe(false);
+    expect(withBody({ collisionRemainder: { stl: "straight-rest.stl", name: "rest" } })).toBe(false);
+    expect(validKitJob({ ...job, collisions: ["box"] })).toBe(false);
+    expect(validKitJob({ ...job, pivots: ["center"] })).toBe(false);
   });
 
   it("refuses what the pack command refuses", () => {

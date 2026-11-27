@@ -165,6 +165,12 @@ export interface AssetBodyInput extends BodyInput {
   lods?: readonly LodInput[];
   /** The pieces the body was made from, for collision. */
   collisionPieces?: readonly CollisionPieceInput[];
+  /**
+   * The rest of the body, beside its `collisionPieces`: one closed solid in the same units and
+   * axes as the body, triangle soup without `indices`. A decomposition cuts this up with the
+   * kernel in place of the whole body, and writes the pieces given and its own as one shape.
+   */
+  collisionRemainder?: { positions: ArrayLike<number>; indices?: ArrayLike<number> };
   attachPoints?: readonly AttachPointInput[];
 }
 
@@ -326,6 +332,11 @@ export interface CollisionFacts {
   shape: CollisionShape | "none";
   /** How many convex pieces, and so how many nodes. */
   pieces: number;
+  /**
+   * Only for a decomposition of a body given `collisionRemainder`: how many of the pieces are
+   * the ones the caller gave. They come first, and the rest are what the kernel cut.
+   */
+  givenPieces?: number;
   tolerance: number;
   /** The most convex pieces a decomposition of this body makes. Not in files written before 0.1.8. */
   maxPieces?: number;

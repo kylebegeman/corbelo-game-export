@@ -152,6 +152,20 @@
                     }
                   }
                 },
+                "collisionRemainder": {
+                  "description": "The rest of the body beside its pieces, as one closed STL: what a decomposition cuts up in place of the whole body.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "stl"
+                  ],
+                  "properties": {
+                    "stl": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
                 "attachPoints": {
                   "type": "array",
                   "items": {

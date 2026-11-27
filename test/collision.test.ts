@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_COLLISION_PIECES,
   DEFAULT_MAX_HULL_VERTICES,
   checkGameAsset,
+  decomposeSolid,
   exportGameAsset,
   GameExportError,
   meshVolume,
@@ -14,7 +15,7 @@ import {
   type CollisionKernel,
   type GameExportErrorCode,
 } from "../src/index.js";
-import { box, chamferedBlock, cylinder, doorFrame, ell, fold, holedBlock, MM_Z_UP, moved, tube } from "./fixtures.js";
+import { box, chamferedBlock, cylinder, doorFrame, ell, fold, holedBlock, joined, MM_Z_UP, moved, signedVolume, tube } from "./fixtures.js";
 import { counting, loadKernel } from "./kernel.js";
 
 let kernel: CollisionKernel;
@@ -524,5 +525,123 @@ describe("collision chosen for each body", () => {
     expect(refusal(() => asset({ collisions: [null, null, null, "box"] }))).toEqual({ code: "BAD_OPTION", message: "collisions has 4 entries, and there are 3 bodies." });
     expect(refusal(() => asset({ collisions: { Post: "sphere" as never } }))).toMatchObject({ code: "BAD_OPTION", body: 1 });
     expect(refusal(() => asset({ collisions: [{ tolerance: -1 }] }))).toMatchObject({ code: "BAD_OPTION", body: 0, message: "collision tolerance must be zero or a positive share of the visible volume, like 0.05. Got -1." });
+  });
+});
+
+describe("a decomposition of part of a body", () => {
+  // A round post, and beside it a corner that is not convex. Together they are one body with
+  // two shells. The post is a piece the caller has. The corner is what is left to cut up.
+  const post = cylinder(150, 400, 24);
+  const corner = moved(ell(1000, 500), [1000, 0, 0]);
+  const body = joined(post, corner);
+  const visible = (signedVolume(post.positions) + signedVolume(corner.positions)) / 1e9;
+  /** A kernel that writes down how many vertices each solid it was given has. */
+  const watching = (): { kernel: CollisionKernel; given: number[] } => {
+    const given: number[] = [];
+    return { given, kernel: { solid: (positions, indices) => (given.push(positions.length / 3), kernel.solid(positions, indices)) } };
+  };
+  const input = { name: "Stand", positions: body.positions, collisionPieces: [{ positions: post.positions }], collisionRemainder: { positions: corner.positions } };
+
+  it("writes the pieces given and the rest cut up by the kernel as one shape, measured against the whole body", () => {
+    const watched = watching();
+    const facts = collisionOf({ bodies: [input], kernel: watched.kernel });
+    expect(facts.tried.map((tier) => [tier.shape, tier.pieces, tier.withinTolerance])).toEqual([
+      ["box", 1, false],
+      ["hull", 1, false],
+      ["pieces", 1, false],
+      ["decomposition", 3, true],
+    ]);
+    expect(facts).toMatchObject({ shape: "decomposition", pieces: 3, givenPieces: 1, withinTolerance: true });
+    expect(facts.volume.visible).toBeCloseTo(visible, 6);
+    expect(facts.volume.collision).toBeCloseTo(visible, 6);
+    expect(facts.volume.error).toBeCloseTo(0, 6);
+    // The piece given comes first, as it is. The two boxes of the corner follow.
+    expect(facts.nodes.map((node) => node.vertices)).toEqual([48, 8, 8]);
+    expect(facts.nodes[0]!.volume).toBeCloseTo(signedVolume(post.positions) / 1e9, 6);
+    // The kernel was given the corner alone: its 16 points, and not the 66 of the whole body.
+    expect(watched.given).toEqual([16]);
+  });
+
+  it("without what is left given, hands the kernel the whole body, as before", () => {
+    const watched = watching();
+    const { collisionRemainder: _, ...whole } = input;
+    const facts = collisionOf({ bodies: [whole], kernel: watched.kernel, collision: "decomposition" });
+    expect(watched.given).toEqual([66]);
+    expect(facts.givenPieces).toBeUndefined();
+  });
+
+  it("counts the pieces given in the most pieces allowed, and takes indexed triangles and a mirrored source", () => {
+    const one = collisionOf({ bodies: [input], kernel, collision: { shape: "decomposition", maxPieces: 2 } });
+    expect(one).toMatchObject({ pieces: 2, givenPieces: 1, withinTolerance: false });
+    const indexed = { positions: corner.positions, indices: Array.from({ length: corner.positions.length / 3 }, (_, at) => at) };
+    expect(collisionOf({ bodies: [{ ...input, collisionRemainder: indexed }], kernel, collision: "decomposition" })).toMatchObject({ pieces: 3, withinTolerance: true });
+    const mirrored = exportGameAsset({ bodies: [input], source: { ...MM_Z_UP, handedness: "left" }, kernel, collision: "decomposition" }).facts.bodies[0]!.collision!;
+    expect(mirrored).toMatchObject({ pieces: 3, givenPieces: 1, withinTolerance: true });
+  });
+
+  it("with nothing but what is left, cuts that up, and without a kernel says what is missing", () => {
+    const { collisionPieces: _, ...rest } = input;
+    expect(collisionOf({ bodies: [rest], kernel, collision: "decomposition" })).toMatchObject({ pieces: 2, givenPieces: 0, withinTolerance: false });
+    const none = collisionOf({ bodies: [input] });
+    expect(none.tried.map((tier) => tier.shape)).toEqual(["box", "hull", "pieces"]);
+    expect(none.notes).toContain("No kernel was given, and a general convex decomposition needs one.");
+  });
+
+  it("says what is wrong with what is left when the kernel cannot cut it up", () => {
+    const open = { positions: corner.positions.slice(9) };
+    expect(refusal(() => collisionOf({ bodies: [{ ...input, collisionRemainder: open }], kernel, collision: "decomposition" }))).toEqual({
+      code: "BAD_COLLISION",
+      body: 0,
+      message: 'Body "Stand": collision "decomposition" cannot be built. What was given as the rest of the body was not cut up. 3 edges have a face on one side only once the body is stored, so its surface does not close.',
+    });
+    const left = collisionOf({ bodies: [{ ...input, collisionRemainder: open }], kernel });
+    expect(left.notes).toContain("No convex decomposition was made. What was given as the rest of the body was not cut up. 3 edges have a face on one side only once the body is stored, so its surface does not close.");
+    for (const bad of [{}, { positions: [0, 0, 0, 1] }, { positions: corner.positions, indices: [0, 1] }, { positions: corner.positions, indices: [0, 1, 9999] }, { positions: [0, 0, Number.NaN, 0, 0, 1, 0, 1, 0] }]) {
+      expect(refusal(() => collisionOf({ bodies: [{ ...input, collisionRemainder: bad as never }], kernel }))).toEqual({
+        code: "BAD_COLLISION",
+        body: 0,
+        message: 'Body "Stand": collisionRemainder needs positions, x, y, z for each point as finite numbers, and with indices three vertex numbers for each triangle.',
+      });
+    }
+  });
+});
+
+describe("a decomposition by itself", () => {
+  it("cuts one solid into convex pieces with a kernel, and says how far their volume is from its own", () => {
+    const counted = counting(kernel);
+    const made = decomposeSolid(ell(1000, 500), counted.kernel);
+    expect(made.pieces).toHaveLength(2);
+    expect(made.solidVolume).toBeCloseTo(375e6, 0);
+    expect(made.volume).toBeCloseTo(375e6, 0);
+    expect(made.error).toBeCloseTo(0, 9);
+    expect(made.withinTolerance).toBe(true);
+    for (const piece of made.pieces) expect(piece).toMatchObject({ capped: false, positions: expect.any(Float64Array), indices: expect.any(Uint32Array) });
+    expect(made.pieces.reduce((total, piece) => total + meshVolume(piece.positions, piece.indices), 0)).toBeCloseTo(375e6, 0);
+    expect(counted.freed()).toBe(counted.made());
+  });
+
+  it("stops at the most pieces allowed and at the tolerance given", () => {
+    const block = holedBlock(600, 300, 120, 16);
+    const few = decomposeSolid(block, kernel, { maxPieces: 3 });
+    expect(few.pieces).toHaveLength(3);
+    expect(few.withinTolerance).toBe(false);
+    expect(few.error).toBeGreaterThan(0.05);
+    const many = decomposeSolid(block, kernel, { maxPieces: 16, tolerance: 0.05 });
+    expect(many.withinTolerance).toBe(true);
+    expect(Math.abs(many.error)).toBeLessThanOrEqual(0.05);
+    // The same solid cut the same way as a body of an asset is.
+    const asset = collisionOf({ bodies: [{ name: "Holed", positions: block.positions }], kernel, collision: { shape: "decomposition", maxPieces: 16 } });
+    expect(many.pieces).toHaveLength(asset.pieces);
+    expect(many.error).toBeCloseTo(asset.volume.error!, 5);
+  });
+
+  it("refuses a solid it cannot cut up, with the reason, and settings it cannot read", () => {
+    expect(refusal(() => decomposeSolid({ positions: ell(1000, 500).positions.slice(9) }, kernel))).toEqual({
+      code: "BAD_COLLISION",
+      message: "No convex decomposition was made. 3 edges have a face on one side only once the body is stored, so its surface does not close.",
+    });
+    expect(refusal(() => decomposeSolid(ell(1000, 500), undefined as never)).code).toBe("BAD_OPTION");
+    expect(refusal(() => decomposeSolid(ell(1000, 500), kernel, { maxPieces: 0 })).code).toBe("BAD_OPTION");
+    expect(refusal(() => decomposeSolid({ positions: [0, 0, 0] }, kernel)).code).toBe("BAD_COLLISION");
   });
 });

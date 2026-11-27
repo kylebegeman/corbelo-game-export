@@ -124,6 +124,8 @@ export interface CollisionSource {
   closed: boolean;
   /** Pieces the caller made the body from, each a list of points. Each becomes its convex hull. */
   pieces: readonly ArrayLike<number>[] | undefined;
+  /** The solid that is the rest of the body, beside the pieces: what a decomposition cuts up in place of the whole body. */
+  remainder?: { positions: ArrayLike<number>; indices: ArrayLike<number> } | undefined;
 }
 
 /** The box around points, as a piece: 8 corners and 12 triangles. Null when the box has no volume. */
@@ -192,6 +194,8 @@ interface Cut {
   spread: number;
 }
 
+const NO_VOLUME = "It encloses no volume. Its faces may point inwards.";
+
 /** The parts of a decomposition may hold this share more or less volume than the body before the result is not trusted. */
 const DECOMPOSITION_VOLUME_SLACK = 0.001;
 
@@ -237,9 +241,16 @@ function solidFault(indices: Uint32Array, vertices: number): string | null {
  * pieces are looked at one cut further, and the one that a second cut gains the most from is
  * taken.
  *
- * Returns the pieces, or the reason there are none.
+ * `visibleVolume` is the volume of the solid itself, and `allowed` how much more the hulls
+ * together may hold. Returns the pieces, or the reason there are none.
  */
-function decompose(source: CollisionSource, kernel: CollisionKernel, visibleVolume: number, settings: ResolvedCollisionSettings): CollisionPiece[] | string {
+function decompose(
+  source: { positions: ArrayLike<number>; indices: ArrayLike<number> },
+  kernel: CollisionKernel,
+  visibleVolume: number,
+  allowed: number,
+  settings: { maxPieces: number; maxHullVertices: number },
+): CollisionPiece[] | string {
   const alive = new Set<KernelSolid>();
   const keep = <T extends KernelSolid>(solid: T, into?: KernelSolid[]): T => {
     alive.add(solid);
@@ -321,7 +332,7 @@ function decompose(source: CollisionSource, kernel: CollisionKernel, visibleVolu
     if (parts.length === 0) return "The kernel made a solid with no volume from the body.";
     for (;;) {
       const excess = parts.reduce((total, part) => total + part.excess, 0);
-      if (excess <= settings.tolerance * visibleVolume || parts.length >= settings.maxPieces) break;
+      if (excess <= allowed || parts.length >= settings.maxPieces) break;
       let worst = -1;
       for (const [at, part] of parts.entries()) {
         if (!part.settled && part.excess > 0 && (worst < 0 || part.excess > parts[worst]!.excess)) worst = at;
@@ -447,7 +458,16 @@ export function planCollision(source: CollisionSource, settings: ResolvedCollisi
       case "decomposition": {
         if (kernel === undefined) return "No kernel was given, and a general convex decomposition needs one.";
         if (visibleVolume === null) return "A general convex decomposition needs a closed body with a volume.";
-        return decompose(source, kernel, visibleVolume, settings);
+        const allowed = settings.tolerance * visibleVolume;
+        const { remainder } = source;
+        if (remainder === undefined) return decompose(source, kernel, visibleVolume, allowed, settings);
+        // The pieces given stay as they are, and only the rest of the body is cut up. Together
+        // they are one shape, with no more pieces than a decomposition of the whole body may have.
+        const given = source.pieces?.length ? build("pieces") : [];
+        if (typeof given === "string") return given;
+        const volume = meshVolume(remainder.positions, remainder.indices);
+        const rest = volume > 0 ? decompose(remainder, kernel, volume, allowed, { ...settings, maxPieces: Math.max(1, settings.maxPieces - given.length) }) : NO_VOLUME;
+        return typeof rest === "string" ? `What was given as the rest of the body was not cut up. ${rest}` : [...given, ...rest];
       }
     }
   };
@@ -493,4 +513,40 @@ export function planCollision(source: CollisionSource, settings: ResolvedCollisi
   }
   if (chosen === null) notes.push("No collision shape could be built.");
   return { requested, chosen, visibleVolume, tried, notes };
+}
+
+/** What `decomposeSolid` made. Volumes are in the cube of the unit the solid was given in. */
+export interface Decomposition {
+  /** The convex pieces, each the hull of one part of the solid. */
+  pieces: Hull[];
+  /** The volumes of the pieces added up. */
+  volume: number;
+  /** The volume of the solid itself. */
+  solidVolume: number;
+  /** `(volume - solidVolume) / solidVolume`: the share the pieces hold more than the solid does. */
+  error: number;
+  withinTolerance: boolean;
+}
+
+/**
+ * Cuts one closed solid into convex pieces with a kernel, the way the `"decomposition"` shape of
+ * an asset is made, and measures the pieces against the solid. The solid is taken as given, in
+ * its own unit and axes, with its faces pointing outwards. Without indices it is triangle soup.
+ * Refuses a solid that cannot be cut up with `BAD_COLLISION`, and says why.
+ */
+export function decomposeSolid(
+  solid: { positions: ArrayLike<number>; indices?: ArrayLike<number> },
+  kernel: CollisionKernel,
+  settings: Pick<CollisionSettings, "tolerance" | "maxPieces" | "maxHullVertices"> = {},
+): Decomposition {
+  const { tolerance, maxPieces, maxHullVertices } = readCollisionSettings(settings);
+  if (typeof kernel?.solid !== "function") refuse("BAD_OPTION", "kernel must be an object with a solid(positions, indices) function.");
+  const positions = solid?.positions ?? [];
+  const indices = solid.indices ?? Uint32Array.from({ length: positions.length / 3 }, (_, at) => at);
+  const solidVolume = meshVolume(positions, indices);
+  const pieces = solidVolume > 0 ? decompose({ positions, indices }, kernel, solidVolume, tolerance * solidVolume, { maxPieces, maxHullVertices }) : NO_VOLUME;
+  if (typeof pieces === "string") refuse("BAD_COLLISION", `${NO_DECOMPOSITION}${pieces}`);
+  const volume = pieces.reduce((total, piece) => total + piece.volume, 0);
+  const error = (volume - solidVolume) / solidVolume;
+  return { pieces: pieces.map(({ kind: _, ...hull }) => hull), volume, solidVolume, error, withinTolerance: Math.abs(error) <= tolerance };
 }

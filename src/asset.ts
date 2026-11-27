@@ -29,6 +29,14 @@ function checkAssetBody(body: AssetBodyInput): void {
       }
     }
   }
+  const rest = body.collisionRemainder;
+  if (rest !== undefined) {
+    const count = isArrayLike(rest?.positions) ? rest.positions.length / 3 : 0;
+    const numbers = [...(count > 0 ? Array.from(rest.positions) : [NaN]), ...(rest?.indices === undefined ? [] : isArrayLike(rest.indices) ? Array.from(rest.indices, (vertex) => (Number.isInteger(vertex) && vertex >= 0 && vertex < count ? 0 : NaN)) : [NaN])];
+    if (!Number.isInteger(count) || ((rest.indices?.length ?? count) % 3 !== 0) || !numbers.every(Number.isFinite)) {
+      refuse("BAD_COLLISION", `${label}: collisionRemainder needs positions, x, y, z for each point as finite numbers, and with indices three vertex numbers for each triangle.`);
+    }
+  }
   if (body.attachPoints !== undefined) {
     if (!Array.isArray(body.attachPoints)) refuse("BAD_ATTACH_POINT", `${label}: attachPoints must be a list of { name, position }.`);
     for (const [at, point] of body.attachPoints.entries()) {
@@ -207,14 +215,21 @@ export function exportGameAsset(input: AssetInput): ExportResult {
       // of its own has facts even when they ask for no shape, so that is seen to be a choice.
       const collision = collisions[index] ?? everyCollision;
       if (collision.shape !== "none" || collisions[index] !== undefined) {
-        const pieces = body.collisionPieces?.map((piece) => {
-          const points = new Float64Array(piece.positions.length);
-          toGltfSpace(piece.positions, conversion, points);
+        const own = (positions: ArrayLike<number>): Float64Array => {
+          const points = new Float64Array(positions.length);
+          toGltfSpace(positions, conversion, points);
           for (let at = 0; at < points.length; at += 1) points[at] = points[at]! - pivot[at % 3]!;
           return points;
-        });
+        };
+        const pieces = body.collisionPieces?.map((piece) => own(piece.positions));
+        const rest = body.collisionRemainder;
+        // A mirrored source has its triangles turned over, as the body's own are, to face outwards.
+        const remainder =
+          rest === undefined
+            ? undefined
+            : { positions: own(rest.positions), indices: Uint32Array.from({ length: rest.indices?.length ?? rest.positions.length / 3 }, (_, at) => ((turn) => rest.indices?.[turn] ?? turn)(conversion.mirrored && at % 3 > 0 ? at + 3 - 2 * (at % 3) : at)) };
         const plan = planCollision(
-          { name: body.name, positions: drafted.stored, indices: drafted.mesh.indices, closed: drafted.mesh.openEdges === 0 && drafted.mesh.nonManifoldEdges === 0, pieces },
+          { name: body.name, positions: drafted.stored, indices: drafted.mesh.indices, closed: drafted.mesh.openEdges === 0 && drafted.mesh.nonManifoldEdges === 0, pieces, remainder },
           collision,
           input.kernel,
         );
@@ -249,6 +264,7 @@ export function exportGameAsset(input: AssetInput): ExportResult {
           requested: plan.requested,
           shape: plan.chosen?.shape ?? "none",
           pieces: written.length,
+          ...(remainder !== undefined && plan.chosen?.shape === "decomposition" ? { givenPieces: pieces?.length ?? 0 } : {}),
           tolerance: collision.tolerance,
           maxPieces: collision.maxPieces,
           maxHullVertices: collision.maxHullVertices,

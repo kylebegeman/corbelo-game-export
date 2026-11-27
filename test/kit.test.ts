@@ -500,6 +500,8 @@ describe("the kit as data", () => {
     expect(kit({ name: "" })).toEqual({ code: "BAD_KIT", message: "A kit needs a name." });
     expect(kit({ grid: { moduleMeters: 0, storeyMeters: 3 } })).toEqual({ code: "BAD_KIT", message: "grid.moduleMeters must be a positive number of metres. Got 0." });
     expect(kit({ pivot: "center" } as never).code).toBe("BAD_KIT");
+    expect(kit({ pivots: ["center"] } as never)).toMatchObject({ code: "BAD_KIT", message: "A kit takes no pivots: each piece has its own pivot, and sits at the scene origin." });
+    expect(kit({ collisions: ["box"] } as never)).toMatchObject({ code: "BAD_KIT", message: "A kit takes no collisions: its collision settings are for every piece." });
     expect(kit({ pieces: [] }).code).toBe("BAD_KIT");
     expect(kit({ mates: { a: "b", b: "c" } }).code).toBe("BAD_KIT");
     expect(pieces((all) => [all[0]!, { ...all[1]!, name: "straight" }])).toEqual({ code: "BAD_KIT", message: 'Two pieces are named "straight".' });

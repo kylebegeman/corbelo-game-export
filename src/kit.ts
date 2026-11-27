@@ -109,7 +109,7 @@ export interface KitLayout {
   placements: KitPlacement[];
 }
 
-export interface KitInput extends Omit<AssetOptions, "pivot" | "placement"> {
+export interface KitInput extends Omit<AssetOptions, "pivot" | "pivots" | "placement" | "collisions"> {
   /** The kit's name: "corridor". */
   name: string;
   source: SourceSpace;
@@ -376,8 +376,10 @@ export function readLayout(layout: KitLayoutInput, pieces: readonly { name: stri
 export function resolveKit(input: KitInput, grid?: KitGridInput): Kit {
   if (typeof input !== "object" || input === null) refuse("BAD_KIT", "A kit is { name, source, grid, pieces }.");
   if (typeof input.name !== "string" || input.name.trim() === "") refuse("BAD_KIT", "A kit needs a name.");
-  for (const key of ["pivot", "placement"]) {
-    if ((input as unknown as Record<string, unknown>)[key] !== undefined) refuse("BAD_KIT", `A kit takes no ${key}: each piece has its own pivot, and sits at the scene origin.`);
+  for (const key of ["pivot", "pivots", "placement", "collisions"]) {
+    if ((input as unknown as Record<string, unknown>)[key] !== undefined) {
+      refuse("BAD_KIT", `A kit takes no ${key}: ${key === "collisions" ? "its collision settings are for every piece" : "each piece has its own pivot, and sits at the scene origin"}.`);
+    }
   }
   const resolvedGrid = readGrid(grid ?? input.grid);
   const profile = resolveProfile(input.profile);
