@@ -386,7 +386,9 @@ A shape asked for by name is built, or refused with `BAD_COLLISION` when it cann
 | `maxPieces` | `8` | The most parts a decomposition makes. |
 | `maxHullVertices` | `64` | The most corners one convex piece has. A piece stopped there may leave points outside it, and its facts say `capped: true`. |
 
-The hulls are built by this package, with no dependency. Each piece is a node of its own with a mesh that holds positions only, a child of the body's node, named the way the profile's engine reads it:
+The hulls are built by this package, with no dependency. `convexHull(points, maxVertices)` is exported for use on its own: it gives `{ positions, indices, volume, capped }`, or `null` for points with no volume between them. With no `maxVertices` it keeps every corner, and the time it takes grows with the points about as fast as their number does: a ring of 256 sides by 64, which is 16,384 points and 8,448 corners, takes about 40 ms where 0.1.7 took about 400 ms, so a caller does not need a limit to keep a view moving. A ball of 256 sides by 128, for which 0.1.7 had no hull, gets one. One shape is still slow: a flat end with very many corners on its rim, where every corner added remakes the triangles of that end. A cylinder of 2,048 sides takes over a second.
+
+Each piece is a node of its own with a mesh that holds positions only, a child of the body's node, named the way the profile's engine reads it:
 
 | Profile | A box | A convex piece | What the engine does with the name |
 | --- | --- | --- | --- |

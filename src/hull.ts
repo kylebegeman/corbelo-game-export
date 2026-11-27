@@ -31,9 +31,15 @@ interface Face {
   far: number;
   farDistance: number;
   alive: boolean;
+  /** The last point that saw the face. */
+  seenBy: number;
 }
 
-function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: number): Hull | null | "failed" {
+/**
+ * One try at the hull. `level` is how far under a face a point may lie and still count as seeing
+ * it: the tolerance, or nothing at all for the last try.
+ */
+function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: number, level = tolerance): Hull | null | "failed" {
   const count = points.length / 3;
   const px = (p: number) => points[p * 3]!;
   const py = (p: number) => points[p * 3 + 1]!;
@@ -99,7 +105,7 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
     nx /= length;
     ny /= length;
     nz /= length;
-    return { v: [a, b, c], near: [-1, -1, -1], nx, ny, nz, d: nx * px(a) + ny * py(a) + nz * pz(a), outside: [], far: -1, farDistance: 0, alive: true };
+    return { v: [a, b, c], near: [-1, -1, -1], nx, ny, nz, d: nx * px(a) + ny * py(a) + nz * pz(a), outside: [], far: -1, farDistance: 0, alive: true, seenBy: -1 };
   };
   const above = (face: Face, p: number): number => face.nx * px(p) + face.ny * py(p) + face.nz * pz(p) - face.d;
 
@@ -160,51 +166,98 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
     if (p !== a && p !== b && p !== c && p !== d) assign(p, start);
   }
 
+  // The faces that still have a point outside them, the one whose point is furthest out on top.
+  // A face gets its points once, when it is made, so it goes in once. Between faces whose points
+  // are as far out, the one made first comes first.
+  const waiting: number[] = [];
+  const before = (one: number, other: number): boolean => {
+    const a = faces[one]!.farDistance;
+    const b = faces[other]!.farDistance;
+    return a > b || (a === b && one < other);
+  };
+  const wait = (face: number): void => {
+    if (faces[face]!.far < 0) return;
+    let at = waiting.length;
+    waiting.push(face);
+    while (at > 0) {
+      const up = (at - 1) >> 1;
+      if (!before(face, waiting[up]!)) break;
+      waiting[at] = waiting[up]!;
+      at = up;
+    }
+    waiting[at] = face;
+  };
+  /** Takes the face on top off, and returns it. */
+  const take = (): number => {
+    const top = waiting[0]!;
+    const last = waiting.pop()!;
+    const size = waiting.length;
+    if (size > 0) {
+      let at = 0;
+      for (;;) {
+        let child = at * 2 + 1;
+        if (child >= size) break;
+        if (child + 1 < size && before(waiting[child + 1]!, waiting[child]!)) child += 1;
+        if (!before(waiting[child]!, last)) break;
+        waiting[at] = waiting[child]!;
+        at = child;
+      }
+      waiting[at] = last;
+    }
+    return top;
+  };
+  for (const face of start) wait(face);
+
+  // The edges around the hole a point leaves, by the corner each starts at: where it ends, the
+  // face beyond it, and the point whose hole it is of.
+  const rimTo = new Int32Array(count);
+  const rimBeyond = new Int32Array(count);
+  const rimOf = new Int32Array(count).fill(-1);
+
   let vertices = 4;
   let capped = false;
   for (;;) {
     // The point furthest outside the hull so far goes in next, so a hull that is stopped early
-    // is the best one with that many corners this order can give.
-    let from = -1;
-    let distance = 0;
-    for (let face = 0; face < faces.length; face += 1) {
-      const candidate = faces[face]!;
-      if (candidate.alive && candidate.far >= 0 && candidate.farDistance > distance) {
-        distance = candidate.farDistance;
-        from = face;
-      }
-    }
-    if (from < 0) break;
+    // is the best one with that many corners this order can give. Faces that are gone by now
+    // are passed over.
+    while (waiting.length > 0 && !faces[waiting[0]!]!.alive) take();
+    if (waiting.length === 0) break;
     if (vertices >= maxVertices) {
       capped = true;
       break;
     }
+    const from = take();
     const eye = faces[from]!.far;
 
     // The faces the point can see, found from the one it is outside of. A face the point lies
     // level with counts as seen, so the faces left around the hole all look away from it.
     const seen: number[] = [from];
-    const isSeen = new Set<number>(seen);
+    faces[from]!.seenBy = eye;
     for (let at = 0; at < seen.length; at += 1) {
       for (const next of faces[seen[at]!]!.near) {
         if (next < 0) return "failed";
-        if (isSeen.has(next)) continue;
-        if (above(faces[next]!, eye) > -tolerance) {
-          isSeen.add(next);
+        const face = faces[next]!;
+        if (face.seenBy === eye) continue;
+        if (above(face, eye) > -level) {
+          face.seenBy = eye;
           seen.push(next);
         }
       }
     }
 
-    // The edges around the hole, by the corner each starts at. Around a hole there is one each.
-    const rim = new Map<number, { to: number; beyond: number }>();
+    // The edges around the hole. Around a hole there is one from each corner.
     let edges = 0;
+    let firstCorner = -1;
     for (const face of seen) {
       const { v, near } = faces[face]!;
       for (let k = 0; k < 3; k += 1) {
-        if (isSeen.has(near[k]!)) continue;
-        if (rim.has(v[k]!)) return "failed";
-        rim.set(v[k]!, { to: v[(k + 1) % 3]!, beyond: near[k]! });
+        if (faces[near[k]!]!.seenBy === eye) continue;
+        const corner = v[k]!;
+        if (rimOf[corner] === eye) return "failed";
+        rimOf[corner] = eye;
+        rimTo[corner] = v[(k + 1) % 3]!;
+        rimBeyond[corner] = near[k]!;
+        if (edges === 0) firstCorner = corner;
         edges += 1;
       }
     }
@@ -213,21 +266,20 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
     // A new face from each edge of the hole to the point, linked to the face beyond the edge
     // and to the new faces on either side.
     const made: number[] = [];
-    const firstCorner = rim.keys().next().value as number;
     let corner = firstCorner;
     for (let step = 0; step < edges; step += 1) {
-      const edge = rim.get(corner);
-      if (edge === undefined) return "failed";
-      const face = plane(corner, edge.to, eye);
+      if (rimOf[corner] !== eye) return "failed";
+      const to = rimTo[corner]!;
+      const face = plane(corner, to, eye);
       if (face === null) return "failed";
-      face.near[0] = edge.beyond;
-      const beyond = faces[edge.beyond]!;
-      const at = beyond.v.indexOf(edge.to);
+      face.near[0] = rimBeyond[corner]!;
+      const beyond = faces[face.near[0]]!;
+      const at = beyond.v.indexOf(to);
       if (at < 0 || beyond.v[(at + 1) % 3] !== corner) return "failed";
       beyond.near[at] = faces.length;
       made.push(faces.length);
       faces.push(face);
-      corner = edge.to;
+      corner = to;
     }
     if (corner !== firstCorner) return "failed";
     for (let at = 0; at < made.length; at += 1) {
@@ -245,6 +297,7 @@ function attempt(points: ArrayLike<number>, maxVertices: number, tolerance: numb
       gone.outside = [];
       gone.far = -1;
     }
+    for (const face of made) wait(face);
     vertices += 1;
   }
 
@@ -339,11 +392,16 @@ export function convexHull(points: ArrayLike<number>, maxVertices = Infinity): H
   if (!(diagonal > 0) || !Number.isFinite(diagonal)) return null;
   // Points that nearly line up can leave a hole that is not one loop. A wider idea of "on a
   // face" clears that up, at the cost of a hull that is thinner by that much.
+  const most = Math.max(4, maxVertices);
   let tolerance = diagonal * HULL_FLATNESS;
   for (let tries = 0; tries < 4; tries += 1) {
-    const hull = attempt(points, Math.max(4, maxVertices), tolerance);
+    const hull = attempt(points, most, tolerance);
     if (hull !== "failed") return hull;
     tolerance *= 10;
   }
-  return null;
+  // Counting a face a point lies level with as seen is what gives way on a very fine round
+  // shape: next to a face much larger than the new ones, it leaves a dent. One more try counts
+  // only the faces the point is truly outside of.
+  const hull = attempt(points, most, diagonal * HULL_FLATNESS, 0);
+  return hull === "failed" ? null : hull;
 }

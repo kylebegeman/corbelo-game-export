@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { convexHull, meshVolume, type Hull } from "../src/hull.js";
+import { convexHull, HULL_FLATNESS, meshVolume, type Hull } from "../src/hull.js";
+import { sha256Hex } from "../src/sha256.js";
 import { box, chamferedBlock, cylinder, ell, seeded, signedVolume, tube } from "./fixtures.js";
 
 /** How far the furthest point is outside the hull, measured from the plane of each triangle. */
@@ -49,6 +50,49 @@ function sphereCloud(count: number, seed: number): Float64Array {
     points[p * 3 + 2] = z * reach;
   }
   return points;
+}
+
+/** The points of a ring with a round section, lying flat: `around` sides by `across`, read from 32-bit floats. */
+function ringPoints(major: number, minor: number, around: number, across: number): Float32Array {
+  const points = new Float32Array(around * across * 3);
+  for (let i = 0; i < around; i += 1) {
+    for (let j = 0; j < across; j += 1) {
+      const a = (i / around) * Math.PI * 2;
+      const b = (j / across) * Math.PI * 2;
+      points.set([(major + minor * Math.cos(b)) * Math.cos(a), (major + minor * Math.cos(b)) * Math.sin(a), minor * Math.sin(b)], (i * across + j) * 3);
+    }
+  }
+  return points;
+}
+
+/** The points of a ball of radius 1: its two ends, then `around` points on each of `across - 1` rings. */
+function ballPoints(around: number, across: number): Float32Array {
+  const points = [0, 0, 1, 0, 0, -1];
+  for (let j = 1; j < across; j += 1) {
+    for (let i = 0; i < around; i += 1) {
+      const a = (i / around) * Math.PI * 2;
+      const b = (j / across) * Math.PI;
+      points.push(Math.sin(b) * Math.cos(a), Math.sin(b) * Math.sin(a), Math.cos(b));
+    }
+  }
+  return Float32Array.from(points);
+}
+
+/** A hull in a few words: its corners, its triangles, its volume and the start of a digest of each array. */
+function digest(hull: Hull): string {
+  const start = (values: Float64Array | Uint32Array): string => sha256Hex(new Uint8Array(values.buffer, values.byteOffset, values.byteLength)).slice(0, 16);
+  return `${hull.positions.length / 3} ${hull.indices.length / 3} ${hull.volume} ${start(hull.positions)} ${start(hull.indices)}`;
+}
+
+/** The least of a few runs, in milliseconds: what the work takes when nothing else is in the way. */
+function quickest(work: () => unknown, runs = 5): number {
+  let least = Infinity;
+  for (let run = 0; run < runs; run += 1) {
+    const from = performance.now();
+    work();
+    least = Math.min(least, performance.now() - from);
+  }
+  return least;
 }
 
 describe("convex hull", () => {
@@ -130,6 +174,38 @@ describe("convex hull", () => {
     const second = convexHull(Float64Array.from(points))!;
     expect([...second.positions]).toEqual([...first.positions]);
     expect([...second.indices]).toEqual([...first.indices]);
+  });
+
+  it("gives fine round shapes the hull that version 0.1.7 gave them, to the last number", () => {
+    // Written down from 0.1.7, which found each next point by looking at every face it had made.
+    expect(digest(convexHull(ringPoints(1, 0.25, 96, 24))!)).toBe("1248 2492 2.2433566533473424 e95222ef85cef20a 7733445266200308");
+    expect(digest(convexHull(ringPoints(1, 0.25, 96, 24), 64)!)).toBe("64 124 2.0873582467252834 e2a68cf9ba02b083 d478e278e831a40f");
+    expect(digest(convexHull(ballPoints(64, 32))!)).toBe("1986 3968 4.171995693260485 d715da462c796562 9dc95eee795a267e");
+    expect(digest(convexHull(ballPoints(256, 128), 64)!)).toBe("64 124 3.7947825550786107 d10299f64dee22d0 b07bf48d40b9c0ce");
+  });
+
+  it("takes a fine round solid with no limit on its corners in the time its points call for", () => {
+    // Four times the points, and about four times the work: the next point comes off the top of
+    // a heap. Looking at every face for each point took eleven to twenty times as long.
+    const coarse = ringPoints(1, 0.25, 128, 32);
+    const fine = ringPoints(1, 0.25, 256, 64);
+    expect(convexHull(fine)!.positions).toHaveLength(8448 * 3);
+    expect(quickest(() => convexHull(fine)) / quickest(() => convexHull(coarse))).toBeLessThan(8);
+  });
+
+  it("has a hull for a ball too fine for a point level with a face to count as seeing it", () => {
+    // Next to the ends of the ball the rings are close together, and a face much larger than
+    // the new ones around it leaves a dent when a point just under it counts as seeing it.
+    const points = ballPoints(256, 128);
+    const hull = convexHull(points)!;
+    expect(hull).not.toBeNull();
+    expect(isClosed(hull)).toBe(true);
+    expect(hull.capped).toBe(false);
+    expect(hull.volume).toBeGreaterThan(4.187);
+    expect(hull.volume).toBeLessThan((4 / 3) * Math.PI);
+    // Every point is in it, to the flatness a hull is built to. One point in seven is looked at.
+    const sample = points.filter((_, at) => Math.floor(at / 3) % 7 === 0);
+    expect(furthestOutside(hull, sample)).toBeLessThan(Math.hypot(2, 2, 2) * HULL_FLATNESS * 8);
   });
 
   it("has nothing to give for points with no volume between them", () => {
