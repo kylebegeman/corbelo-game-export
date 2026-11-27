@@ -326,6 +326,7 @@ const PACK_JOB_KEYS = [
   "rows",
   "profile",
   "pivot",
+  "pivots",
   "placement",
   "creaseAngle",
   "normals",
@@ -342,7 +343,7 @@ const PACK_JOB_KEYS = [
   "revision",
   "output",
 ];
-const KIT_JOB_KEYS = [...PACK_JOB_KEYS.filter((key) => key !== "bodies" && key !== "rows" && key !== "pivot" && key !== "placement"), "grid", "pieces", "mates", "layouts", "pieceChecks", "scenes"];
+const KIT_JOB_KEYS = [...PACK_JOB_KEYS.filter((key) => key !== "bodies" && key !== "rows" && key !== "pivot" && key !== "pivots" && key !== "placement"), "grid", "pieces", "mates", "layouts", "pieceChecks", "scenes"];
 const KIT_PIECE_KEYS = ["name", "bodies", "glb", "cells", "origin", "pivot", "sockets", "trim", "provenance"];
 const PACK_BODY_KEYS = [...BODY_KEYS, "lods", "collisionPieces", "attachPoints"];
 const LOD_KEYS = ["stl", "faceIds", "faceColors"];

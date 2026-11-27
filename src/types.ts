@@ -191,6 +191,11 @@ export interface TexcoordOptions {
 }
 
 export interface AssetOptions extends ExportOptions {
+  /**
+   * A pivot of its own for some bodies: a list in the order of the bodies, where `null` leaves a
+   * body to `pivot`, or an object with a pivot for each body name. A body with none has `pivot`.
+   */
+  pivots?: readonly (PivotOption | null | undefined)[] | Readonly<Record<string, PivotOption>>;
   /** Default `"auto"`. */
   collision?: CollisionRequest | CollisionSettings;
   /** `true` or `{ tileMeters }` writes box-projected texture coordinates. Default none. */

@@ -881,7 +881,15 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       results.push({ id: "pivot", status: "warn", message: `${plural(farOut, "body has", "bodies have")} a pivot further from the body than the body is long.`, values });
     } else {
       const first = values.bodies[0];
-      results.push({ id: "pivot", status: "pass", message: first === undefined ? "There are no bodies." : `The pivot is at ${PIVOT_WORDS[first.mode]}${offGrid === 0 ? `, on the ${gridMeters} m grid` : ""}.`, values });
+      const onGrid = offGrid === 0 ? `, on the ${gridMeters} m grid` : "";
+      // Bodies with the same pivot are said as one. A body with a pivot of its own gets every body named.
+      const message =
+        first === undefined
+          ? "There are no bodies."
+          : values.bodies.every((body) => body.mode === first.mode)
+            ? `The pivot is at ${PIVOT_WORDS[first.mode]}${onGrid}.`
+            : `Each body has a pivot of its own: ${values.bodies.map((body) => `"${body.name}" at ${PIVOT_WORDS[body.mode]}`).join(", ")}${offGrid === 0 ? `. All are on the ${gridMeters} m grid` : ""}.`;
+      results.push({ id: "pivot", status: "pass", message, values });
     }
   }
 

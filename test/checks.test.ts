@@ -225,6 +225,18 @@ describe("pivot", () => {
     expect(check("pivot", asset(wall), { assetClass: "large-prop" })).toMatchObject({ status: "pass", values: { bodies: [{ onGrid: false }] } });
   });
 
+  it("says the pivot of each body when they are not all the same", () => {
+    const glb = (pivots: AssetInput["pivots"]) =>
+      exportGameAsset({ bodies: [{ name: "crate", positions: crate.positions }, { name: "lid", positions: moved(crate, [0, 0, 500]).positions }], source: MM_Z_UP, pivots }).glb;
+    const mixed = check("pivot", glb({ lid: "min-corner" }));
+    expect(mixed.status).toBe("pass");
+    expect(mixed.values.bodies.map((body) => [body.name, body.mode])).toEqual([["crate", "base-center"], ["lid", "min-corner"]]);
+    expect(mixed.message).toBe('Each body has a pivot of its own: "crate" at the middle of the base, "lid" at the lowest corner of the box around the body. All are on the 1 m grid.');
+    // Bodies that all have the same pivot are said as one, as before.
+    expect(check("pivot", glb({ lid: "base-center" })).message).toBe("The pivot is at the middle of the base, on the 1 m grid.");
+    expect(check("pivot", glb(["center", "center"])).message).toBe("The pivot is at the middle of the body, on the 1 m grid.");
+  });
+
   it("warns when the pivot is far outside the body", () => {
     const far = check("pivot", asset(crate.positions, { pivot: [20000, 0, 0] }));
     expect(far.status).toBe("warn");

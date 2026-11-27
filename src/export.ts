@@ -59,7 +59,7 @@ interface Settings {
   provenance: JsonValue | undefined;
 }
 
-function isArrayLike(value: unknown): value is ArrayLike<number> {
+export function isArrayLike(value: unknown): value is ArrayLike<number> {
   return (Array.isArray(value) || ArrayBuffer.isView(value)) && typeof (value as { length?: unknown }).length === "number";
 }
 
@@ -79,6 +79,20 @@ export function assertJson(value: unknown, path: string, depth: number): void {
     return;
   }
   refuse("BAD_PROVENANCE", `${path} is not plain JSON (null, boolean, number, string, array or object).`);
+}
+
+/** Checks a pivot and says its mode. `what` starts the refusal of one that is not a pivot. */
+export function readPivot(pivot: PivotOption, what = "pivot"): PivotMode {
+  if (typeof pivot === "string") {
+    if (!PIVOT_MODES.includes(pivot)) {
+      refuse("BAD_OPTION", `${what} must be one of ${PIVOT_MODES.map((mode) => `"${mode}"`).join(", ")} or a point [x, y, z]. Got ${JSON.stringify(pivot)}.`);
+    }
+    return pivot;
+  }
+  if (!Array.isArray(pivot) || pivot.length !== 3 || !pivot.every((value) => Number.isFinite(value))) {
+    refuse("BAD_OPTION", "A pivot point must be three finite numbers [x, y, z] in source units.");
+  }
+  return "point";
 }
 
 function readSettings(input: ExportInput): Settings {
@@ -107,18 +121,7 @@ function readSettings(input: ExportInput): Settings {
     refuse("BAD_OPTION", `colorSpace must be "srgb" or "linear". Got ${JSON.stringify(colorSpace)}.`);
   }
   const pivot = input.pivot ?? "base-center";
-  let pivotMode: PivotMode;
-  if (typeof pivot === "string") {
-    if (!PIVOT_MODES.includes(pivot)) {
-      refuse("BAD_OPTION", `pivot must be one of ${PIVOT_MODES.map((mode) => `"${mode}"`).join(", ")} or a point [x, y, z]. Got ${JSON.stringify(pivot)}.`);
-    }
-    pivotMode = pivot;
-  } else {
-    if (!Array.isArray(pivot) || pivot.length !== 3 || !pivot.every((value) => Number.isFinite(value))) {
-      refuse("BAD_OPTION", "A pivot point must be three finite numbers [x, y, z] in source units.");
-    }
-    pivotMode = "point";
-  }
+  const pivotMode = readPivot(pivot);
   if (input.provenance !== undefined) assertJson(input.provenance, "provenance", 0);
   return {
     profile: resolveProfile(input.profile),
@@ -254,10 +257,10 @@ export function boundsOf(positions: ArrayLike<number>): { min: Vec3; max: Vec3 }
   return { min, max };
 }
 
-function pivotPoint(settings: Settings, bounds: { min: Vec3; max: Vec3 }, conversion: SpaceConversion): Vec3 {
+function pivotPoint(pivot: PivotOption, bounds: { min: Vec3; max: Vec3 }, conversion: SpaceConversion): Vec3 {
   const { min, max } = bounds;
-  if (typeof settings.pivot !== "string") return pointToGltfSpace(settings.pivot, conversion);
-  switch (settings.pivot) {
+  if (typeof pivot !== "string") return pointToGltfSpace(pivot, conversion);
+  switch (pivot) {
     case "base-center":
       return [(min[0] + max[0]) / 2, min[1], (min[2] + max[2]) / 2];
     case "center":
@@ -312,6 +315,8 @@ export interface LevelSource {
 export interface SceneExtension {
   /** The function a person called, for the message of a refusal. */
   caller?: string;
+  /** For each body, a pivot of its own that was checked, or nothing for the pivot of the export. */
+  pivots?: readonly (PivotOption | undefined)[];
   /** For each body, its lower detail levels, the nearest to full detail first. */
   levels?: readonly (readonly LevelSource[] | undefined)[];
   /**
@@ -483,7 +488,7 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
         max[axis] = Math.max(max[axis]!, bounds.max[axis]!);
       }
     }
-    assemblyPivot = pivotPoint(settings, { min, max }, conversion);
+    assemblyPivot = pivotPoint(settings.pivot, { min, max }, conversion);
   }
 
   const byName = extension.slotOrder === "name";
@@ -507,7 +512,7 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
     return { mesh, uvs, stored, local: boundsOf(stored), parts };
   };
   const prepared = shaped.map(({ mesh, levels }, index) => {
-    const pivot = pivotPoint(settings, boundsOf(mesh.positions), conversion);
+    const pivot = pivotPoint(extension.pivots?.[index] ?? settings.pivot, boundsOf(mesh.positions), conversion);
     const translation: Vec3 =
       assemblyPivot !== undefined
         ? [pivot[0] - assemblyPivot[0] + 0, pivot[1] - assemblyPivot[1] + 0, pivot[2] - assemblyPivot[2] + 0]
@@ -656,7 +661,7 @@ export function draftScene(input: ExportInput, extension: SceneExtension = {}): 
       bounds: measuredBox(sceneMin, sceneMax, profile),
       localBounds: measuredBox(local.min, local.max, profile),
       pivot: {
-        mode: settings.pivotMode,
+        mode: readPivot(extension.pivots?.[index] ?? settings.pivot),
         meters: [pivot[0] + 0, pivot[1] + 0, pivot[2] + 0],
         engine: toEngine(pivot, profile),
         source: pointToSourceSpace(pivot, conversion),

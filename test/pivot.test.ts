@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exportGameGlb, readGlb, readPack, type ExportOptions } from "../src/index.js";
+import { exportGameAsset, exportGameGlb, exportGamePack, GameExportError, readGlb, readPack, type AssetInput, type ExportOptions } from "../src/index.js";
 import { box, MM_Z_UP } from "./fixtures.js";
 
 // A 1000 x 500 x 250 mm block away from the origin. In glTF space it spans
@@ -133,5 +133,90 @@ describe("placement", () => {
     const { glb, facts } = run({ placement: "designed", pivot: "origin" });
     expect(readGlb(glb).json.nodes![0]).not.toHaveProperty("translation");
     near(facts.bounds.meters.min, [0.1, 0.3, -0.7]);
+  });
+});
+
+describe("a pivot of its own for a body", () => {
+  // A door 900 mm wide, 40 mm thick and 2 m tall, and the handle on its face.
+  const door = box([0, 0, 0], [900, 40, 2000]);
+  const handle = box([800, 40, 950], [860, 100, 1050]);
+  const bodies = [
+    { name: "door", positions: door.positions },
+    { name: "handle", positions: handle.positions },
+  ];
+  const asset = (more: Partial<AssetInput>) => exportGameAsset({ bodies, source: MM_Z_UP, ...more });
+
+  it("takes a pivot for a body by its name, and the asset's pivot for every other body", () => {
+    // The door turns about its hinge edge, a point of its own. The handle keeps the asset's pivot.
+    const { facts, glb } = asset({ pivot: "center", pivots: { door: [0, 20, 0] } });
+    expect(facts.settings.pivot).toBe("center");
+    const [doorFacts, handleFacts] = facts.bodies;
+    expect(doorFacts!.pivot.mode).toBe("point");
+    near(doorFacts!.pivot.source, [0, 20, 0]);
+    near(doorFacts!.pivot.meters, [0, 0, -0.02]);
+    near(doorFacts!.localBounds.meters.min, [0, 0, -0.02]);
+    near(doorFacts!.localBounds.meters.max, [0.9, 2, 0.02]);
+    expect(handleFacts!.pivot.mode).toBe("center");
+    near(handleFacts!.pivot.source, [830, 70, 1000]);
+    near(handleFacts!.localBounds.meters.min, [-0.03, -0.05, -0.03]);
+    // The stored vertex data is relative to each body's own pivot.
+    const stored = readPack(glb).bodies.map((body) => [0, 1, 2].map((axis) => Math.max(...body.positions.filter((_, at) => at % 3 === axis))));
+    near(stored[0]!, [0.9, 2, 0.02]);
+    near(stored[1]!, [0.03, 0.05, 0.03]);
+  });
+
+  it("takes pivots in the order of the bodies, and the asset's pivot where the list has none", () => {
+    const { facts } = asset({ pivots: [null, "min-corner"] });
+    expect(facts.bodies.map((body) => body.pivot.mode)).toEqual(["base-center", "min-corner"]);
+    near(facts.bodies[1]!.pivot.source, [800, 40, 950]);
+    const short = asset({ pivots: ["origin"] });
+    expect(short.facts.bodies.map((body) => body.pivot.mode)).toEqual(["origin", "base-center"]);
+  });
+
+  it("writes the file it wrote before when no body has a pivot of its own", () => {
+    const plain = asset({ placement: "designed" }).glb;
+    expect(asset({ placement: "designed", pivots: {} }).glb).toEqual(plain);
+    expect(asset({ placement: "designed", pivots: [] }).glb).toEqual(plain);
+    expect(asset({ placement: "designed", pivots: { door: "base-center" } }).glb).toEqual(plain);
+  });
+
+  it("keeps each body where it was modelled, and its collision and attach points in its own frame", () => {
+    const { facts } = exportGameAsset({
+      bodies: [bodies[0]!, { ...bodies[1]!, attachPoints: [{ name: "grip", position: [830, 100, 1000] }] }],
+      source: MM_Z_UP,
+      placement: "assembly",
+      collision: "box",
+      pivots: { handle: "center" },
+    });
+    // The set stands on the origin by the asset's pivot, and the handle hangs where it was.
+    near(facts.assemblyPivot!.source, [450, 50, 0]);
+    near(facts.bodies[1]!.translation, [0.38, 1, -0.02]);
+    near(facts.bodies[1]!.bounds.meters.min, [0.35, 0.95, -0.05]);
+    near(facts.bodies[1]!.collision!.nodes[0]!.bounds.meters.min, [0.35, 0.95, -0.05]);
+    near(facts.bodies[1]!.attachPoints![0]!.meters, [0.38, 1, -0.05]);
+    near(facts.bodies[1]!.attachPoints![0]!.source, [830, 100, 1000]);
+  });
+
+  it("goes through a pack to every asset of it", () => {
+    const pack = exportGamePack({ name: "door", bodies, source: MM_Z_UP, pivots: { handle: "center" }, checks: false });
+    expect(pack.manifest.files[0]!.facts.bodies.map((body) => body.pivot.mode)).toEqual(["base-center", "center"]);
+  });
+
+  it("refuses a name no body has, a list longer than the bodies and a pivot it cannot read", () => {
+    const refusal = (pivots: unknown): string => {
+      try {
+        asset({ pivots: pivots as AssetInput["pivots"] });
+      } catch (error) {
+        expect(error).toBeInstanceOf(GameExportError);
+        expect((error as GameExportError).code).toBe("BAD_OPTION");
+        return (error as Error).message;
+      }
+      throw new Error("Expected a refusal.");
+    };
+    expect(refusal({ hinge: "center" })).toBe('pivots has an entry for a body named "hinge", and no body has that name.');
+    expect(refusal(["center", "center", "center"])).toBe("pivots has 3 entries, and there are 2 bodies.");
+    expect(refusal("center")).toBe("pivots must be a list in the order of the bodies, or an object with an entry for each body name.");
+    expect(refusal({ handle: "middle" })).toBe('The pivot of body "handle" must be one of "base-center", "center", "min-corner", "origin" or a point [x, y, z]. Got "middle".');
+    expect(refusal([[0, 0]])).toBe("A pivot point must be three finite numbers [x, y, z] in source units.");
   });
 });

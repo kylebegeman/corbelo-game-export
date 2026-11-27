@@ -351,9 +351,21 @@ And these options besides the [plain ones](#options):
 
 | Option | Default | Meaning |
 | --- | --- | --- |
+| `pivots` | none | A pivot of its own for some bodies, beside `pivot`. See [A pivot for one body](#a-pivot-for-one-body). |
 | `collision` | `"auto"` | `"none"`, `"auto"`, `"box"`, `"hull"`, `"pieces"` or `"decomposition"`, or `{ shape, tolerance, maxPieces, maxHullVertices }`. |
 | `texcoords` | none | `true` or `{ tileMeters }` writes texture coordinates. See [Texture coordinates](#texture-coordinates). |
 | `kernel` | none | A solid kernel, needed only for `"decomposition"`. See [A kernel for convex decomposition](#a-kernel-for-convex-decomposition). |
+
+### A pivot for one body
+
+`pivot` is the pivot of every body. `pivots` gives some bodies a pivot of their own, and each takes what `pivot` takes: a name or a point `[x, y, z]` in source units. It is an object with a pivot for each body name, or a list in the order of the bodies where `null` leaves a body to `pivot`:
+
+```js
+exportGameAsset({ bodies: [door, handle], source, pivot: "base-center", pivots: { door: [0, 20, 0] } });
+exportGameAsset({ bodies: [door, handle], source, pivots: [null, "center"] });
+```
+
+A body that is not named has `pivot`, and so does every body past the end of a list. The name is the one the body was given, before it was made safe for a node, and it stands for every body of that name. Each body's facts say its own pivot in `pivot`, with its `mode`, and `settings.pivot` stays the pivot of the asset. Collision, detail levels and attach points are in the frame of their body's own pivot. With `placement: "assembly"` the set's pivot is still taken with `pivot`. A name no body has, a list longer than the bodies and a pivot that cannot be read are refused with `BAD_OPTION`. In a family every row is written with the same `pivots`, so each row needs a body of each name.
 
 Two things differ from the plain export, both so that a part stays the same thing from one revision to the next:
 
@@ -571,7 +583,7 @@ Every result has `id`, `status`, a `message` for a person, and `values`, the num
 What each one measures:
 
 - **Size.** The box around everything, in metres and in the engine's unit. The mix-ups looked for are millimetres, centimetres and inches read as metres, and the other way round.
-- **Pivot.** Where each body's pivot is against its own box. A pivot is on the grid when it is a whole number of grid steps from a face of the box, along every axis the body is at least one grid step long in. The grid is `gridMeters`, 1 metre unless given.
+- **Pivot.** Where each body's pivot is against its own box. A pivot is on the grid when it is a whole number of grid steps from a face of the box, along every axis the body is at least one grid step long in. The grid is `gridMeters`, 1 metre unless given. Bodies that all have the same pivot are said as one. Where a body has a pivot of its own the message names every body with its pivot, and `values.bodies` has the `mode` of each.
 - **Shading.** Hard and soft edges are counted from the file. The message says which normal rule the file was written with, and that weighting by the whole flat face is there to ask for.
 - **Clean mesh.** A sliver is a triangle whose doubled area is under 1% of its longest edge squared.
 - **Collision.** The volume error the facts state, against `collisionTolerance` or else the tolerance the file was written with. Where a shape `"auto"` settled for is outside it, the message says what would bring it nearer and never asks for what was given: the pieces the part was built from, a kernel when none was given, more pieces when a kernel made the most allowed, or the reason a kernel that was given made no decomposition. A body that is not closed is named with the count of its open edges.
@@ -1336,6 +1348,7 @@ The keys of a pack job:
 | `bodies` | One asset: a list of bodies. Give this or `rows`. |
 | `rows` | A family: `[{ "name": "small", "bodies": [...], "provenance": ... }]`. |
 | `profile`, `pivot`, `placement`, `creaseAngle`, `normals`, `weldTolerance`, `maxTriangles`, `colorSpace`, `provenance` | As in the [options](#options). `profile` may be an id or a profile object. |
+| `pivots` | A pivot for some bodies: `{ "door": [0, 20, 0] }` or `[null, "center"]`. See [A pivot for one body](#a-pivot-for-one-body). |
 | `collision` | A shape by name, or `{ "shape", "tolerance", "maxPieces", "maxHullVertices" }`. |
 | `texcoords` | `true` or `{ "tileMeters": 0.5 }`. |
 | `kernel` | Only `"manifold-3d"`. Loads that package for a general convex decomposition. It must be installed next to this one, and the job is refused with `BAD_JOB` when it is not. |
@@ -1506,7 +1519,7 @@ Bad input is refused with a `GameExportError`. Its `code` is stable and its `mes
 | `BAD_COLOR` | A colour cannot be read. Transparency is not supported. For a face colour the message names the triangle. |
 | `MATERIAL_CONFLICT` | One material name is used with two colours, or one colour of a body is given two names. In a family, also one name with two colours in two rows, and in a kit in two pieces. |
 | `BAD_SOURCE_SPACE` | `source` is missing or has a bad unit, up axis or handedness. |
-| `BAD_OPTION` | An option is outside its range, or the profile is unknown. This covers the collision settings, `texcoords`, `kernel` and the options of the checks. |
+| `BAD_OPTION` | An option is outside its range, or the profile is unknown. This covers `pivots`, the collision settings, `texcoords`, `kernel` and the options of the checks. |
 | `BAD_PROVENANCE` | `provenance` is not plain JSON. |
 | `BAD_STL` | An STL file cannot be read. |
 | `BAD_GLB` | A GLB file cannot be read, or one given to the checks was not written by this package. |

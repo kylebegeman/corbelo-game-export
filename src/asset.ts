@@ -1,6 +1,6 @@
 import { planCollision, readCollisionSettings, type CollisionPiece } from "./collision.js";
 import { forBody, refuse } from "./errors.js";
-import { boundsOf, draftScene, finishScene, measuredBox, toEngine, type DraftBody, type DraftMesh } from "./export.js";
+import { boundsOf, draftScene, finishScene, isArrayLike, measuredBox, readPivot, toEngine, type DraftBody, type DraftMesh } from "./export.js";
 import { COMPONENT_FLOAT, COMPONENT_UNSIGNED_INT, COMPONENT_UNSIGNED_SHORT, MODE_TRIANGLES, NODE_VISIBILITY_EXTENSION, TARGET_ARRAY_BUFFER, TARGET_ELEMENT_ARRAY_BUFFER } from "./gltf.js";
 import { meshDeviation } from "./lod.js";
 import { clearName, uniqueName } from "./names.js";
@@ -8,10 +8,6 @@ import type { EngineProfile, NodeNameConvention, NodeRole } from "./profiles.js"
 import { toGltfSpace } from "./space.js";
 import type { AssetBodyInput, AssetInput, AttachPointFacts, CollisionFacts, CollisionNodeFacts, ExportResult, LodFacts, Vec3 } from "./types.js";
 import { boxProject, DEFAULT_TILE_METERS } from "./uv.js";
-
-function isArrayLike(value: unknown): value is ArrayLike<number> {
-  return (Array.isArray(value) || ArrayBuffer.isView(value)) && typeof (value as { length?: unknown }).length === "number";
-}
 
 function isPoint(value: unknown): value is readonly [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every((part) => Number.isFinite(part));
@@ -45,6 +41,21 @@ function checkAssetBody(body: AssetBodyInput): void {
       }
     }
   }
+}
+
+/**
+ * What an option gives each body: a list in the order of the bodies, or an object by body name.
+ * Nothing for a body it leaves to the option of the whole asset.
+ */
+function perBody<T>(key: string, given: readonly (T | null | undefined)[] | Readonly<Record<string, T>> | undefined, bodies: readonly AssetBodyInput[]): (T | undefined)[] {
+  if (given === undefined) return [];
+  if (typeof given !== "object" || given === null) refuse("BAD_OPTION", `${key} must be a list in the order of the bodies, or an object with an entry for each body name.`);
+  const list = Array.isArray(given) ? given : undefined;
+  const names = list !== undefined ? [] : Object.keys(given);
+  const missing = names.find((name) => !bodies.some((body) => body?.name === name));
+  if (missing !== undefined) refuse("BAD_OPTION", `${key} has an entry for a body named "${missing}", and no body has that name.`);
+  if (list !== undefined && list.length > bodies.length) refuse("BAD_OPTION", `${key} has ${list.length} entries, and there are ${bodies.length} bodies.`);
+  return bodies.map((body, index) => (list !== undefined ? list[index] : names.includes(body?.name) ? (given as Readonly<Record<string, T>>)[body.name] : undefined) ?? undefined);
 }
 
 /** Fills in a profile's name pattern: `{name}`, `{n}` counted from 0, and `{nn}` the same with two digits. */
@@ -112,9 +123,12 @@ export function exportGameAsset(input: AssetInput): ExportResult {
   const bodies: readonly AssetBodyInput[] = Array.isArray(input.bodies) ? input.bodies : [];
   for (const [index, body] of bodies.entries()) forBody(index, () => checkAssetBody(body));
 
+  const pivots = perBody("pivots", input.pivots, bodies);
+  for (const [index, pivot] of pivots.entries()) if (pivot !== undefined) forBody(index, () => readPivot(pivot, `The pivot of body "${bodies[index]!.name}"`));
   const tile = tileMeters;
   const draft = draftScene(input, {
     caller: "exportGameAsset",
+    pivots,
     levels: bodies.map((body) => (typeof body === "object" && body !== null ? body.lods : undefined)),
     slotOrder: "name",
     ...(tile !== undefined ? { texture: (mesh, offset) => boxProject(mesh, offset, tile) } : {}),
