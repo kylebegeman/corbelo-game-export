@@ -26,13 +26,13 @@ It is used by Corbelo and Corbelo Studio. It has no runtime dependencies and run
 The built `dist/` folder is committed, so the package installs straight from a git tag with no build step:
 
 ```sh
-npm install github:kylebegeman/corbelo-game-export#v0.1.6
+npm install github:kylebegeman/corbelo-game-export#v0.1.7
 ```
 
 Where the build machine has no `git` program, install the tag's tarball instead. The lock file then holds a plain HTTPS address and a checksum:
 
 ```sh
-npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.6.tar.gz
+npm install https://github.com/kylebegeman/corbelo-game-export/archive/refs/tags/v0.1.7.tar.gz
 ```
 
 ## Use
@@ -240,7 +240,7 @@ Facts are measured from the geometry that was written, not from the input. A sho
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.6",
+  "generator": "corbelo-game-export 0.1.7",
   "profile": "unreal5",
   "engine": { "unit": "cm", "unitMeters": 0.01, "up": "Z" },
   "source": { "unit": 0.001, "up": "Z", "handedness": "right" },
@@ -533,7 +533,7 @@ const report = checkGameAsset(glb, { assetClass: "kit-piece", expect: { opening:
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.6",
+  "generator": "corbelo-game-export 0.1.7",
   "profile": "godot4",
   "assetClass": "small-prop",
   "budget": { "maxTriangles": 2000, "maxVertices": 4000, "maxMaterialSlots": 2 },
@@ -731,7 +731,7 @@ What stays the same from one revision to the next:
   "schema": 1,
   "kind": "family",
   "name": "SM_Crate",
-  "generator": "corbelo-game-export 0.1.6",
+  "generator": "corbelo-game-export 0.1.7",
   "revision": "r12",
   "profile": "unreal5",
   "engine": { "unit": "cm", "unitMeters": 0.01, "up": "Z" },
@@ -892,7 +892,7 @@ Six test layouts are built from the sockets alone, so a kit is tested as it will
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.6",
+  "generator": "corbelo-game-export 0.1.7",
   "kit": "corridor",
   "profile": "godot4",
   "grid": { "moduleMeters": 3, "storeyMeters": 3, "trimMeters": 0.1 },
@@ -1016,7 +1016,7 @@ The facts are in the scene extras under `corbeloGameExport.blockout`, in the man
 ```json
 {
   "schema": 1,
-  "generator": "corbelo-game-export 0.1.6",
+  "generator": "corbelo-game-export 0.1.7",
   "kind": "blockout",
   "kit": "corridor",
   "layout": "room",
@@ -1139,7 +1139,7 @@ The lock file holds two revisions for each pack: the one whose files are in the 
       "kind": "kit",
       "into": "assets/corridor",
       "manifest": "corridor.pack.json",
-      "generator": "corbelo-game-export 0.1.6",
+      "generator": "corbelo-game-export 0.1.7",
       "profile": "godot4",
       "revision": "r7",
       "digest": "bc4267ac5434a0c8c3e147d72584bffff5f4b9f32c9eebd7fb332fa09f59e9e7",
@@ -1567,20 +1567,22 @@ The package is marked `"sideEffects": false` and does no work when it is importe
 
 | Import | Minified | Gzipped |
 | --- | --- | --- |
-| `exportGameGlb` | 31,557 bytes | 12,428 |
-| `readPack` | 4,634 | 2,041 |
-| `exportGameAsset` | 52,169 | 20,267 |
-| `checkGameAsset` | 27,619 | 10,453 |
-| `exportGamePack` | 85,106 | 32,163 |
+| `exportGameGlb` | 31,557 bytes | 12,429 |
+| `readPack` | 4,634 | 2,043 |
+| `exportGameAsset` | 54,156 | 21,134 |
+| `checkGameAsset` | 29,565 | 11,124 |
+| `exportGamePack` | 89,001 | 33,674 |
 | `readZip` | 3,362 | 1,507 |
 | `verifyPack` | 5,087 | 2,368 |
 | `planInstall` | 3,379 | 1,525 |
-| `checkKit` | 105,576 | 39,193 |
-| `exportBlockout` | 77,854 | 29,274 |
-| `exportKitPack` | 132,729 | 48,624 |
-| everything | 156,359 | 56,445 |
+| `checkKit` | 107,653 | 40,100 |
+| `exportBlockout` | 79,841 | 30,110 |
+| `exportKitPack` | 136,638 | 50,089 |
+| everything | 160,268 | 57,944 |
 
 Version 0.1.5, measured the same way, was 31,557 bytes (12,434 gzipped) for `exportGameGlb` and 90,673 (34,432) for everything. The plain export did not grow in 0.1.6: kits, blockouts, the archive reader and the lock file are modules of their own, and an import that does not name them carries none of them. `exportGamePack` did not grow either. A page that checks a kit carries the scene writer, the collision code and the game checks with it, since a kit is measured from the files its pieces are written as. A page that only installs a pack somewhere of its own carries `readZip`, `verifyPack` and `planInstall`: about 8 kB together, 3.5 kB gzipped.
+
+Version 0.1.6 was 52,169 bytes (20,267 gzipped) for `exportGameAsset`, 27,619 (10,453) for `checkGameAsset` and 156,359 (56,445) for everything. Version 0.1.7 added about 2 kB to each of the two: the search that opens a hole through a body and the reasons a body cannot be cut up are in the collision code, and what the checks say in words is in the checks. The plain export and the install tools did not grow.
 
 The test suite bundles each of these and fails when a module that should have been left out is in a bundle, when the plain export passes 32,000 bytes, or when the whole entry passes 165,000 or pulls in a Node built-in. Each new import has a limit of its own there too. `corbelo-game-export/node`, the command line, and the Godot add-on are not part of this: the first is for Node only and the second is GDScript that no bundle reads.
 

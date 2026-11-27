@@ -178,7 +178,10 @@ export interface DetailLevelValues {
     }[];
 }
 export interface OpeningValues {
+    /** The id of the player profile. */
     player: string;
+    /** The name of the player profile, for people. The id again for a profile that was given no name. */
+    playerName: string;
     capsuleRadiusMeters: number;
     capsuleHeightMeters: number;
     /** The size of one cell of the picture the openings were measured in. Sizes are good to about two cells. */
@@ -199,7 +202,10 @@ export interface OpeningValues {
     ignored: number;
 }
 export interface StepValues {
+    /** The id of the player profile. */
     player: string;
+    /** The name of the player profile, for people. The id again for a profile that was given no name. */
+    playerName: string;
     stepHeightMeters: number;
     jumpHeightMeters: number;
     /** Flat levels a player can stand on, as heights above the bottom of the asset, lowest first. */
@@ -209,7 +215,10 @@ export interface StepValues {
     maxRiseMeters: number | null;
 }
 export interface RampValues {
+    /** The id of the player profile. */
     player: string;
+    /** The name of the player profile, for people. The id again for a profile that was given no name. */
+    playerName: string;
     walkableSlopeDegrees: number;
     ramps: {
         angleDegrees: number;
@@ -307,6 +316,8 @@ export declare function walkable(bodies: readonly SceneMesh[], floor: number, pl
     levels: number[];
     ramps: RampValues["ramps"];
 };
+/** What a player is called in a message and in the values of a check: its name, or its id when it was given none. */
+export declare function playerName(player: PlayerProfile): string;
 /** The player a check is run for: a profile of the caller's own, a built-in one by engine profile id, or the player of the engine a file was written for. */
 export declare function resolvePlayer(option: PlayerProfile | EngineProfileId | undefined, profile: string): PlayerProfile;
 /**

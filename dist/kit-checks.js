@@ -1,4 +1,4 @@
-import { openingsAlong, resolvePlayer, STEP_MAX_RISE_METERS, walkable } from "./checks.js";
+import { openingsAlong, playerName, resolvePlayer, STEP_MAX_RISE_METERS, walkable } from "./checks.js";
 import { weldExact } from "./collision.js";
 import { GameExportError, refuse } from "./errors.js";
 import { readAccessor, readGlb, readPack } from "./glb-read.js";
@@ -894,7 +894,7 @@ export function checkKit(input, options = {}) {
         }
         const joints = values.layouts.reduce((total, layout) => total + layout.joints, 0);
         if (layouts.length === 0) {
-            results.push({ id: "layouts", status: "not-measured", message: "No test layout could be built from the kit's sockets.", reason: generated.skipped.map((skip) => `${skip.name}: ${skip.reason}`).join(" "), values });
+            results.push({ id: "layouts", status: "not-measured", message: "No test layout could be built from the kit's sockets.", reason: generated.skipped.map((skip) => `"${skip.name}": ${skip.reason}`).join(" "), values });
         }
         else if (problems.length > 0) {
             results.push({ id: "layouts", status: "fail", message: `Layouts do not close: ${problems.join("; ")}.`, values });
@@ -964,8 +964,10 @@ export function checkKit(input, options = {}) {
     }
     // Walkable.
     {
+        const who = playerName(player);
         const values = {
             player: player.id,
+            playerName: who,
             capsuleRadiusMeters: player.capsuleRadiusM,
             capsuleHeightMeters: player.capsuleHeightM,
             stepHeightMeters: player.stepHeightM,
@@ -1050,14 +1052,14 @@ export function checkKit(input, options = {}) {
         }
         const ramps = values.pieces.reduce((total, piece) => total + piece.ramps.length, 0);
         if (problems.length > 0) {
-            results.push({ id: "walkable", status: "fail", message: `Not walkable for ${player.name}: ${problems.slice(0, 4).join("; ")}${problems.length > 4 ? `; and ${problems.length - 4} more` : ""}.`, values });
+            results.push({ id: "walkable", status: "fail", message: `Not walkable for ${who}: ${problems.slice(0, 4).join("; ")}${problems.length > 4 ? `; and ${problems.length - 4} more` : ""}.`, values });
         }
         else if (passages === 0 && ramps === 0) {
             results.push({ id: "walkable", status: "not-measured", message: "The kit has nothing said to be walked through.", reason: "No socket on a side is marked as a passage, and no piece has a slope large enough to stand on.", values });
         }
         else {
             const size = `a capsule ${round(player.capsuleRadiusM * 2, 3)} m wide and ${round(player.capsuleHeightM, 3)} m tall`;
-            results.push({ id: "walkable", status: "pass", message: `The player (${size}) passes ${plural(passages, "passage")}, with rises of up to ${values.maxRiseMeters} m and slopes of up to ${values.maxRampDegrees} degrees.`, values });
+            results.push({ id: "walkable", status: "pass", message: `${who} (${size}) passes ${plural(passages, "passage")}, with rises of up to ${values.maxRiseMeters} m and slopes of up to ${values.maxRampDegrees} degrees.`, values });
         }
     }
     // Collision tiles.

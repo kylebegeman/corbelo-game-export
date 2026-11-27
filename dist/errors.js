@@ -13,6 +13,11 @@ export class GameExportError extends Error {
         this.code = code;
     }
 }
+/**
+ * Starts the note a body's collision facts carry when a kernel was given and made no convex
+ * decomposition. The rest of the note is the reason. The collision check reads it by this start.
+ */
+export const NO_DECOMPOSITION = "No convex decomposition was made. ";
 export function refuse(code, message) {
     throw new GameExportError(code, message);
 }

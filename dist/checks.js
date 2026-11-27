@@ -1,4 +1,4 @@
-import { refuse } from "./errors.js";
+import { NO_DECOMPOSITION, refuse } from "./errors.js";
 import { readGlb, readPack } from "./glb-read.js";
 import { ENGINE_PROFILES } from "./profiles.js";
 import { GENERATOR } from "./version.js";
@@ -15,6 +15,16 @@ export const ASSET_SIZE_RANGES = {
     "kit-piece": { minMeters: 0.5, maxMeters: 12 },
 };
 export const DEFAULT_ASSET_CLASS = "small-prop";
+// A message is read by a person, so it says an asset class, a pivot and a normal rule in words
+// and not by the id an option takes.
+const CLASS_WORDS = { "small-prop": "small prop", "large-prop": "large prop", "kit-piece": "kit piece" };
+const PIVOT_WORDS = {
+    "base-center": "the middle of the base",
+    center: "the middle of the body",
+    "min-corner": "the lowest corner of the box around the body",
+    origin: "the origin the body was modelled around",
+    point: "a point that was given",
+};
 /** The grid a pivot is checked against, in metres. */
 export const DEFAULT_GRID_METERS = 1;
 /** A lower detail level may move the outline by this share of the diagonal of the body before the check warns. */
@@ -95,6 +105,27 @@ function round(value, digits = 6) {
 }
 function plural(count, one, many = `${one}s`) {
     return `${count} ${count === 1 ? one : many}`;
+}
+/**
+ * What would bring a collision shape nearer, for a body whose shape was left to be chosen and came
+ * out past the tolerance. It reads what was tried, so it never asks for what was already given.
+ */
+function nearer(name, collision, settings) {
+    const refused = collision.notes.find((note) => note.startsWith(NO_DECOMPOSITION));
+    if (refused !== undefined)
+        return ` A kernel was given, but no convex decomposition was made. ${refused.slice(NO_DECOMPOSITION.length)}`;
+    const gavePieces = collision.tried.some((tier) => tier.shape === "pieces");
+    const cut = collision.tried.find((tier) => tier.shape === "decomposition");
+    if (cut !== undefined) {
+        const into = ` "${name}" was cut into ${plural(cut.pieces, "convex piece")}`;
+        if (settings !== undefined && cut.pieces >= settings.maxPieces) {
+            return `${into}, the most allowed. ${gavePieces ? "More pieces" : "More pieces, or the pieces the part was built from,"} would bring it nearer.`;
+        }
+        return `${into}, and no further cut that fits brought it nearer.${gavePieces ? "" : " The pieces the part was built from would."}`;
+    }
+    if (settings?.kernel === true)
+        return gavePieces ? "" : " The pieces the part was built from would bring it nearer.";
+    return gavePieces ? " A solid kernel to cut it into convex pieces would bring it nearer." : " The pieces the part was built from, or a solid kernel to cut it into convex pieces, would bring it nearer.";
 }
 /** Vertices that share a place, counted as one: the number of each vertex's place. */
 function placesOf(positions) {
@@ -471,6 +502,10 @@ export function walkable(bodies, floor, player) {
         .sort((p, q) => p.angleDegrees - q.angleDegrees || q.areaSquareMeters - p.areaSquareMeters);
     return { levels, ramps };
 }
+/** What a player is called in a message and in the values of a check: its name, or its id when it was given none. */
+export function playerName(player) {
+    return typeof player.name === "string" && player.name.trim() !== "" ? player.name : player.id;
+}
 /** The player a check is run for: a profile of the caller's own, a built-in one by engine profile id, or the player of the engine a file was written for. */
 export function resolvePlayer(option, profile) {
     let player;
@@ -572,7 +607,7 @@ export function checkGameAsset(glb, options = {}) {
         const values = { meters: meters.size, engine: engine.size, unit, largestMeters, expectedMeters: [range.minMeters, range.maxMeters], suggestedScale: null };
         const sizeText = `${round(Math.max(...engine.size), 3)} ${unit} on its longest side`;
         if (largestMeters >= range.minMeters && largestMeters <= range.maxMeters) {
-            results.push({ id: "size", status: "pass", message: `The asset is ${sizeText}, a size a ${assetClass} has.`, values });
+            results.push({ id: "size", status: "pass", message: `The asset is ${sizeText}, a size a ${CLASS_WORDS[assetClass]} has.`, values });
         }
         else {
             // A mix-up of units is offered when it would land the size nearest the middle of the range.
@@ -586,7 +621,7 @@ export function checkGameAsset(glb, options = {}) {
                     best = mixup;
             }
             values.suggestedScale = best === undefined ? null : round(best[0], 6);
-            const expected = `a ${assetClass} is expected to be from ${range.minMeters} to ${range.maxMeters} m`;
+            const expected = `a ${CLASS_WORDS[assetClass]} is expected to be from ${range.minMeters} to ${range.maxMeters} m`;
             results.push({
                 id: "size",
                 status: "warn",
@@ -629,7 +664,7 @@ export function checkGameAsset(glb, options = {}) {
         }
         else {
             const first = values.bodies[0];
-            results.push({ id: "pivot", status: "pass", message: first === undefined ? "There are no bodies." : `The pivot is at "${first.mode}"${offGrid === 0 ? `, on the ${gridMeters} m grid` : ""}.`, values });
+            results.push({ id: "pivot", status: "pass", message: first === undefined ? "There are no bodies." : `The pivot is at ${PIVOT_WORDS[first.mode]}${offGrid === 0 ? `, on the ${gridMeters} m grid` : ""}.`, values });
         }
     }
     // Triangles, vertices and material slots against the budget.
@@ -638,7 +673,7 @@ export function checkGameAsset(glb, options = {}) {
             const values = { count: facts.bodies.reduce((total, body) => total + pick(body), 0), budget: limit, bodies: facts.bodies.map((body) => ({ name: body.name, count: pick(body) })) };
             const over = values.count > limit;
             const what = id === "triangles" ? "triangles" : "vertices after hard edges split";
-            results.push({ id, status: over ? "fail" : "pass", message: `${values.count} ${what}, against a budget of ${limit} for a ${assetClass}.`, values });
+            results.push({ id, status: over ? "fail" : "pass", message: `${values.count} ${what}, against a budget of ${limit} for a ${CLASS_WORDS[assetClass]}.`, values });
         };
         count("triangles", budget.maxTriangles, (body) => body.triangles);
         count("vertices", budget.maxVertices, (body) => body.vertices);
@@ -655,7 +690,8 @@ export function checkGameAsset(glb, options = {}) {
             backFacingNormals: total((topology) => topology.backFacingNormals),
             maxNormalAngle: round(Math.max(0, ...topologies.map((topology) => topology.maxNormalAngle)), 3),
         };
-        const edges = `${plural(shading.hardEdges, "hard edge")} and ${plural(shading.softEdges, "soft edge")}, normals by "${shading.normals}"`;
+        const byFace = shading.normals === "face-weighted";
+        const edges = `${plural(shading.hardEdges, "hard edge")} and ${plural(shading.softEdges, "soft edge")}. Normals are weighted by ${byFace ? "the whole flat face each triangle belongs to" : "the area and angle of each triangle"}.`;
         if (pack.bodies.some((body) => body.normals.length !== body.positions.length)) {
             results.push({ id: "shading", status: "fail", message: "A body has no normals.", values: shading });
         }
@@ -666,12 +702,12 @@ export function checkGameAsset(glb, options = {}) {
             results.push({
                 id: "shading",
                 status: "warn",
-                message: `A normal is ${shading.maxNormalAngle} degrees from the face it shades, over ${NORMAL_ANGLE_WARNING_DEGREES}. A lower crease angle would make that edge hard. ${edges}.`,
+                message: `A normal is ${shading.maxNormalAngle} degrees from the face it shades, over ${NORMAL_ANGLE_WARNING_DEGREES}. A lower crease angle would make that edge hard. ${edges}`,
                 values: shading,
             });
         }
         else {
-            results.push({ id: "shading", status: "pass", message: `${edges}. ${shading.normals === "face-weighted" ? "Face-weighted normals are in use." : "Face-weighted normals are there to ask for: normals \"face-weighted\"."}`, values: shading });
+            results.push({ id: "shading", status: "pass", message: `${edges}${byFace ? "" : " Weighting by the whole flat face is there to ask for."}`, values: shading });
         }
         const clean = {
             degenerateTrianglesDropped: facts.total.degenerateTrianglesDropped,
@@ -713,7 +749,7 @@ export function checkGameAsset(glb, options = {}) {
         results.push({
             id: "material-slots",
             status: values.count > values.budget ? "fail" : "pass",
-            message: `${plural(values.count, "material slot")} on the body with the most, against a budget of ${values.budget} for a ${assetClass}.`,
+            message: `${plural(values.count, "material slot")} on the body with the most, against a budget of ${values.budget} for a ${CLASS_WORDS[assetClass]}.`,
             values,
         });
     }
@@ -737,8 +773,15 @@ export function checkGameAsset(glb, options = {}) {
         const without = values.bodies.filter((body) => body.shape === "none");
         const beyond = values.bodies.filter((body) => body.withinTolerance === false);
         const unknown = values.bodies.filter((body) => body.shape !== "none" && body.withinTolerance === null);
+        const factsOf = (body) => facts.bodies[values.bodies.indexOf(body)];
         if (without.length === values.bodies.length) {
-            results.push({ id: "collision", status: "not-measured", message: "The file has no collision shape.", reason: "No collision was written. exportGameAsset writes one unless collision is \"none\".", values });
+            results.push({
+                id: "collision",
+                status: "not-measured",
+                message: "The file has no collision shape.",
+                reason: "No collision was written with the file. Write it again with a collision shape to have it measured.",
+                values,
+            });
         }
         else if (beyond.length > 0) {
             const worst = beyond.reduce((a, b) => (Math.abs(b.error) > Math.abs(a.error) ? b : a));
@@ -748,7 +791,7 @@ export function checkGameAsset(glb, options = {}) {
             results.push({
                 id: "collision",
                 status: chosen ? "warn" : "fail",
-                message: `The collision of "${worst.name}" (${worst.shape}, ${plural(worst.pieces, "piece")}) is ${round(Math.abs(worst.error) * 100, 1)}% ${worst.error > 0 ? "more" : "less"} volume than the visible part, over the ${round(tolerance * 100, 1)}% allowed.${chosen ? "" : " Collision pieces from the construction, or a kernel for a convex decomposition, would bring it nearer."}`,
+                message: `The collision of "${worst.name}" (${worst.shape}, ${plural(worst.pieces, "piece")}) is ${round(Math.abs(worst.error) * 100, 1)}% ${worst.error > 0 ? "more" : "less"} volume than the visible part, over the ${round(tolerance * 100, 1)}% allowed.${chosen ? "" : nearer(worst.name, factsOf(worst).collision, facts.settings.collision)}`,
                 values,
             });
         }
@@ -756,11 +799,24 @@ export function checkGameAsset(glb, options = {}) {
             results.push({ id: "collision", status: "warn", message: `${plural(without.length, "body has", "bodies have")} no collision shape.`, values });
         }
         else if (unknown.length > 0) {
+            const names = unknown.map((body) => `"${body.name}"`);
+            const open = unknown.filter((body) => factsOf(body).openEdges + factsOf(body).nonManifoldEdges > 0);
+            const why = unknown.map((body) => {
+                const { openEdges, nonManifoldEdges } = factsOf(body);
+                const edges = [
+                    ...(openEdges > 0 ? [plural(openEdges, "open edge")] : []),
+                    ...(nonManifoldEdges > 0 ? [`${plural(nonManifoldEdges, "edge")} shared by more than two triangles`] : []),
+                ];
+                return edges.length > 0 ? `"${body.name}" has ${edges.join(" and ")}` : `"${body.name}" is closed with its faces pointing inwards`;
+            });
+            const one = unknown.length === 1;
             results.push({
                 id: "collision",
                 status: "not-measured",
-                message: "A collision shape was written, but its body is not closed.",
-                reason: "A body with open edges encloses no volume, so there is nothing to compare the collision volume with.",
+                message: open.length === 0
+                    ? `A collision shape was written, but ${one ? `${names[0]} encloses` : `${names.join(", ")} enclose`} no volume.`
+                    : `A collision shape was written, but ${one ? `${names[0]} is` : `${names.join(", ")} are`} not closed.`,
+                reason: `${why.join(", and ")}, so ${one ? "it encloses" : "they enclose"} no volume to compare the collision volume with. ${open.length === 0 ? "Turn the faces to point outwards" : "Close the mesh"} to have its collision measured.`,
                 values,
             });
         }
@@ -805,7 +861,7 @@ export function checkGameAsset(glb, options = {}) {
             }
         }
         if (values.bodies.length === 0) {
-            results.push({ id: "detail-levels", status: "not-measured", message: "The file has no lower detail levels.", reason: "No body was given lods. Engines that make their own levels on import need none.", values });
+            results.push({ id: "detail-levels", status: "not-measured", message: "The file has no lower detail levels.", reason: "No body was given lower detail levels. Engines that make their own levels on import need none.", values });
         }
         else if (problems.length > 0) {
             results.push({ id: "detail-levels", status: "fail", message: `Detail levels: ${[...problems, ...notes].join("; ")}.`, values });
@@ -821,11 +877,14 @@ export function checkGameAsset(glb, options = {}) {
     // Player fit.
     const sceneMin = facts.total.bounds.meters.min;
     const sceneMax = facts.total.bounds.meters.max;
+    // A person reads the player by its name. The id stays in the values, next to the name.
+    const who = playerName(player);
     {
         const alongX = openingsAlong(scene, "x", sceneMin, sceneMax, player);
         const alongZ = openingsAlong(scene, "z", sceneMin, sceneMax, player);
         const values = {
             player: player.id,
+            playerName: who,
             capsuleRadiusMeters: player.capsuleRadiusM,
             capsuleHeightMeters: player.capsuleHeightM,
             cellMeters: round(Math.max(alongX.cell, alongZ.cell), 6),
@@ -838,20 +897,20 @@ export function checkGameAsset(glb, options = {}) {
         if (values.openings.length === 0) {
             const reason = "No opening closed over the top was found along the X or Z axis. A gap that is open to the sky is not counted.";
             if (expect.opening === true)
-                results.push({ id: "player-openings", status: "fail", message: "An opening for the player was expected, and none was found.", values });
+                results.push({ id: "player-openings", status: "fail", message: `An opening for ${who} was expected, and none was found.`, values });
             else
                 results.push({ id: "player-openings", status: "not-measured", message: "The asset has no opening for a player to pass.", reason, values });
         }
         else if (walkIn.length > 0) {
             const widest = walkIn.reduce((a, b) => (b.widthMeters > a.widthMeters ? b : a));
-            results.push({ id: "player-openings", status: "pass", message: `The player (${size}) passes an opening ${widest.widthMeters} m wide and ${widest.heightMeters} m tall.`, values });
+            results.push({ id: "player-openings", status: "pass", message: `${who} (${size}) passes an opening ${widest.widthMeters} m wide and ${widest.heightMeters} m tall.`, values });
         }
         else if (fitting.length > 0) {
             const lowest = fitting.reduce((a, b) => (b.sillMeters < a.sillMeters ? b : a));
             results.push({
                 id: "player-openings",
                 status: expect.opening === true ? "fail" : "warn",
-                message: `The player fits an opening, but its sill is ${lowest.sillMeters} m up and the player steps up ${player.stepHeightM} m.`,
+                message: `${who} fits an opening, but its sill is ${lowest.sillMeters} m up and this player steps up ${player.stepHeightM} m.`,
                 values,
             });
         }
@@ -860,7 +919,7 @@ export function checkGameAsset(glb, options = {}) {
             results.push({
                 id: "player-openings",
                 status: expect.opening === true ? "fail" : "warn",
-                message: `The player (${size}) fits none of ${plural(values.openings.length, "opening")}. The largest is ${largest.widthMeters} m wide and ${largest.heightMeters} m tall.`,
+                message: `${who} (${size}) fits none of ${plural(values.openings.length, "opening")}. The largest is ${largest.widthMeters} m wide and ${largest.heightMeters} m tall.`,
                 values,
             });
         }
@@ -886,6 +945,7 @@ export function checkGameAsset(glb, options = {}) {
         const rises = found ? best : [];
         const stepValues = {
             player: player.id,
+            playerName: who,
             stepHeightMeters: player.stepHeightM,
             jumpHeightMeters: player.jumpHeightM,
             levels: levels.map((level) => round(level, 4)),
@@ -900,14 +960,14 @@ export function checkGameAsset(glb, options = {}) {
                 results.push({ id: "player-steps", status: "not-measured", message: "The asset has no steps.", reason, values: stepValues });
         }
         else if (stepValues.maxRiseMeters <= player.stepHeightM + 0.001) {
-            results.push({ id: "player-steps", status: "pass", message: `${plural(rises.length, "rise")} of up to ${stepValues.maxRiseMeters} m, and the player steps up ${player.stepHeightM} m.`, values: stepValues });
+            results.push({ id: "player-steps", status: "pass", message: `${plural(rises.length, "rise")} of up to ${stepValues.maxRiseMeters} m, and ${who} steps up ${player.stepHeightM} m.`, values: stepValues });
         }
         else {
-            const how = player.stepHeightM === 0 ? "this player climbs no steps" : `the player steps up ${player.stepHeightM} m`;
+            const how = player.stepHeightM === 0 ? `${who} climbs no steps` : `${who} steps up ${player.stepHeightM} m`;
             const jump = stepValues.maxRiseMeters <= player.jumpHeightM ? " A jump clears it, or collision can be a ramp." : "";
             results.push({ id: "player-steps", status: expect.stairs === true ? "fail" : "warn", message: `The tallest rise is ${stepValues.maxRiseMeters} m, and ${how}.${jump}`, values: stepValues });
         }
-        const rampValues = { player: player.id, walkableSlopeDegrees: player.walkableSlopeDeg, ramps };
+        const rampValues = { player: player.id, playerName: who, walkableSlopeDegrees: player.walkableSlopeDeg, ramps };
         const tooSteep = ramps.filter((slope) => !slope.walkable);
         if (ramps.length === 0) {
             const reason = `No flat slope from ${RAMP_MIN_DEGREES} to ${RAMP_MAX_DEGREES} degrees was found that is large enough to stand on.`;
@@ -920,12 +980,12 @@ export function checkGameAsset(glb, options = {}) {
             results.push({
                 id: "player-ramps",
                 status: expect.ramp === true ? "fail" : "warn",
-                message: `${plural(tooSteep.length, "slope is", "slopes are")} steeper than the ${player.walkableSlopeDeg} degrees the player walks up. The steepest is ${ramps[ramps.length - 1].angleDegrees} degrees.`,
+                message: `${plural(tooSteep.length, "slope is", "slopes are")} steeper than the ${player.walkableSlopeDeg} degrees ${who} walks up. The steepest is ${ramps[ramps.length - 1].angleDegrees} degrees.`,
                 values: rampValues,
             });
         }
         else {
-            results.push({ id: "player-ramps", status: "pass", message: `${plural(ramps.length, "slope")} of up to ${ramps[ramps.length - 1].angleDegrees} degrees, and the player walks up ${player.walkableSlopeDeg}.`, values: rampValues });
+            results.push({ id: "player-ramps", status: "pass", message: `${plural(ramps.length, "slope")} of up to ${ramps[ramps.length - 1].angleDegrees} degrees, and ${who} walks up ${player.walkableSlopeDeg}.`, values: rampValues });
         }
     }
     const counts = { pass: 0, warn: 0, fail: 0, notMeasured: 0 };

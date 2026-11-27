@@ -11,6 +11,11 @@ export declare class GameExportError extends Error {
     body?: number;
     constructor(code: GameExportErrorCode, message: string);
 }
+/**
+ * Starts the note a body's collision facts carry when a kernel was given and made no convex
+ * decomposition. The rest of the note is the reason. The collision check reads it by this start.
+ */
+export declare const NO_DECOMPOSITION = "No convex decomposition was made. ";
 export declare function refuse(code: GameExportErrorCode, message: string): never;
 /** Runs `work` on one body of the input, and marks a refusal that comes out of it with that body. */
 export declare function forBody<T>(body: number, work: () => T): T;

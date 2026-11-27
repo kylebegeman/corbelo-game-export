@@ -109,6 +109,8 @@ export declare function weldExact(positions: ArrayLike<number>, indices: ArrayLi
  * A shape asked for by name is built or refused. `"auto"` builds the tiers cheapest first (one
  * box, one convex hull, the caller's pieces, a decomposition by the kernel) and takes the first
  * whose volume is within the tolerance of the visible part's. When none is, it takes the nearest.
- * A body that is not closed has no volume to compare with, and gets its convex hull.
+ * A body that is not closed has no volume to compare with, and gets its convex hull. A tier that
+ * cannot be built is passed over with a note that says why, a decomposition the kernel could not
+ * make too.
  */
 export declare function planCollision(source: CollisionSource, settings: ResolvedCollisionSettings, kernel: CollisionKernel | undefined): CollisionPlan;

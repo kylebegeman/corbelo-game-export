@@ -127,7 +127,10 @@ export interface CornerValues {
     worst: [string, string] | null;
 }
 export interface WalkableValues {
+    /** The id of the player profile. */
     player: string;
+    /** The name of the player profile, for people. The id again for a profile that was given no name. */
+    playerName: string;
     capsuleRadiusMeters: number;
     capsuleHeightMeters: number;
     stepHeightMeters: number;
