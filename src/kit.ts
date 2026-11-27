@@ -495,6 +495,29 @@ export function resolveKit(input: KitInput, grid?: KitGridInput): Kit {
   };
 }
 
+/** True for a kit `resolveKit` returned, false for one as it is given. */
+export function isKit(value: KitInput | Kit): value is Kit {
+  return typeof value === "object" && value !== null && typeof (value as Kit).profile === "string" && Array.isArray(value.pieces) && value.pieces.every((piece) => typeof piece === "object" && piece !== null && "glb" in piece && "facts" in piece);
+}
+
+/** A kit as `resolveKit` returns it, from that or from a kit as it is given. */
+export function kitOf(input: KitInput | Kit, grid?: KitGridInput): Kit {
+  if (!isKit(input)) return resolveKit(input, grid);
+  if (grid !== undefined) refuse("BAD_OPTION", "A kit that is already written cannot be made for another grid: give the kit as it was given to resolveKit.");
+  return input;
+}
+
+/** A layout by name, among the test layouts and the kit's own, or a layout as given. */
+export function layoutOf(kit: Kit, layout: string | KitLayoutInput): KitLayout {
+  if (typeof layout !== "string") return readLayout(layout, kit.pieces);
+  const found = [...kitLayouts(kit).layouts, ...kit.layouts].find((one) => one.name === layout);
+  if (found === undefined) {
+    const skipped = kitLayouts(kit).skipped.find((one) => one.name === layout);
+    refuse("BAD_LAYOUT", skipped !== undefined ? `The kit has no "${layout}" layout: ${skipped.reason}` : `The kit has no layout named ${JSON.stringify(layout)}.`);
+  }
+  return found;
+}
+
 function cellKey(cell: readonly number[]): string {
   return `${cell[0]!},${cell[1]!},${cell[2]!}`;
 }

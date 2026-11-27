@@ -1,7 +1,7 @@
 // A corridor kit built from plain boxes, in millimetres with Z up: seven pieces that share a
 // grid and one socket type. Every open end shows the same outline, a floor slab with a wall on
 // each side, with the same corners, so any two ends meet.
-import type { AssetBodyInput, KitGrid, KitInput, KitPieceInput, KitSide, KitSocketInput } from "../src/index.js";
+import type { AssetBodyInput, KitGrid, KitPackInput, KitPieceInput, KitSide, KitSocketInput } from "../src/index.js";
 import { box, joined, MM_Z_UP, type Point, type Shape } from "./fixtures.js";
 
 /** Thickness of the floor slab, in millimetres. */
@@ -149,7 +149,7 @@ export function corridorPieces(grid: KitGrid): KitPieceInput[] {
  * The kit as given to this package. `change` gets the pieces of the grid and returns the ones
  * to use, which is how the tests put one wrong piece in.
  */
-export function corridorKit(change: (pieces: KitPieceInput[], grid: KitGrid) => KitPieceInput[] = (pieces) => pieces, more: Partial<KitInput> = {}): KitInput {
+export function corridorKit(change: (pieces: KitPieceInput[], grid: KitGrid) => KitPieceInput[] = (pieces) => pieces, more: Partial<KitPackInput> = {}): KitPackInput {
   return {
     name: "corridor",
     source: MM_Z_UP,

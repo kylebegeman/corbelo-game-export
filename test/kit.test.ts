@@ -505,6 +505,6 @@ describe("the kit as data", () => {
     expect(pieces((all) => [{ ...all[6]!, sockets: [{ type: "corridor", side: "+x", cell: [0, 0, 0] }] }]).message).toContain("faces another cell of the same piece");
     expect(pieces((all) => [{ ...all[0]!, bodies: [] }]).code).toBe("NO_BODIES");
     expect(refusal(() => checkKit(corridorKit(), { toleranceMeters: 0 })).code).toBe("BAD_OPTION");
-    expect(refusal(() => checkKit(resolveKit(corridorKit()), { grid: { moduleMeters: 4, storeyMeters: 3 } })).message).toContain("cannot be checked for another grid");
+    expect(refusal(() => checkKit(resolveKit(corridorKit()), { grid: { moduleMeters: 4, storeyMeters: 3 } })).message).toContain("cannot be made for another grid");
   });
 });

@@ -5,10 +5,10 @@ import { readAccessor, readGlb, readPack } from "./glb-read.js";
 import {
   cellSize,
   kitLayouts,
+  kitOf,
   layoutJoints,
   mateOf,
   placePoint,
-  resolveKit,
   sideAxis,
   sideSign,
   socketFrame,
@@ -906,9 +906,7 @@ function seamTypes(kit: Kit, entries: readonly Entry[], faceOfEntry: (entry: Ent
  */
 export function checkKit(input: KitInput | Kit, options: KitCheckOptions = {}): KitCheckReport {
   if (typeof options !== "object" || options === null) refuse("BAD_OPTION", "Check options must be an object.");
-  const isKit = (value: KitInput | Kit): value is Kit => typeof value === "object" && value !== null && typeof (value as Kit).profile === "string" && Array.isArray(value.pieces) && value.pieces.every((piece) => "glb" in piece && "facts" in piece);
-  if (isKit(input) && options.grid !== undefined) refuse("BAD_OPTION", "A kit that is already written cannot be checked for another grid: give checkKit the kit as it was given to resolveKit.");
-  const kit = isKit(input) ? input : resolveKit(input, options.grid);
+  const kit = kitOf(input, options.grid);
   const tolerance = options.toleranceMeters ?? DEFAULT_KIT_TOLERANCE_METERS;
   if (!(Number.isFinite(tolerance) && tolerance > 0)) refuse("BAD_OPTION", `toleranceMeters must be a positive number of metres. Got ${String(tolerance)}.`);
   if (options.kernel !== undefined && (typeof options.kernel !== "object" || options.kernel === null || typeof options.kernel.solid !== "function")) {

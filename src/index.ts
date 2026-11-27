@@ -1,4 +1,5 @@
 export { exportGameAsset } from "./asset.js";
+export { exportBlockout, type BlockoutExtras, type BlockoutFacts, type BlockoutOptions, type BlockoutPlacementFacts, type BlockoutResult } from "./blockout.js";
 export {
   ASSET_BUDGETS,
   ASSET_SIZE_RANGES,
@@ -54,8 +55,11 @@ export {
   DEFAULT_TRIM_METERS,
   KIT_LAYOUT_NAMES,
   KIT_SIDES,
+  isKit,
   kitLayouts,
+  kitOf,
   layoutJoints,
+  layoutOf,
   mateOf,
   oppositeSide,
   placePoint,
@@ -98,6 +102,7 @@ export {
   type SeamValues,
   type WalkableValues,
 } from "./kit-checks.js";
+export { exportKitPack, type KitManifest, type KitManifestPiece, type KitMeshLibrary, type KitPackInput } from "./kit-pack.js";
 export { DEVIATION_MAX_SAMPLES, meshDeviation } from "./lod.js";
 export { DEFAULT_COLOR } from "./materials.js";
 export { DEGENERATE_AREA_RATIO, FLAT_FACE_ANGLE_DEGREES } from "./mesh.js";
@@ -113,6 +118,7 @@ export {
   type PackInput,
   type PackManifest,
   type PackManifestFile,
+  type PackManifestScene,
   type PackRowInput,
 } from "./pack.js";
 export {
