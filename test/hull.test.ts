@@ -184,13 +184,16 @@ describe("convex hull", () => {
     expect(digest(convexHull(ballPoints(256, 128), 64)!)).toBe("64 124 3.7947825550786107 d10299f64dee22d0 b07bf48d40b9c0ce");
   });
 
-  it("takes a fine round solid with no limit on its corners in the time its points call for", () => {
-    // Four times the points, and about four times the work: the next point comes off the top of
-    // a heap. Looking at every face for each point took eleven to twenty times as long.
+  it("takes a fine round solid with no limit on its corners in the time its points call for", { retry: 2 }, () => {
+    // Sixteen times the points, and about twenty times the work: the next point comes off the
+    // top of a heap. Looking at every face for each point took eleven to twenty times as long
+    // for four times the points, so well over a hundred times as long for sixteen. The line is
+    // drawn between the two with room on both sides, since a clock on a busy machine is rough.
     const coarse = ringPoints(1, 0.25, 128, 32);
-    const fine = ringPoints(1, 0.25, 256, 64);
-    expect(convexHull(fine)!.positions).toHaveLength(8448 * 3);
-    expect(quickest(() => convexHull(fine)) / quickest(() => convexHull(coarse))).toBeLessThan(8);
+    const fine = ringPoints(1, 0.25, 512, 128);
+    expect(convexHull(ringPoints(1, 0.25, 256, 64))!.positions).toHaveLength(8448 * 3);
+    expect(convexHull(fine)!.positions).toHaveLength(33280 * 3);
+    expect(quickest(() => convexHull(fine), 3) / quickest(() => convexHull(coarse))).toBeLessThan(60);
   });
 
   it("has a hull for a ball too fine for a point level with a face to count as seeing it", () => {
