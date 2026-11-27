@@ -41,7 +41,8 @@ describe("package", () => {
     // A browser build fails outright if the main entry reaches for a Node module.
     const { code } = await bundle(null);
     expect(/["']node:|\brequire\(/.test(code)).toBe(false);
-    expect(code.length).toBeLessThan(100_000);
+    // 90,673 bytes before kits. Kits, their checks, blockouts and installs are the difference.
+    expect(code.length).toBeLessThan(165_000);
   });
 
   it("does no work when it is imported, so a bundler may drop what is not used", async () => {
@@ -55,9 +56,9 @@ describe("package", () => {
   it("charges a consumer that only writes a GLB nothing for assets, checks, collision or packs", async () => {
     const { code, modules } = await bundle("exportGameGlb");
     expect(used(modules)).toEqual(["errors", "export", "glb-write", "gltf", "materials", "mesh", "names", "profiles", "space", "version"]);
-    for (const text of ["player-openings", "KHR_node_visibility", ".pack.json", "ZIP can hold", "maxHullVertices", "{family}", "TEXCOORD_1"]) expect(code.includes(text), text).toBe(false);
+    for (const text of ["player-openings", "KHR_node_visibility", ".pack.json", "ZIP can hold", "maxHullVertices", "{family}", "TEXCOORD_1", "collision-tiles", "blockout", ".lock.json", "moduleMeters"]) expect(code.includes(text), text).toBe(false);
     // 29,100 bytes before game assets. The writer it shares with them can now also write
-    // detail levels and texture coordinates, which is the difference.
+    // detail levels and texture coordinates, which is the difference. Kits added nothing to it.
     expect(code.length).toBeLessThan(32_000);
   });
 
@@ -74,14 +75,42 @@ describe("package", () => {
     for (const name of ["checks", "pack", "zip", "sha256", "naming", "glb-read", "stl"]) expect(asset.modules[name] ?? 0, name).toBe(0);
     for (const name of ["asset", "collision", "hull", "lod", "uv", "export"]) expect(asset.modules[name], name).toBeGreaterThan(0);
     expect(asset.code.length).toBeLessThan(56_000);
-    // A pack is all of it but the STL reader.
+    // A pack is all of that but the STL reader, and nothing of kits or installs.
     const pack = await bundle("exportGamePack");
-    expect(pack.modules["stl"] ?? 0).toBe(0);
+    for (const name of ["stl", "kit", "kit-checks", "kit-pack", "blockout", "lock", "unzip", "zip"]) expect(pack.modules[name] ?? 0, name).toBe(0);
     expect(pack.code.length).toBeLessThan(92_000);
     // The small tools stand alone.
     expect(used((await bundle("writeZip")).modules)).toEqual(["errors", "zip"]);
     expect(used((await bundle("sha256Hex")).modules)).toEqual(["sha256"]);
     expect(used((await bundle("convexHull")).modules)).toEqual(["hull"]);
     expect(used((await bundle("assetName")).modules)).toEqual(["errors", "names", "naming"]);
+  });
+
+  it("charges for kits, blockouts and installs only where they are used", async () => {
+    // Installing is reading an archive, checking a pack and planning: no exporter and no kit.
+    const unzip = await bundle("readZip");
+    expect(used(unzip.modules)).toEqual(["errors", "unzip", "zip"]);
+    expect(unzip.code.length).toBeLessThan(5_000);
+    const verify = await bundle("verifyPack");
+    expect(used(verify.modules)).toEqual(["errors", "lock", "sha256"]);
+    expect(verify.code.length).toBeLessThan(7_000);
+    const plan = await bundle("planInstall");
+    expect(used(plan.modules)).toEqual(["errors", "lock"]);
+    expect(plan.code.length).toBeLessThan(5_000);
+    expect(used((await bundle("lockJson")).modules)).toEqual(["lock"]);
+    expect(used((await bundle("kitLayouts")).modules)).toEqual(["kit"]);
+    // The kit checks write each piece as an asset to measure it: no pack, scene, archive or lock file.
+    const checks = await bundle("checkKit");
+    for (const name of ["pack", "kit-pack", "blockout", "zip", "unzip", "lock", "sha256", "stl"]) expect(checks.modules[name] ?? 0, name).toBe(0);
+    for (const name of ["kit", "kit-checks", "asset"]) expect(checks.modules[name], name).toBeGreaterThan(0);
+    expect(checks.code.length).toBeLessThan(112_000);
+    // A blockout is the pieces in a scene: no checks of either kind.
+    const blockout = await bundle("exportBlockout");
+    for (const name of ["checks", "kit-checks", "pack", "kit-pack", "zip", "unzip", "lock", "sha256", "stl"]) expect(blockout.modules[name] ?? 0, name).toBe(0);
+    expect(blockout.code.length).toBeLessThan(84_000);
+    // A kit pack is all of it but the readers of archives and STL, and the lock file.
+    const kitPack = await bundle("exportKitPack");
+    for (const name of ["stl", "unzip", "lock"]) expect(kitPack.modules[name] ?? 0, name).toBe(0);
+    expect(kitPack.code.length).toBeLessThan(140_000);
   });
 });

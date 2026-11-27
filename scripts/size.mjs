@@ -19,6 +19,12 @@ export const ENTRIES = [
   ["exportGameAsset", "a game asset: collision, detail levels, texture coordinates, attach points"],
   ["checkGameAsset", "the game checks"],
   ["exportGamePack", "a pack: assets, checks and the manifest"],
+  ["readZip", "reading an archive"],
+  ["verifyPack", "checking a pack against its manifest"],
+  ["planInstall", "the plan of an install, and the lock file after it"],
+  ["checkKit", "a kit and its seven checks"],
+  ["exportBlockout", "a layout of kit pieces as one scene"],
+  ["exportKitPack", "a kit pack: pieces, checks, scenes and the manifest"],
   [null, "everything the main entry exports"],
 ];
 
