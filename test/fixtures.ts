@@ -493,3 +493,41 @@ export function doorFrame(width: number, thickness: number, height: number, door
   }
   return shape.build();
 }
+
+/**
+ * A square block with a round hole straight down through its middle, Z up: from the origin to
+ * `size` along X and along Y and `height` tall. One closed body, cut into triangles the way a
+ * solid modeller writes a mesh file: each end is fanned from the four corners of the block to
+ * the corners of the hole, and each flat side is two triangles. The block is convex but for the
+ * hole, so its hull is the block with the hole filled. `segments` is the number of flat sides
+ * of the hole and a multiple of 4. 4 x segments + 16 triangles.
+ */
+export function holedBlock(size: number, height: number, radius: number, segments: number): Shape {
+  const shape = new ShapeBuilder();
+  const [top, bottom, wall] = [shape.face(), shape.face(), shape.face()];
+  const middle = size / 2;
+  const ring = (i: number, z: number): Point => {
+    const angle = ((i % segments) / segments) * Math.PI * 2;
+    return [middle + radius * Math.cos(angle), middle + radius * Math.sin(angle), z];
+  };
+  // Corner 0 is at high X and high Y, and the others follow anticlockwise seen from above.
+  const corner = (k: number, z: number): Point => [k % 4 === 0 || k % 4 === 3 ? size : 0, k % 4 < 2 ? size : 0, z];
+  const quarter = segments / 4;
+  for (let k = 0; k < 4; k += 1) {
+    // Each corner of the block sees the quarter of the hole that faces it.
+    for (let i = k * quarter; i < (k + 1) * quarter; i += 1) {
+      shape.triangle(corner(k, height), ring(i + 1, height), ring(i, height), top);
+      shape.triangle(corner(k, 0), ring(i, 0), ring(i + 1, 0), bottom);
+    }
+    shape.triangle(corner(k, height), corner(k + 1, height), ring((k + 1) * quarter, height), top);
+    shape.triangle(corner(k, 0), ring((k + 1) * quarter, 0), corner(k + 1, 0), bottom);
+    const side = shape.face();
+    shape.triangle(corner(k, 0), corner(k + 1, 0), corner(k + 1, height), side);
+    shape.triangle(corner(k, 0), corner(k + 1, height), corner(k, height), side);
+  }
+  for (let i = 0; i < segments; i += 1) {
+    shape.triangle(ring(i, 0), ring(i + 1, height), ring(i + 1, 0), wall);
+    shape.triangle(ring(i, 0), ring(i, height), ring(i + 1, height), wall);
+  }
+  return shape.build();
+}

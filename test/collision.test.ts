@@ -3,6 +3,7 @@ import {
   DEFAULT_COLLISION_TOLERANCE,
   DEFAULT_MAX_COLLISION_PIECES,
   DEFAULT_MAX_HULL_VERTICES,
+  checkGameAsset,
   exportGameAsset,
   GameExportError,
   meshVolume,
@@ -13,7 +14,7 @@ import {
   type CollisionKernel,
   type GameExportErrorCode,
 } from "../src/index.js";
-import { box, chamferedBlock, cylinder, doorFrame, ell, fold, MM_Z_UP, tube } from "./fixtures.js";
+import { box, chamferedBlock, cylinder, doorFrame, ell, fold, holedBlock, MM_Z_UP, tube } from "./fixtures.js";
 import { counting, loadKernel } from "./kernel.js";
 
 let kernel: CollisionKernel;
@@ -221,6 +222,152 @@ describe("collision tiers", () => {
     const refused = refusal(() => collisionOf({ bodies: [{ name: "Ell", positions: ell(1000, 500).positions }], collision: "decomposition", kernel: broken }));
     expect(refused.code).toBe("BAD_COLLISION");
     expect(refused.message).toContain("not manifold");
+  });
+});
+
+describe("a block with a hole through it, given as a mesh alone", () => {
+  // 600 by 600 by 450 with a hole of radius 120 and 32 sides: the hull, and the box, fill the hole.
+  const holed = holedBlock(600, 450, 120, 32).positions;
+  const hullError = 0.14267;
+  const collisionCheck = (input: Omit<AssetInput, "source">) => {
+    const { glb, facts } = exportGameAsset({ ...input, source: MM_Z_UP });
+    return { facts: facts.bodies[0]!.collision!, check: checkGameAsset(glb).results.find((result) => result.id === "collision")! };
+  };
+
+  it("is cut into pieces within the tolerance at 8, 16 and 32 pieces allowed, and passes the collision check", () => {
+    for (const maxPieces of [8, 16, 32]) {
+      const { facts, check } = collisionCheck({ bodies: [{ name: "Block", positions: holed }], collision: { shape: "decomposition", maxPieces }, kernel });
+      expect(facts, `${maxPieces} pieces allowed`).toMatchObject({ requested: "decomposition", shape: "decomposition", withinTolerance: true, notes: [] });
+      expect(facts.pieces).toBeGreaterThan(1);
+      expect(facts.pieces).toBeLessThanOrEqual(maxPieces);
+      expect(Math.abs(facts.volume.error!)).toBeLessThanOrEqual(DEFAULT_COLLISION_TOLERANCE);
+      // The pieces as written add up to the volume the facts say: the hole is not filled.
+      expect(facts.nodes.reduce((total, node) => total + node.volume, 0)).toBeCloseTo(facts.volume.collision, 9);
+      expect(facts.volume.collision).toBeLessThan(facts.volume.visible! * (1 + DEFAULT_COLLISION_TOLERANCE));
+      expect(check.status).toBe("pass");
+    }
+  });
+
+  it("reaches the decomposition by itself with a kernel, where the box and the hull fill the hole", () => {
+    const counted = counting(kernel);
+    const { facts, check } = collisionCheck({ bodies: [{ name: "Block", positions: holed }], kernel: counted.kernel });
+    expect(facts.tried.map((tier) => [tier.shape, tier.withinTolerance])).toEqual([["box", false], ["hull", false], ["decomposition", true]]);
+    expect(facts.tried[0]!.error).toBeCloseTo(hullError, 4);
+    expect(facts.tried[1]!.error).toBeCloseTo(hullError, 4);
+    expect(facts).toMatchObject({ requested: "auto", shape: "decomposition", withinTolerance: true });
+    expect(facts.pieces).toBeLessThanOrEqual(DEFAULT_MAX_COLLISION_PIECES);
+    expect(check).toMatchObject({ status: "pass" });
+    expect(counted.freed()).toBe(counted.made());
+  });
+
+  it("is cut the same wherever the hole runs and wherever the block sits", () => {
+    for (const up of ["Y", "Z"] as const) {
+      for (const by of [[0, 0, 0], [137.25, -52.5, 12.75]] as const) {
+        const positions = Float32Array.from(holed, (value, at) => value + by[at % 3]!);
+        const facts = exportGameAsset({ bodies: [{ name: "Block", positions }], source: { unit: 0.001, up }, kernel }).facts.bodies[0]!.collision!;
+        expect(facts, `up ${up}, moved by ${by.join(", ")}`).toMatchObject({ shape: "decomposition", withinTolerance: true });
+      }
+    }
+  });
+
+  it("opens a ring too: one 1.2 m across is within the tolerance at 13 parts and 9% over at 8", () => {
+    const ring = tube(600, 400, 400, 48).positions;
+    const cut = (maxPieces: number) => collisionOf({ bodies: [{ name: "Ring", positions: ring }], collision: { shape: "decomposition", maxPieces }, kernel });
+    expect(cut(13)).toMatchObject({ shape: "decomposition", pieces: 13, withinTolerance: true });
+    const eight = cut(8);
+    expect(eight).toMatchObject({ pieces: 8, withinTolerance: false });
+    expect(eight.volume.error!).toBeGreaterThan(0.09);
+    expect(eight.volume.error!).toBeLessThan(0.1);
+  });
+
+  it("without a kernel takes the box, and the check asks for pieces or a kernel", () => {
+    const { facts, check } = collisionCheck({ bodies: [{ name: "Block", positions: holed }] });
+    expect(facts).toMatchObject({ requested: "auto", shape: "box", pieces: 1, withinTolerance: false });
+    expect(facts.volume.error).toBeCloseTo(hullError, 4);
+    expect(facts.notes).toEqual([
+      "No collision pieces were given for the body.",
+      "No kernel was given, and a general convex decomposition needs one.",
+      "No tier is within the tolerance. The nearest was taken.",
+    ]);
+    expect(check.status).toBe("fail");
+    expect(check.message).toBe(
+      'The collision of "Block" (box, 1 piece) is 14.3% more volume than the visible part, over the 5% allowed. The pieces the part was built from, or a solid kernel to cut it into convex pieces, would bring it nearer.',
+    );
+  });
+
+  it("with a kernel and too few pieces allowed, the check asks for more pieces and not for a kernel", () => {
+    const pipe = tube(300, 250, 1000, 24).positions;
+    const { facts, check } = collisionCheck({ bodies: [{ name: "Pipe", positions: pipe }], kernel });
+    expect(facts).toMatchObject({ requested: "auto", shape: "decomposition", pieces: DEFAULT_MAX_COLLISION_PIECES, withinTolerance: false });
+    expect(check.status).toBe("fail");
+    expect(check.message).toContain("was cut into 8 convex pieces, the most allowed");
+    expect(check.message).toContain("More pieces, or the pieces the part was built from, would bring it nearer.");
+    expect(check.message).not.toContain("kernel");
+  });
+
+  it("says why an open mesh was not cut up, and does not ask for the kernel it was given", () => {
+    // The same block with one triangle of its top left out.
+    const open = holed.slice(9);
+    const { facts, check } = collisionCheck({ bodies: [{ name: "Block", positions: open }], kernel });
+    expect(facts).toMatchObject({ requested: "auto", shape: "hull", pieces: 1, withinTolerance: null });
+    expect(facts.notes).toEqual([
+      "The body is not closed, so it has no volume to compare collision with.",
+      "No convex decomposition was made. A body that is not closed has no inside to cut into pieces.",
+    ]);
+    expect(check.status).toBe("not-measured");
+    expect(check.message).toBe('A collision shape was written, but "Block" is not closed.');
+    expect(check.reason).toBe('"Block" has 3 open edges, so it encloses no volume to compare the collision volume with. Close the mesh to have its collision measured.');
+    expect(`${check.message} ${check.reason}`).not.toContain("kernel");
+
+    const named = refusal(() => collisionOf({ bodies: [{ name: "Block", positions: open }], collision: "decomposition", kernel }));
+    expect(named.message).toBe('Body "Block": collision "decomposition" cannot be built. A general convex decomposition needs a closed body with a volume.');
+  });
+
+  it("says why a mesh with a face turned the wrong way was not cut up", () => {
+    // Closed edge for edge, but one triangle of the top faces down into the block.
+    const turned = Float32Array.from(holed);
+    turned.set(holed.subarray(3, 6), 6);
+    turned.set(holed.subarray(6, 9), 3);
+    const why = "3 edges join faces that point opposite ways, so the body has no clear inside. Turn every face to point outwards.";
+    const { facts, check } = collisionCheck({ bodies: [{ name: "Block", positions: turned }], kernel });
+    expect(facts.tried.map((tier) => tier.shape)).toEqual(["box", "hull"]);
+    expect(facts.notes).toEqual(["No collision pieces were given for the body.", `No convex decomposition was made. ${why}`, "No tier is within the tolerance. The nearest was taken."]);
+    expect(check.status).toBe("fail");
+    expect(check.message).toContain(`A kernel was given, but no convex decomposition was made. ${why}`);
+    expect(check.message).not.toContain("would bring it nearer");
+
+    const named = refusal(() => collisionOf({ bodies: [{ name: "Block", positions: turned }], collision: "decomposition", kernel }));
+    expect(named).toMatchObject({ code: "BAD_COLLISION", body: 0 });
+    expect(named.message).toBe(`Body "Block": collision "decomposition" cannot be built. ${why}`);
+  });
+
+  it("passes a kernel's own failure over with a note when the shape is left to it, and names what the kernel said", () => {
+    const broken: CollisionKernel = {
+      solid: () => {
+        throw new Error("not manifold");
+      },
+    };
+    const { facts, check } = collisionCheck({ bodies: [{ name: "Block", positions: holed }], kernel: broken });
+    expect(facts).toMatchObject({ requested: "auto", shape: "box", withinTolerance: false });
+    expect(facts.notes[1]).toBe("No convex decomposition was made. The kernel did not take the body as a closed solid. It said: not manifold");
+    expect(check.message).toContain("A kernel was given, but no convex decomposition was made. The kernel did not take the body as a closed solid. It said: not manifold");
+  });
+
+  it("does not trust parts that do not add up to the body: a hollow shut inside it", () => {
+    // A box with a smaller box turned inside out in its middle: closed, with a hollow no cut from outside reaches.
+    const outer = box([0, 0, 0], [600, 600, 600]).positions;
+    const inner = box([200, 200, 200], [400, 400, 400]).positions;
+    const hollow = new Float32Array(outer.length + inner.length);
+    hollow.set(outer);
+    for (let at = 0; at < inner.length; at += 9) {
+      hollow.set(inner.subarray(at, at + 3), outer.length + at);
+      hollow.set(inner.subarray(at + 6, at + 9), outer.length + at + 3);
+      hollow.set(inner.subarray(at + 3, at + 6), outer.length + at + 6);
+    }
+    const refused = refusal(() => collisionOf({ bodies: [{ name: "Shell", positions: hollow }], collision: "decomposition", kernel }));
+    expect(refused.message).toBe(
+      'Body "Shell": collision "decomposition" cannot be built. The parts the kernel made hold 3.8% more volume than the body. That happens when its surface crosses itself or it has a hollow shut inside it.',
+    );
   });
 });
 

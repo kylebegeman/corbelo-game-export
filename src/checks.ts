@@ -1,7 +1,7 @@
-import { refuse } from "./errors.js";
+import { NO_DECOMPOSITION, refuse } from "./errors.js";
 import { readGlb, readPack, type GlbDocument, type PackBody } from "./glb-read.js";
 import { ENGINE_PROFILES, type EngineProfileId } from "./profiles.js";
-import type { CollisionRequest, CollisionShape, NormalMode, PackFacts, PivotMode, Vec3 } from "./types.js";
+import type { CollisionFacts, CollisionRequest, CollisionShape, NormalMode, PackFacts, PivotMode, Vec3 } from "./types.js";
 import { GENERATOR } from "./version.js";
 
 /** What kind of asset it is, which decides the starting budget and the size it is expected to have. */
@@ -324,6 +324,26 @@ function round(value: number, digits = 6): number {
 
 function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
+}
+
+/**
+ * What would bring a collision shape nearer, for a body whose shape was left to be chosen and came
+ * out past the tolerance. It reads what was tried, so it never asks for what was already given.
+ */
+function nearer(name: string, collision: CollisionFacts, settings: PackFacts["settings"]["collision"]): string {
+  const refused = collision.notes.find((note) => note.startsWith(NO_DECOMPOSITION));
+  if (refused !== undefined) return ` A kernel was given, but no convex decomposition was made. ${refused.slice(NO_DECOMPOSITION.length)}`;
+  const gavePieces = collision.tried.some((tier) => tier.shape === "pieces");
+  const cut = collision.tried.find((tier) => tier.shape === "decomposition");
+  if (cut !== undefined) {
+    const into = ` "${name}" was cut into ${plural(cut.pieces, "convex piece")}`;
+    if (settings !== undefined && cut.pieces >= settings.maxPieces) {
+      return `${into}, the most allowed. ${gavePieces ? "More pieces" : "More pieces, or the pieces the part was built from,"} would bring it nearer.`;
+    }
+    return `${into}, and no further cut that fits brought it nearer.${gavePieces ? "" : " The pieces the part was built from would."}`;
+  }
+  if (settings?.kernel === true) return gavePieces ? "" : " The pieces the part was built from would bring it nearer.";
+  return gavePieces ? " A solid kernel to cut it into convex pieces would bring it nearer." : " The pieces the part was built from, or a solid kernel to cut it into convex pieces, would bring it nearer.";
 }
 
 /** Triangles where they sit in a scene, in metres, +Y up. */
@@ -937,8 +957,15 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
     const without = values.bodies.filter((body) => body.shape === "none");
     const beyond = values.bodies.filter((body) => body.withinTolerance === false);
     const unknown = values.bodies.filter((body) => body.shape !== "none" && body.withinTolerance === null);
+    const factsOf = (body: CollisionValues["bodies"][number]) => facts.bodies[values.bodies.indexOf(body)]!;
     if (without.length === values.bodies.length) {
-      results.push({ id: "collision", status: "not-measured", message: "The file has no collision shape.", reason: "No collision was written. exportGameAsset writes one unless collision is \"none\".", values });
+      results.push({
+        id: "collision",
+        status: "not-measured",
+        message: "The file has no collision shape.",
+        reason: "No collision was written. exportGameAsset writes one unless collision is \"none\".",
+        values,
+      });
     } else if (beyond.length > 0) {
       const worst = beyond.reduce((a, b) => (Math.abs(b.error!) > Math.abs(a.error!) ? b : a));
       // A shape the caller named is the caller's choice, and only worth a warning. One that
@@ -947,17 +974,31 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       results.push({
         id: "collision",
         status: chosen ? "warn" : "fail",
-        message: `The collision of "${worst.name}" (${worst.shape}, ${plural(worst.pieces, "piece")}) is ${round(Math.abs(worst.error!) * 100, 1)}% ${worst.error! > 0 ? "more" : "less"} volume than the visible part, over the ${round(tolerance * 100, 1)}% allowed.${chosen ? "" : " Collision pieces from the construction, or a kernel for a convex decomposition, would bring it nearer."}`,
+        message: `The collision of "${worst.name}" (${worst.shape}, ${plural(worst.pieces, "piece")}) is ${round(Math.abs(worst.error!) * 100, 1)}% ${worst.error! > 0 ? "more" : "less"} volume than the visible part, over the ${round(tolerance * 100, 1)}% allowed.${chosen ? "" : nearer(worst.name, factsOf(worst).collision!, facts.settings.collision)}`,
         values,
       });
     } else if (without.length > 0) {
       results.push({ id: "collision", status: "warn", message: `${plural(without.length, "body has", "bodies have")} no collision shape.`, values });
     } else if (unknown.length > 0) {
+      const names = unknown.map((body) => `"${body.name}"`);
+      const open = unknown.filter((body) => factsOf(body).openEdges + factsOf(body).nonManifoldEdges > 0);
+      const why = unknown.map((body) => {
+        const { openEdges, nonManifoldEdges } = factsOf(body);
+        const edges = [
+          ...(openEdges > 0 ? [plural(openEdges, "open edge")] : []),
+          ...(nonManifoldEdges > 0 ? [`${plural(nonManifoldEdges, "edge")} shared by more than two triangles`] : []),
+        ];
+        return edges.length > 0 ? `"${body.name}" has ${edges.join(" and ")}` : `"${body.name}" is closed with its faces pointing inwards`;
+      });
+      const one = unknown.length === 1;
       results.push({
         id: "collision",
         status: "not-measured",
-        message: "A collision shape was written, but its body is not closed.",
-        reason: "A body with open edges encloses no volume, so there is nothing to compare the collision volume with.",
+        message:
+          open.length === 0
+            ? `A collision shape was written, but ${one ? `${names[0]} encloses` : `${names.join(", ")} enclose`} no volume.`
+            : `A collision shape was written, but ${one ? `${names[0]} is` : `${names.join(", ")} are`} not closed.`,
+        reason: `${why.join(", and ")}, so ${one ? "it encloses" : "they enclose"} no volume to compare the collision volume with. ${open.length === 0 ? "Turn the faces to point outwards" : "Close the mesh"} to have its collision measured.`,
         values,
       });
     } else {

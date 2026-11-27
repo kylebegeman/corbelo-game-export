@@ -1,4 +1,4 @@
-import { GameExportError, refuse } from "./errors.js";
+import { NO_DECOMPOSITION, refuse } from "./errors.js";
 import { convexHull, meshVolume, type Hull } from "./hull.js";
 import type { CollisionRequest, CollisionSettings, CollisionShape } from "./types.js";
 
@@ -179,31 +179,145 @@ interface Part {
   settled: boolean;
 }
 
+/** One way to cut a part: what it leaves, and the solids the kernel made on the way. */
+interface Cut {
+  pieces: Part[];
+  solids: KernelSolid[];
+  /** What the hulls of the pieces add together. */
+  left: number;
+  /** The share of the part's volume the largest piece has. */
+  balance: number;
+  /** The most the hull of any one piece adds. */
+  spread: number;
+}
+
+/** The parts of a decomposition may hold this share more or less volume than the body before the result is not trusted. */
+const DECOMPOSITION_VOLUME_SLACK = 0.001;
+
+/**
+ * Why a welded mesh is not a solid with all its faces outwards, or null when it is. Every edge
+ * of such a solid is walked once each way, by the two triangles that meet at it.
+ */
+function solidFault(indices: Uint32Array, vertices: number): string | null {
+  const walked = new Map<number, number>();
+  let flat = 0;
+  for (let at = 0; at < indices.length; at += 3) {
+    const corners = [indices[at]!, indices[at + 1]!, indices[at + 2]!];
+    if (corners[0] === corners[1] || corners[1] === corners[2] || corners[0] === corners[2]) {
+      flat += 1;
+      continue;
+    }
+    for (let k = 0; k < 3; k += 1) {
+      const key = corners[k]! * vertices + corners[(k + 1) % 3]!;
+      walked.set(key, (walked.get(key) ?? 0) + 1);
+    }
+  }
+  if (flat > 0) return `${flat === 1 ? "1 triangle has" : `${flat} triangles have`} two corners at one place once the body is stored, so its surface does not close.`;
+  let turned = 0;
+  let open = 0;
+  for (const [key, count] of walked) {
+    const from = Math.floor(key / vertices);
+    const back = walked.get((key % vertices) * vertices + from) ?? 0;
+    if (count > 1) turned += 1;
+    else if (back === 0) open += 1;
+  }
+  if (turned > 0) return `${turned === 1 ? "1 edge joins" : `${turned} edges join`} faces that point opposite ways, so the body has no clear inside. Turn every face to point outwards.`;
+  if (open > 0) return `${open === 1 ? "1 edge has" : `${open} edges have`} a face on one side only once the body is stored, so its surface does not close.`;
+  return null;
+}
+
 /**
  * A general convex decomposition: the solid is cut by planes along the axes, the part whose hull
  * adds the most volume first and at the place that leaves the least, until the hulls together
  * are within the tolerance or there are as many parts as allowed.
+ *
+ * A hole through a part is not opened by one cut: each half still has a notch that its hull
+ * fills. Where no cut leaves less, the cuts that share what is left most evenly between their
+ * pieces are looked at one cut further, and the one that a second cut gains the most from is
+ * taken.
+ *
+ * Returns the pieces, or the reason there are none.
  */
-function decompose(source: CollisionSource, kernel: CollisionKernel, visibleVolume: number, settings: ResolvedCollisionSettings): CollisionPiece[] {
-  const made: KernelSolid[] = [];
-  const keep = <T extends KernelSolid>(solid: T): T => {
-    made.push(solid);
+function decompose(source: CollisionSource, kernel: CollisionKernel, visibleVolume: number, settings: ResolvedCollisionSettings): CollisionPiece[] | string {
+  const alive = new Set<KernelSolid>();
+  const keep = <T extends KernelSolid>(solid: T, into?: KernelSolid[]): T => {
+    alive.add(solid);
+    into?.push(solid);
     return solid;
+  };
+  const free = (solids: Iterable<KernelSolid>): void => {
+    for (const solid of solids) if (alive.delete(solid)) solid.delete?.();
   };
   const measure = (solid: KernelSolid): Part => {
     const volume = solid.volume();
     const hull = keep(solid.hull());
-    return { solid, volume, excess: Math.max(0, hull.volume() - volume), settled: false };
+    const excess = Math.max(0, hull.volume() - volume);
+    free([hull]);
+    return { solid, volume, excess, settled: false };
   };
   /** The parts of a solid that do not touch, measured. Parts with next to no volume are left out. */
-  const partsOf = (solid: KernelSolid): Part[] => {
-    const separate = solid.decompose === undefined ? [solid] : solid.decompose().map(keep);
+  const partsOf = (solid: KernelSolid, into?: KernelSolid[]): Part[] => {
+    const separate = solid.decompose === undefined ? [solid] : solid.decompose().map((part) => keep(part, into));
     return separate.map(measure).filter((part) => part.volume > visibleVolume * 1e-9);
+  };
+  const near = visibleVolume * 1e-6;
+  /**
+   * Every cut of a part that makes two or more pieces and no more than `room`, axis by axis.
+   * Places to cut: where the part has vertices, strictly inside it, and at most so many per axis.
+   */
+  const cutsOf = (part: Part, room: number): Cut[][] => {
+    const mesh = part.solid.getMesh();
+    const byAxis: Cut[][] = [];
+    for (let axis = 0; axis < 3; axis += 1) {
+      const values = new Set<number>();
+      let low = Infinity;
+      let high = -Infinity;
+      for (let at = axis; at < mesh.vertProperties.length; at += mesh.numProp) {
+        const value = mesh.vertProperties[at]!;
+        values.add(value);
+        if (value < low) low = value;
+        if (value > high) high = value;
+      }
+      const margin = (high - low) * 1e-6;
+      let places = [...values].filter((value) => value > low + margin && value < high - margin).sort((a, b) => a - b);
+      if (places.length > DECOMPOSITION_CUTS_PER_AXIS) {
+        const all = places;
+        places = Array.from({ length: DECOMPOSITION_CUTS_PER_AXIS }, (_, at) => all[Math.floor(((at + 0.5) * all.length) / DECOMPOSITION_CUTS_PER_AXIS)]!);
+      }
+      if (places.length === 0) places = [(low + high) / 2];
+      const normal: [number, number, number] = [axis === 0 ? 1 : 0, axis === 1 ? 1 : 0, axis === 2 ? 1 : 0];
+      const cuts: Cut[] = [];
+      for (const place of places) {
+        const solids: KernelSolid[] = [];
+        const pieces = part.solid.splitByPlane(normal, place).flatMap((half) => partsOf(keep(half, solids), solids));
+        if (pieces.length < 2 || pieces.length > room) {
+          free(solids);
+          continue;
+        }
+        cuts.push({
+          pieces,
+          solids,
+          left: pieces.reduce((total, piece) => total + piece.excess, 0),
+          balance: Math.max(...pieces.map((piece) => piece.volume)) / part.volume,
+          spread: Math.max(...pieces.map((piece) => piece.excess)),
+        });
+      }
+      byAxis.push(cuts);
+    }
+    return byAxis;
   };
   try {
     const welded = weldExact(source.positions, source.indices);
-    let parts = partsOf(keep(kernel.solid(welded.positions, welded.indices)));
-    if (parts.length === 0) refuse("BAD_COLLISION", `Body "${source.name}": the kernel made a solid with no volume from the body.`);
+    const fault = solidFault(welded.indices, welded.positions.length / 3);
+    if (fault !== null) return fault;
+    let whole: KernelSolid;
+    try {
+      whole = keep(kernel.solid(welded.positions, welded.indices));
+    } catch (error) {
+      return `The kernel did not take the body as a closed solid. It said: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    let parts = partsOf(whole);
+    if (parts.length === 0) return "The kernel made a solid with no volume from the body.";
     for (;;) {
       const excess = parts.reduce((total, part) => total + part.excess, 0);
       if (excess <= settings.tolerance * visibleVolume || parts.length >= settings.maxPieces) break;
@@ -213,70 +327,74 @@ function decompose(source: CollisionSource, kernel: CollisionKernel, visibleVolu
       }
       if (worst < 0) break;
       const part = parts[worst]!;
+      const room = settings.maxPieces - (parts.length - 1);
+      const byAxis = cutsOf(part, room);
 
-      // Places to cut: where the part has vertices, strictly inside it, and at most so many per axis.
-      const mesh = part.solid.getMesh();
-      // A cut is taken even when it leaves as much over as before: a ring only gets better at
-      // the second cut. The number of parts allowed is what ends the cutting.
-      let chosen: Part[] | undefined;
-      let chosenExcess = Infinity;
-      let chosenBalance = Infinity;
-      for (let axis = 0; axis < 3; axis += 1) {
-        const values = new Set<number>();
-        let low = Infinity;
-        let high = -Infinity;
-        for (let at = axis; at < mesh.vertProperties.length; at += mesh.numProp) {
-          const value = mesh.vertProperties[at]!;
-          values.add(value);
-          if (value < low) low = value;
-          if (value > high) high = value;
-        }
-        const margin = (high - low) * 1e-6;
-        let cuts = [...values].filter((value) => value > low + margin && value < high - margin).sort((a, b) => a - b);
-        if (cuts.length > DECOMPOSITION_CUTS_PER_AXIS) {
-          const all = cuts;
-          cuts = Array.from({ length: DECOMPOSITION_CUTS_PER_AXIS }, (_, at) => all[Math.floor(((at + 0.5) * all.length) / DECOMPOSITION_CUTS_PER_AXIS)]!);
-        }
-        if (cuts.length === 0) cuts = [(low + high) / 2];
-        const normal: [number, number, number] = [axis === 0 ? 1 : 0, axis === 1 ? 1 : 0, axis === 2 ? 1 : 0];
-        for (const cut of cuts) {
-          const halves = part.solid.splitByPlane(normal, cut).map(keep);
-          const pieces = halves.flatMap(partsOf);
-          if (pieces.length < 2 || parts.length - 1 + pieces.length > settings.maxPieces) continue;
-          const left = pieces.reduce((total, piece) => total + piece.excess, 0);
-          const balance = Math.max(...pieces.map((piece) => piece.volume)) / part.volume;
-          // Less left over wins. Between cuts that leave the same, the one with the more even parts.
-          const same = Math.abs(left - chosenExcess) <= visibleVolume * 1e-6;
-          if (same ? balance < chosenBalance - 1e-6 : left < chosenExcess) {
-            chosen = pieces;
-            chosenExcess = left;
-            chosenBalance = balance;
-          }
-        }
+      // Less left over wins. Between cuts that leave the same, the one with the more even parts.
+      let chosen: Cut | undefined;
+      for (const cut of byAxis.flat()) {
+        if (chosen === undefined || (Math.abs(cut.left - chosen.left) <= near ? cut.balance < chosen.balance - 1e-6 : cut.left < chosen.left)) chosen = cut;
       }
       if (chosen === undefined) {
         part.settled = true;
         continue;
       }
-      parts = [...parts.slice(0, worst), ...chosen, ...parts.slice(worst + 1)];
+      if (part.excess - chosen.left <= near) {
+        // No cut leaves less. Along each axis, the cut that shares what is left most evenly
+        // between its pieces goes through the middle of what the hull fills: a second cut across
+        // it is what opens a hole. The one a second cut gains the most from is taken.
+        let gained = near;
+        for (const cuts of byAxis) {
+          let even: Cut | undefined;
+          for (const cut of cuts) {
+            if (even === undefined || (Math.abs(cut.spread - even.spread) <= near ? cut.balance < even.balance - 1e-6 : cut.spread < even.spread)) even = cut;
+          }
+          const roomAfter = room - (even?.pieces.length ?? room) + 1;
+          if (even === undefined || roomAfter < 2) continue;
+          let gain = 0;
+          for (const piece of even.pieces) {
+            if (!(piece.excess > 0)) continue;
+            for (const next of cutsOf(piece, roomAfter).flat()) {
+              gain = Math.max(gain, piece.excess - next.left);
+              free(next.solids);
+            }
+          }
+          if (gain > gained) {
+            gained = gain;
+            chosen = even;
+          }
+        }
+        // With nothing gained two cuts on, the cut is taken all the same: a hollow may only get
+        // better later still. The number of parts allowed is what ends the cutting.
+      }
+      for (const cut of byAxis.flat()) if (cut !== chosen) free(cut.solids);
+      parts = [...parts.slice(0, worst), ...chosen.pieces, ...parts.slice(worst + 1)];
+    }
+
+    // The parts together are the body. When they are not, the kernel cut up something else.
+    const cut = parts.reduce((total, part) => total + part.volume, 0);
+    if (Math.abs(cut - visibleVolume) > DECOMPOSITION_VOLUME_SLACK * visibleVolume) {
+      const share = Math.round((Math.abs(cut - visibleVolume) / visibleVolume) * 1000) / 10;
+      return `The parts the kernel made hold ${share}% ${cut > visibleVolume ? "more" : "less"} volume than the body. That happens when its surface crosses itself or it has a hollow shut inside it.`;
     }
 
     // Each part is written as the hull of its own vertices, built here the same way as every other piece.
-    return parts.map((part) => {
+    const pieces: CollisionPiece[] = [];
+    for (const part of parts) {
       const mesh = part.solid.getMesh();
       const points = new Float64Array((mesh.vertProperties.length / mesh.numProp) * 3);
       for (let vertex = 0; vertex < points.length / 3; vertex += 1) {
         for (let axis = 0; axis < 3; axis += 1) points[vertex * 3 + axis] = mesh.vertProperties[vertex * mesh.numProp + axis]!;
       }
       const hull = convexHull(points, settings.maxHullVertices);
-      if (hull === null) refuse("BAD_COLLISION", `Body "${source.name}": a part of the decomposition is flat, so it has no convex hull.`);
-      return { ...hull, kind: "convex" as const };
-    });
+      if (hull === null) return "A part of the decomposition is flat, so it has no convex hull.";
+      pieces.push({ ...hull, kind: "convex" });
+    }
+    return pieces;
   } catch (error) {
-    if (error instanceof GameExportError) throw error;
-    return refuse("BAD_COLLISION", `Body "${source.name}": the kernel could not decompose the body: ${error instanceof Error ? error.message : String(error)}`);
+    return `The kernel could not cut the body up. It said: ${error instanceof Error ? error.message : String(error)}`;
   } finally {
-    for (const solid of made) solid.delete?.();
+    free([...alive]);
   }
 }
 
@@ -286,7 +404,9 @@ function decompose(source: CollisionSource, kernel: CollisionKernel, visibleVolu
  * A shape asked for by name is built or refused. `"auto"` builds the tiers cheapest first (one
  * box, one convex hull, the caller's pieces, a decomposition by the kernel) and takes the first
  * whose volume is within the tolerance of the visible part's. When none is, it takes the nearest.
- * A body that is not closed has no volume to compare with, and gets its convex hull.
+ * A body that is not closed has no volume to compare with, and gets its convex hull. A tier that
+ * cannot be built is passed over with a note that says why, a decomposition the kernel could not
+ * make too.
  */
 export function planCollision(source: CollisionSource, settings: ResolvedCollisionSettings, kernel: CollisionKernel | undefined): CollisionPlan {
   const requested = settings.shape;
@@ -348,10 +468,14 @@ export function planCollision(source: CollisionSource, settings: ResolvedCollisi
 
   for (const shape of TIERS) {
     // Without a volume to compare with, the tiers past the hull have nothing to be chosen by.
-    if (visibleVolume === null && (shape === "pieces" || shape === "decomposition")) continue;
+    if (visibleVolume === null && (shape === "pieces" || shape === "decomposition")) {
+      if (shape === "decomposition" && kernel !== undefined) notes.push(`${NO_DECOMPOSITION}A body that is not closed has no inside to cut into pieces.`);
+      continue;
+    }
     const made = attempt(shape);
     if (typeof made === "string") {
-      notes.push(made);
+      // A kernel that was given and made nothing is said apart from a kernel that was not given.
+      notes.push(shape === "decomposition" && kernel !== undefined ? `${NO_DECOMPOSITION}${made}` : made);
       continue;
     }
     if (made.withinTolerance === true) return { requested, chosen: made, visibleVolume, tried, notes };
@@ -360,8 +484,9 @@ export function planCollision(source: CollisionSource, settings: ResolvedCollisi
   if (visibleVolume === null) {
     chosen = tried.find((made) => made.shape === "hull") ?? tried[0] ?? null;
   } else {
+    // A tier with more pieces is taken only when it is nearer by more than rounding.
     for (const made of tried) {
-      if (chosen === null || Math.abs(made.error!) < Math.abs(chosen.error!)) chosen = made;
+      if (chosen === null || Math.abs(made.error!) < Math.abs(chosen.error!) - 1e-9) chosen = made;
     }
     if (chosen !== null) notes.push("No tier is within the tolerance. The nearest was taken.");
   }
