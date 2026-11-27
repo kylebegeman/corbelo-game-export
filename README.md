@@ -312,6 +312,8 @@ import lock from "corbelo-game-export/schema/lock.schema.json" with { type: "jso
 
 The schemas refer to each other by file name, so keep the files together: the manifest's to the facts, the check report, the kit check report and the blockout, the kit check report's and the kit job's to the facts and the check report, and the blockout's to the facts and the kit check report. The lock file's stands alone. Version 0.1.6 added the last four files, and in the manifest's the kind `"kit"` with `kit` and `scenes`. A manifest of an asset or a family reads as it did.
 
+Version 0.1.7 added `playerName` to the values of the three player checks and of Walkable, next to `player`, which is still the id. Nothing was renamed or removed, and a report from before reads as it did. A program that checks reports against its own copy of these schemas must take the 0.1.7 copy of `check-report.schema.json` and `kit-check-report.schema.json` before it reads a report from 0.1.7, since the older copy refuses the new key.
+
 ## Game assets
 
 `exportGameAsset` takes everything `exportGameGlb` takes and returns the same `{ glb, facts }`. It adds what a game needs around the mesh.
@@ -630,6 +632,8 @@ Without a `player` option, a file is checked against the character of the engine
 | `unreal5` | `unreal5-character` | 0.34 | 1.76 | 0.45 | 44.765 | 0.9 |
 
 A file written with a profile of your own is checked against Godot's unless you pass a player. A player object of your own is checked for sane numbers and written into the report as given, any keys of your own included.
+
+The values of the three player checks, and of Walkable among the [kit checks](#kit-checks), carry the player twice: `player` is the profile's `id`, for a program, and `playerName` is its `name`, for a person. The messages say the name. A profile that was given no name is called by its id in both.
 
 These are meant to be the values a new character starts with in each engine, before anybody tunes it. Where they come from, and how far each engine's own documentation confirms them:
 

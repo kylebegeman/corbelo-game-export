@@ -110,7 +110,7 @@ describe("the corridor kit", () => {
     expect(corners.points).toBeGreaterThan(1000);
 
     const walk = result(report, "walkable").values;
-    expect(walk).toMatchObject({ player: "godot4-character-body", capsuleRadiusMeters: 0.5, capsuleHeightMeters: 2, stepHeightMeters: 0, maxFloorStepMeters: 0, maxRiseMeters: 0, maxRampDegrees: 33.69 });
+    expect(walk).toMatchObject({ player: "godot4-character-body", playerName: "Godot 4 CharacterBody3D", capsuleRadiusMeters: 0.5, capsuleHeightMeters: 2, stepHeightMeters: 0, maxFloorStepMeters: 0, maxRiseMeters: 0, maxRampDegrees: 33.69 });
     const door = walk.pieces.find((piece) => piece.piece === "doorway")!;
     expect(door.geometry).toBe("collision");
     for (const passage of door.passages) {
@@ -294,6 +294,10 @@ describe("a wrong piece fails the check that is about it, and no other", () => {
     const again = checkKit(corridorKit(swap(wrong)), { player: small });
     expect(statuses(again)).toEqual(ALL_PASS);
     expect(again.player).toEqual(small);
+    // The values carry the player's name next to its id, and the message says the name.
+    expect(result(again, "walkable").values).toMatchObject({ player: "small", playerName: "A small player" });
+    expect(result(again, "walkable").message).toBe("A small player (a capsule 0.6 m wide and 1.6 m tall) passes 16 passages, with rises of up to 0 m and slopes of up to 33.69 degrees.");
+    expect(walk.values).toMatchObject({ player: "godot4-character-body", playerName: "Godot 4 CharacterBody3D" });
   });
 
   it("Walkable: steps as collision stop a character that climbs none, and not one that does", () => {

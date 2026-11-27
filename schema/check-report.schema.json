@@ -642,6 +642,10 @@
           "description": "The id of the player profile.",
           "type": "string"
         },
+        "playerName": {
+          "description": "The name of the player profile, for people. The id again for a profile that was given no name. Not in a report from before version 0.1.7.",
+          "type": "string"
+        },
         "capsuleRadiusMeters": {
           "type": "number",
           "exclusiveMinimum": 0
@@ -722,6 +726,10 @@
           "description": "The id of the player profile.",
           "type": "string"
         },
+        "playerName": {
+          "description": "The name of the player profile, for people. The id again for a profile that was given no name. Not in a report from before version 0.1.7.",
+          "type": "string"
+        },
         "stepHeightMeters": {
           "type": "number",
           "minimum": 0
@@ -763,6 +771,10 @@
       "properties": {
         "player": {
           "description": "The id of the player profile.",
+          "type": "string"
+        },
+        "playerName": {
+          "description": "The name of the player profile, for people. The id again for a profile that was given no name. Not in a report from before version 0.1.7.",
           "type": "string"
         },
         "walkableSlopeDegrees": {

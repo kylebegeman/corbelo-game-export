@@ -465,7 +465,7 @@ describe("player fit: openings", () => {
   it("passes a doorway the capsule walks through, and measures it", () => {
     const opening = check("player-openings", asset(frame.positions));
     expect(opening.status).toBe("pass");
-    expect(opening.values).toMatchObject({ player: "godot4-character-body", capsuleRadiusMeters: 0.5, capsuleHeightMeters: 2, ignored: 0 });
+    expect(opening.values).toMatchObject({ player: "godot4-character-body", playerName: "Godot 4 CharacterBody3D", capsuleRadiusMeters: 0.5, capsuleHeightMeters: 2, ignored: 0 });
     expect(opening.values.openings).toHaveLength(1);
     const [door] = opening.values.openings;
     expect(door).toMatchObject({ axis: "z", sillMeters: 0, fits: true, walkIn: true });
@@ -541,7 +541,7 @@ describe("player fit: steps", () => {
   it("passes stairs the player steps up, and lists the rises", () => {
     const steps = check("player-steps", asset(flight, { profile: "unity6" }));
     expect(steps.status).toBe("pass");
-    expect(steps.values).toMatchObject({ player: "unity6-character-controller", stepHeightMeters: 0.3, jumpHeightMeters: 1.5, levels: [0.18, 0.36, 0.54, 0.72, 0.9], rises: [0.18, 0.18, 0.18, 0.18, 0.18], maxRiseMeters: 0.18 });
+    expect(steps.values).toMatchObject({ player: "unity6-character-controller", playerName: "Unity 6 CharacterController", stepHeightMeters: 0.3, jumpHeightMeters: 1.5, levels: [0.18, 0.36, 0.54, 0.72, 0.9], rises: [0.18, 0.18, 0.18, 0.18, 0.18], maxRiseMeters: 0.18 });
     expect(check("player-steps", asset(flight, { profile: "unreal5" })).status).toBe("pass");
   });
 
@@ -549,7 +549,7 @@ describe("player fit: steps", () => {
     // Godot's CharacterBody3D climbs no steps by itself.
     const godot = check("player-steps", asset(flight));
     expect(godot.status).toBe("warn");
-    expect(godot.message).toBe("The tallest rise is 0.18 m, and this player climbs no steps. A jump clears it, or collision can be a ramp.");
+    expect(godot.message).toBe("The tallest rise is 0.18 m, and Godot 4 CharacterBody3D climbs no steps. A jump clears it, or collision can be a ramp.");
     expect(check("player-steps", asset(flight), { expect: { stairs: true } }).status).toBe("fail");
     // Steps of 400 mm are too tall for Unity's 0.3 m and fine for Unreal's 0.45 m.
     const tall = stairs(3, 400, 300, 1200).positions;
@@ -611,6 +611,58 @@ describe("player fit: ramps", () => {
     expect(check("player-ramps", asset(post.positions)).status).toBe("not-measured");
     // A chamfer is a slope too small to stand on.
     expect(check("player-ramps", asset(chamferedBlock([1000, 500, 250], 20).positions)).status).toBe("not-measured");
+  });
+});
+
+describe("the player by name", () => {
+  const flight = stairs(5, 180, 280, 1200).positions;
+  const slope = ramp(4000, 2000, 1500).positions;
+  const players = (glb: Uint8Array, options: CheckOptions = {}) => {
+    const report = checkGameAsset(glb, options);
+    return [result(report, "player-openings"), result(report, "player-steps"), result(report, "player-ramps")] as const;
+  };
+
+  it("carries the name of the player next to its id in the values of each player check", () => {
+    for (const [profile, id, name] of [
+      ["godot4", "godot4-character-body", "Godot 4 CharacterBody3D"],
+      ["unity6", "unity6-character-controller", "Unity 6 CharacterController"],
+      ["unreal5", "unreal5-character", "Unreal Engine 5 Character"],
+    ] as const) {
+      for (const one of players(asset(frame.positions, { profile }))) {
+        expect(one.values, `${profile}, ${one.id}`).toMatchObject({ player: id, playerName: name });
+        expect(one.values.playerName).toBe(PLAYER_PROFILES[profile].name);
+      }
+    }
+    // A player of the caller's own: the id stays the id, and the name is the name it was given.
+    const scout: PlayerProfile = { id: "scout-7", name: "Scout", origin: "account", capsuleRadiusM: 0.3, capsuleHeightM: 1.2, stepHeightM: 0.25, walkableSlopeDeg: 50, jumpHeightM: 2 };
+    for (const one of players(asset(frame.positions), { player: scout })) expect(one.values).toMatchObject({ player: "scout-7", playerName: "Scout" });
+  });
+
+  it("says the player by name in what a person reads, and never by its id", () => {
+    const scout: PlayerProfile = { id: "scout-7", name: "Scout", origin: "account", capsuleRadiusM: 0.3, capsuleHeightM: 1.2, stepHeightM: 0.25, walkableSlopeDeg: 20, jumpHeightM: 2 };
+    const said = (glb: Uint8Array, options: CheckOptions = {}) => players(glb, options).map((one) => one.message);
+    // An opening is measured in a picture, so its size is good to about two cells of it.
+    expect(said(asset(frame.positions))[0]).toMatch(/^Godot 4 CharacterBody3D \(a capsule 1 m wide and 2 m tall\) passes an opening 1\.[12]\d* m wide and 2\.[12]\d* m tall\.$/);
+    expect(said(asset(frame.positions), { player: scout })[0]).toMatch(/^Scout \(a capsule 0\.6 m wide and 1\.2 m tall\) passes an opening /);
+    expect(said(asset(doorFrame(3000, 300, 2800, 800, 2200).positions))[0]).toMatch(/^Godot 4 CharacterBody3D \(a capsule 1 m wide and 2 m tall\) fits none of 1 opening\. The largest is 0\.[78]\d* m wide and 2\.[12]\d* m tall\.$/);
+    expect(said(asset(crate.positions), { expect: { opening: true } })[0]).toBe("An opening for Godot 4 CharacterBody3D was expected, and none was found.");
+    expect(said(asset(flight, { profile: "unity6" }))[1]).toBe("5 rises of up to 0.18 m, and Unity 6 CharacterController steps up 0.3 m.");
+    expect(said(asset(flight))[1]).toBe("The tallest rise is 0.18 m, and Godot 4 CharacterBody3D climbs no steps. A jump clears it, or collision can be a ramp.");
+    expect(said(asset(flight), { player: scout })[1]).toBe("5 rises of up to 0.18 m, and Scout steps up 0.25 m.");
+    expect(said(asset(slope))[2]).toBe("1 slope of up to 20.556 degrees, and Godot 4 CharacterBody3D walks up 45.");
+    expect(said(asset(slope), { player: scout })[2]).toBe("1 slope is steeper than the 20 degrees Scout walks up. The steepest is 20.556 degrees.");
+    for (const options of [{}, { player: scout }, { player: "unreal5" as const }, { expect: { opening: true, stairs: true, ramp: true } }]) {
+      for (const glb of [asset(frame.positions), asset(flight), asset(slope), asset(crate.positions)]) {
+        for (const one of players(glb, options)) expect(`${one.message} ${one.reason ?? ""}`).not.toMatch(/scout-7|godot4-character-body|unreal5-character/);
+      }
+    }
+  });
+
+  it("falls back to the id for a player that was given no name", () => {
+    const { name: _name, ...nameless } = { ...PLAYER_PROFILES.godot4, id: "nameless" };
+    const [opening] = players(asset(frame.positions), { player: nameless as PlayerProfile });
+    expect(opening.values).toMatchObject({ player: "nameless", playerName: "nameless" });
+    expect(opening.message).toMatch(/^nameless \(a capsule/);
   });
 });
 

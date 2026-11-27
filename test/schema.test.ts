@@ -262,6 +262,26 @@ describe("schema/check-report.schema.json", () => {
     expect(validReport(report), JSON.stringify(validReport.errors)).toBe(true);
   });
 
+  it("describes the player's name in the values of each player check, and still reads a report from before it was there", () => {
+    const report = JSON.parse(JSON.stringify(checkGameAsset(exportGameAsset(assets["the defaults"]!).glb))) as { results: { id: string; values: Record<string, unknown> }[] };
+    const players = report.results.filter((result) => result.id.startsWith("player-"));
+    expect(players.map((result) => [result.id, result.values["player"], result.values["playerName"]])).toEqual([
+      ["player-openings", "godot4-character-body", "Godot 4 CharacterBody3D"],
+      ["player-steps", "godot4-character-body", "Godot 4 CharacterBody3D"],
+      ["player-ramps", "godot4-character-body", "Godot 4 CharacterBody3D"],
+    ]);
+    const withValues = (change: (values: Record<string, unknown>) => void) => {
+      const changed = JSON.parse(JSON.stringify(report)) as typeof report;
+      for (const result of changed.results) if (result.id.startsWith("player-")) change(result.values);
+      return validReport(changed);
+    };
+    expect(withValues(() => undefined)).toBe(true);
+    // Version 0.1.6 wrote the id alone.
+    expect(withValues((values) => delete values["playerName"])).toBe(true);
+    expect(withValues((values) => (values["playerName"] = 7))).toBe(false);
+    expect(withValues((values) => delete values["player"])).toBe(false);
+  });
+
   it("sees every status in the reports it was given", () => {
     const seen = new Set<string>();
     for (const [, input, options] of reports) for (const result of checkGameAsset(exportGameAsset(input).glb, options).results) seen.add(`${result.id}:${result.status}`);
@@ -405,6 +425,18 @@ describe("schema/kit-check-report.schema.json", () => {
     for (const id of ["on-grid", "seams", "in-cells", "layouts", "corners", "walkable", "collision-tiles"]) {
       expect([...seen].filter((entry) => entry.startsWith(`${id}:`)).length, id).toBeGreaterThan(1);
     }
+  });
+
+  it("describes the player's name in the values of Walkable, and still reads a report from before it was there", () => {
+    const report = json(checkKit(kits["the corridor kit"]!)) as unknown as { results: { id: string; values: Record<string, unknown> }[] };
+    const walk = report.results.find((result) => result.id === "walkable")!;
+    expect([walk.values["player"], walk.values["playerName"]]).toEqual(["godot4-character-body", "Godot 4 CharacterBody3D"]);
+    expect(validKitReport(report), JSON.stringify(validKitReport.errors)).toBe(true);
+    // Version 0.1.6 wrote the id alone.
+    delete walk.values["playerName"];
+    expect(validKitReport(report), JSON.stringify(validKitReport.errors)).toBe(true);
+    walk.values["playerName"] = 7;
+    expect(validKitReport(report)).toBe(false);
   });
 
   it("refuses a report with a result missing, out of order, or of a kind it does not know", () => {

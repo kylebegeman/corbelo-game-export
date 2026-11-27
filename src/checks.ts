@@ -231,7 +231,10 @@ export interface DetailLevelValues {
 }
 
 export interface OpeningValues {
+  /** The id of the player profile. */
   player: string;
+  /** The name of the player profile, for people. The id again for a profile that was given no name. */
+  playerName: string;
   capsuleRadiusMeters: number;
   capsuleHeightMeters: number;
   /** The size of one cell of the picture the openings were measured in. Sizes are good to about two cells. */
@@ -253,7 +256,10 @@ export interface OpeningValues {
 }
 
 export interface StepValues {
+  /** The id of the player profile. */
   player: string;
+  /** The name of the player profile, for people. The id again for a profile that was given no name. */
+  playerName: string;
   stepHeightMeters: number;
   jumpHeightMeters: number;
   /** Flat levels a player can stand on, as heights above the bottom of the asset, lowest first. */
@@ -264,7 +270,10 @@ export interface StepValues {
 }
 
 export interface RampValues {
+  /** The id of the player profile. */
   player: string;
+  /** The name of the player profile, for people. The id again for a profile that was given no name. */
+  playerName: string;
   walkableSlopeDegrees: number;
   ramps: { angleDegrees: number; areaSquareMeters: number; walkable: boolean }[];
 }
@@ -728,6 +737,11 @@ export function walkable(bodies: readonly SceneMesh[], floor: number, player: Pl
   return { levels, ramps };
 }
 
+/** What a player is called in a message and in the values of a check: its name, or its id when it was given none. */
+export function playerName(player: PlayerProfile): string {
+  return typeof player.name === "string" && player.name.trim() !== "" ? player.name : player.id;
+}
+
 /** The player a check is run for: a profile of the caller's own, a built-in one by engine profile id, or the player of the engine a file was written for. */
 export function resolvePlayer(option: PlayerProfile | EngineProfileId | undefined, profile: string): PlayerProfile {
   let player: PlayerProfile;
@@ -1064,11 +1078,14 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
   // Player fit.
   const sceneMin = facts.total.bounds.meters.min;
   const sceneMax = facts.total.bounds.meters.max;
+  // A person reads the player by its name. The id stays in the values, next to the name.
+  const who = playerName(player);
   {
     const alongX = openingsAlong(scene, "x", sceneMin, sceneMax, player);
     const alongZ = openingsAlong(scene, "z", sceneMin, sceneMax, player);
     const values: OpeningValues = {
       player: player.id,
+      playerName: who,
       capsuleRadiusMeters: player.capsuleRadiusM,
       capsuleHeightMeters: player.capsuleHeightM,
       cellMeters: round(Math.max(alongX.cell, alongZ.cell), 6),
@@ -1080,17 +1097,17 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
     const walkIn = fitting.filter((opening) => opening.walkIn);
     if (values.openings.length === 0) {
       const reason = "No opening closed over the top was found along the X or Z axis. A gap that is open to the sky is not counted.";
-      if (expect.opening === true) results.push({ id: "player-openings", status: "fail", message: "An opening for the player was expected, and none was found.", values });
+      if (expect.opening === true) results.push({ id: "player-openings", status: "fail", message: `An opening for ${who} was expected, and none was found.`, values });
       else results.push({ id: "player-openings", status: "not-measured", message: "The asset has no opening for a player to pass.", reason, values });
     } else if (walkIn.length > 0) {
       const widest = walkIn.reduce((a, b) => (b.widthMeters > a.widthMeters ? b : a));
-      results.push({ id: "player-openings", status: "pass", message: `The player (${size}) passes an opening ${widest.widthMeters} m wide and ${widest.heightMeters} m tall.`, values });
+      results.push({ id: "player-openings", status: "pass", message: `${who} (${size}) passes an opening ${widest.widthMeters} m wide and ${widest.heightMeters} m tall.`, values });
     } else if (fitting.length > 0) {
       const lowest = fitting.reduce((a, b) => (b.sillMeters < a.sillMeters ? b : a));
       results.push({
         id: "player-openings",
         status: expect.opening === true ? "fail" : "warn",
-        message: `The player fits an opening, but its sill is ${lowest.sillMeters} m up and the player steps up ${player.stepHeightM} m.`,
+        message: `${who} fits an opening, but its sill is ${lowest.sillMeters} m up and this player steps up ${player.stepHeightM} m.`,
         values,
       });
     } else {
@@ -1098,7 +1115,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       results.push({
         id: "player-openings",
         status: expect.opening === true ? "fail" : "warn",
-        message: `The player (${size}) fits none of ${plural(values.openings.length, "opening")}. The largest is ${largest.widthMeters} m wide and ${largest.heightMeters} m tall.`,
+        message: `${who} (${size}) fits none of ${plural(values.openings.length, "opening")}. The largest is ${largest.widthMeters} m wide and ${largest.heightMeters} m tall.`,
         values,
       });
     }
@@ -1123,6 +1140,7 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
     const rises = found ? best : [];
     const stepValues: StepValues = {
       player: player.id,
+      playerName: who,
       stepHeightMeters: player.stepHeightM,
       jumpHeightMeters: player.jumpHeightM,
       levels: levels.map((level) => round(level, 4)),
@@ -1134,14 +1152,14 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       if (expect.stairs === true) results.push({ id: "player-steps", status: "fail", message: "Steps were expected, and none were found.", values: stepValues });
       else results.push({ id: "player-steps", status: "not-measured", message: "The asset has no steps.", reason, values: stepValues });
     } else if (stepValues.maxRiseMeters! <= player.stepHeightM + 0.001) {
-      results.push({ id: "player-steps", status: "pass", message: `${plural(rises.length, "rise")} of up to ${stepValues.maxRiseMeters} m, and the player steps up ${player.stepHeightM} m.`, values: stepValues });
+      results.push({ id: "player-steps", status: "pass", message: `${plural(rises.length, "rise")} of up to ${stepValues.maxRiseMeters} m, and ${who} steps up ${player.stepHeightM} m.`, values: stepValues });
     } else {
-      const how = player.stepHeightM === 0 ? "this player climbs no steps" : `the player steps up ${player.stepHeightM} m`;
+      const how = player.stepHeightM === 0 ? `${who} climbs no steps` : `${who} steps up ${player.stepHeightM} m`;
       const jump = stepValues.maxRiseMeters! <= player.jumpHeightM ? " A jump clears it, or collision can be a ramp." : "";
       results.push({ id: "player-steps", status: expect.stairs === true ? "fail" : "warn", message: `The tallest rise is ${stepValues.maxRiseMeters} m, and ${how}.${jump}`, values: stepValues });
     }
 
-    const rampValues: RampValues = { player: player.id, walkableSlopeDegrees: player.walkableSlopeDeg, ramps };
+    const rampValues: RampValues = { player: player.id, playerName: who, walkableSlopeDegrees: player.walkableSlopeDeg, ramps };
     const tooSteep = ramps.filter((slope) => !slope.walkable);
     if (ramps.length === 0) {
       const reason = `No flat slope from ${RAMP_MIN_DEGREES} to ${RAMP_MAX_DEGREES} degrees was found that is large enough to stand on.`;
@@ -1151,11 +1169,11 @@ export function checkGameAsset(glb: Uint8Array | GlbDocument, options: CheckOpti
       results.push({
         id: "player-ramps",
         status: expect.ramp === true ? "fail" : "warn",
-        message: `${plural(tooSteep.length, "slope is", "slopes are")} steeper than the ${player.walkableSlopeDeg} degrees the player walks up. The steepest is ${ramps[ramps.length - 1]!.angleDegrees} degrees.`,
+        message: `${plural(tooSteep.length, "slope is", "slopes are")} steeper than the ${player.walkableSlopeDeg} degrees ${who} walks up. The steepest is ${ramps[ramps.length - 1]!.angleDegrees} degrees.`,
         values: rampValues,
       });
     } else {
-      results.push({ id: "player-ramps", status: "pass", message: `${plural(ramps.length, "slope")} of up to ${ramps[ramps.length - 1]!.angleDegrees} degrees, and the player walks up ${player.walkableSlopeDeg}.`, values: rampValues });
+      results.push({ id: "player-ramps", status: "pass", message: `${plural(ramps.length, "slope")} of up to ${ramps[ramps.length - 1]!.angleDegrees} degrees, and ${who} walks up ${player.walkableSlopeDeg}.`, values: rampValues });
     }
   }
 
